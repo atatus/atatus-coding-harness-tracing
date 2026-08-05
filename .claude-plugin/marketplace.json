@@ -1,0 +1,29 @@
+{
+  "name": "coding-harness-tracing",
+  "owner": {
+    "name": "Arize AI",
+    "email": "support@arize.com"
+  },
+  "metadata": {
+    "description": "Arize AI plugins for Claude Code observability and tracing"
+  },
+  "plugins": [
+    {
+      "name": "claude-code-tracing",
+      "source": "./tracing/claude_code",
+      "description": "Automatic tracing of Claude Code sessions to Arize AX or Phoenix with OpenInference spans",
+      "version": "1.0.1",
+      "homepage": "https://arize.com",
+      "repository": "https://github.com/Arize-ai/coding-harness-tracing",
+      "license": "MIT",
+      "keywords": [
+        "tracing",
+        "agents",
+        "openinference",
+        "arize",
+        "phoenix"
+      ],
+      "category": "observability"
+    }
+  ]
+}

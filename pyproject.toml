@@ -1,0 +1,123 @@
+[project]
+name = "coding-harness-tracing"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-timeout",
+    "pytest-cov",
+    "pre-commit",
+    "ruff",
+    "black",
+    "isort",
+    "mypy",
+]
+
+[project.scripts]
+# Core tools
+arize-config = "core.config:main"
+# Claude Code hooks
+arize-hook-session-start = "tracing.claude_code.hooks.handlers:session_start"
+arize-hook-pre-tool-use = "tracing.claude_code.hooks.handlers:pre_tool_use"
+arize-hook-post-tool-use = "tracing.claude_code.hooks.handlers:post_tool_use"
+arize-hook-user-prompt-submit = "tracing.claude_code.hooks.handlers:user_prompt_submit"
+arize-hook-stop = "tracing.claude_code.hooks.handlers:stop"
+arize-hook-subagent-stop = "tracing.claude_code.hooks.handlers:subagent_stop"
+arize-hook-stop-failure = "tracing.claude_code.hooks.handlers:stop_failure"
+arize-hook-notification = "tracing.claude_code.hooks.handlers:notification"
+arize-hook-permission-request = "tracing.claude_code.hooks.handlers:permission_request"
+arize-hook-session-end = "tracing.claude_code.hooks.handlers:session_end"
+arize-hook-post-tool-use-failure = "tracing.claude_code.hooks.handlers:post_tool_use_failure"
+arize-hook-subagent-start = "tracing.claude_code.hooks.handlers:subagent_start"
+arize-hook-user-prompt-expansion = "tracing.claude_code.hooks.handlers:user_prompt_expansion"
+arize-hook-pre-compact = "tracing.claude_code.hooks.handlers:pre_compact"
+arize-hook-post-compact = "tracing.claude_code.hooks.handlers:post_compact"
+arize-hook-permission-denied = "tracing.claude_code.hooks.handlers:permission_denied"
+# Codex hooks
+arize-hook-codex-notify = "tracing.codex.hooks.handlers:notify"
+# Copilot hooks
+arize-hook-copilot-session-start = "tracing.copilot.hooks.handlers:session_start"
+arize-hook-copilot-user-prompt = "tracing.copilot.hooks.handlers:user_prompt_submitted"
+arize-hook-copilot-pre-tool = "tracing.copilot.hooks.handlers:pre_tool_use"
+arize-hook-copilot-post-tool = "tracing.copilot.hooks.handlers:post_tool_use"
+arize-hook-copilot-stop = "tracing.copilot.hooks.handlers:stop"
+arize-hook-copilot-subagent-stop = "tracing.copilot.hooks.handlers:subagent_stop"
+# Gemini hooks
+arize-hook-gemini-session-start = "tracing.gemini.hooks.handlers:session_start"
+arize-hook-gemini-session-end = "tracing.gemini.hooks.handlers:session_end"
+arize-hook-gemini-before-agent = "tracing.gemini.hooks.handlers:before_agent"
+arize-hook-gemini-after-agent = "tracing.gemini.hooks.handlers:after_agent"
+arize-hook-gemini-before-model = "tracing.gemini.hooks.handlers:before_model"
+arize-hook-gemini-after-model = "tracing.gemini.hooks.handlers:after_model"
+arize-hook-gemini-before-tool = "tracing.gemini.hooks.handlers:before_tool"
+arize-hook-gemini-after-tool = "tracing.gemini.hooks.handlers:after_tool"
+# Cursor hook
+arize-hook-cursor = "tracing.cursor.hooks.handlers:main"
+# Kiro hook
+arize-hook-kiro = "tracing.kiro.hooks.handlers:main"
+# opencode hook
+arize-hook-opencode = "tracing.opencode.hooks.handlers:main"
+# omp hook
+arize-hook-omp = "tracing.omp.hooks.handlers:main"
+# Setup wizards
+arize-setup-claude = "core.setup.claude:main"
+arize-setup-codex = "core.setup.codex:main"
+arize-setup-copilot = "core.setup.copilot:main"
+arize-setup-cursor = "core.setup.cursor:main"
+arize-setup-gemini = "core.setup.gemini:main"
+arize-setup-kiro = "core.setup.kiro:main"
+arize-setup-opencode = "core.setup.opencode:main"
+arize-setup-omp = "core.setup.omp:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=core --cov=tracing --cov-report=term-missing --cov-report=xml"
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+
+[tool.coverage.run]
+source = ["core", "tracing"]
+omit = [
+    "**/constants.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+# I (isort) handled by isort pre-commit hook; formatting handled by black.
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 120
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["core", "tracing", "tests"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+# Lenient baseline — tighten over time.
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = ["core"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["core*", "tracing*"]

@@ -1,0 +1,57 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.11
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy (core)
+        files: ^core/
+      - id: mypy
+        name: mypy (tracing/claude_code)
+        files: ^tracing/claude_code/
+      - id: mypy
+        name: mypy (tracing/codex)
+        files: ^tracing/codex/
+      - id: mypy
+        name: mypy (tracing/copilot)
+        files: ^tracing/copilot/
+      - id: mypy
+        name: mypy (tracing/cursor)
+        files: ^tracing/cursor/
+      - id: mypy
+        name: mypy (tracing/gemini)
+        files: ^tracing/gemini/
+      - id: mypy
+        name: mypy (tracing/kiro)
+        files: ^tracing/kiro/
+      - id: mypy
+        name: mypy (tracing/opencode)
+        files: ^tracing/opencode/
+      - id: mypy
+        name: mypy (tracing/omp)
+        files: ^tracing/omp/

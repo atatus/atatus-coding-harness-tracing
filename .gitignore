@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+
+# Testing / coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+.workbench/
+.agents/*
+!.agents/skills/
+.claude/
+mempalace.yaml
+entities.json
+*.code-workspace
+
+# Runtime artifacts (generated at install/run time, not versioned)
+state/
+config.json
+logs/
+run/
+.arize-tmp-traces/
+.github/hooks/
+*/node_modules/
+wheel.json
+docs/superpowers/*
+.serena/*
