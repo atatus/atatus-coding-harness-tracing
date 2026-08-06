@@ -16,10 +16,10 @@ from core.constants import HARNESSES
 
 _HARNESS = HARNESSES["codex"]
 SERVICE_NAME = _HARNESS["service_name"]  # "codex"
-SCOPE_NAME = _HARNESS["scope_name"]  # "arize-codex-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-codex-plugin"
 
 # Route hook stderr to a per-harness log file unless the user already set one.
-os.environ.setdefault("ARIZE_LOG_FILE", str(_HARNESS["default_log_file"]))
+os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 

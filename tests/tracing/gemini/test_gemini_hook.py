@@ -97,7 +97,7 @@ def captured_spans():
     """Mock _send_span_async and collect all payloads emitted by handlers.
 
     Patching _send_span_async (rather than send_span) lets tests run
-    synchronously without forking, regardless of the ARIZE_DISABLE_FORK env.
+    synchronously without forking, regardless of the ATATUS_DISABLE_FORK env.
     """
     sent = []
     with mock.patch("tracing.gemini.hooks.handlers._send_span_async", side_effect=lambda s: sent.append(s)):
@@ -259,14 +259,14 @@ class TestBeforeAgent:
 
     def test_does_not_redact_at_save_time(self, mock_resolve, state, monkeypatch):
         """Prompt is NOT redacted at save time even when log_prompts is False."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         _handle_before_agent({"messages": [{"role": "user", "content": "secret prompt"}]})
         saved = state.get("current_trace_prompt")
         assert saved == "secret prompt"
 
     def test_saves_prompt_when_allowed(self, mock_resolve, state, monkeypatch):
         """Prompt is saved as-is when log_prompts is True."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
         _handle_before_agent({"messages": [{"role": "user", "content": "visible prompt"}]})
         assert state.get("current_trace_prompt") == "visible prompt"
 
@@ -349,7 +349,7 @@ class TestAfterAgent:
 
     def test_redacts_response(self, mock_resolve, state, captured_spans, monkeypatch):
         """Response is redacted when log_prompts is False."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         state.set("current_trace_start_time", "1000")
@@ -466,7 +466,7 @@ class TestAfterModel:
                 "model": "gemini-2.5-pro",
                 "llm_response": {"candidates": [{"content": {"parts": ["4"]}}]},
                 "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
-                "model_call_id": "mc-1",
+                "model_call_id": "mc-1"
             }
         )
         assert len(captured_spans) == 1
@@ -497,7 +497,7 @@ class TestAfterModel:
             {
                 "llm_response": {"text": ""},
                 "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 3},
-                "model_call_id": "mc-1",
+                "model_call_id": "mc-1"
             }
         )
         assert len(captured_spans) == 1
@@ -557,7 +557,7 @@ class TestAfterModel:
 
     def test_redacts_prompt_and_response(self, mock_resolve, state, captured_spans, monkeypatch):
         """Redacts input/output when log_prompts is False."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         state.set("current_model_call_id", "mc-1")
@@ -568,7 +568,7 @@ class TestAfterModel:
                 {
                     "model": "gemini-2.5-pro",
                     "llm_response": {"candidates": [{"content": {"parts": ["secret response"]}}]},
-                    "model_call_id": "mc-1",
+                    "model_call_id": "mc-1"
                 }
             )
         )
@@ -637,7 +637,7 @@ class TestAfterModel:
                 {
                     "model": "gemini-2.5-pro",
                     "llm_response": {"candidates": [{"content": {"parts": [{"text": "Hello"}, {"text": " world"}]}}]},
-                    "model_call_id": "mc-1",
+                    "model_call_id": "mc-1"
                 }
             )
         )
@@ -656,9 +656,9 @@ class TestAfterModel:
                 "llm_response": {
                     "candidates": [{"content": {"parts": ["Actual response content"], "role": "model"}}],
                     "text": "",
-                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
+                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}
                 },
-                "model_call_id": "mc-1",
+                "model_call_id": "mc-1"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -666,7 +666,7 @@ class TestAfterModel:
 
     def test_handles_structured_prompt(self, mock_resolve, state, captured_spans, monkeypatch):
         """JSON-encodes structured prompt before redaction."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         state.set("current_model_call_id", "mc-1")
@@ -753,7 +753,7 @@ class TestAfterTool:
             "tool_name": "read_file",
             "tool_call_id": "tc-1",
             "tool_args": {"file_path": "/foo/bar.py"},
-            "tool_result": "file content",
+            "tool_result": "file content"
         }
         _handle_after_tool(inp)
         assert len(captured_spans) == 1
@@ -773,8 +773,8 @@ class TestAfterTool:
                 "tool_input": {"dir_path": "."},
                 "tool_response": {
                     "llmContent": "Directory listing for /tmp:\n  [DIR] foo\n  bar.txt\n",
-                    "returnDisplay": {"files": ["foo", "bar.txt"], "summary": "2 items"},
-                },
+                    "returnDisplay": {"files": ["foo", "bar.txt"], "summary": "2 items"}
+                }
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -810,7 +810,7 @@ class TestAfterTool:
             {
                 "tool_name": "read_file",
                 "tool_call_id": "tc-1",
-                "tool_result": "content",
+                "tool_result": "content"
             }
         )
         span = _get_span(captured_spans[0])
@@ -837,7 +837,7 @@ class TestAfterTool:
             {
                 "tool_name": "run_shell_command",
                 "tool_args": {"command": "git status"},
-                "tool_result": "clean",
+                "tool_result": "clean"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -852,7 +852,7 @@ class TestAfterTool:
             {
                 "tool_name": "read_file",
                 "tool_args": {"file_path": "/src/main.py"},
-                "tool_result": "content",
+                "tool_result": "content"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -867,7 +867,7 @@ class TestAfterTool:
             {
                 "tool_name": "write_file",
                 "tool_args": {"file_path": "/src/out.py"},
-                "tool_result": "ok",
+                "tool_result": "ok"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -881,7 +881,7 @@ class TestAfterTool:
             {
                 "tool_name": "edit",
                 "tool_args": {"absolute_path": "/src/app.py"},
-                "tool_result": "ok",
+                "tool_result": "ok"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -895,7 +895,7 @@ class TestAfterTool:
             {
                 "tool_name": "replace",
                 "tool_args": {"file_path": "/src/fix.py"},
-                "tool_result": "ok",
+                "tool_result": "ok"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -909,7 +909,7 @@ class TestAfterTool:
             {
                 "tool_name": "glob",
                 "tool_args": {"pattern": "**/*.py", "path": "/src"},
-                "tool_result": "matches",
+                "tool_result": "matches"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -925,7 +925,7 @@ class TestAfterTool:
             {
                 "tool_name": "search_file_content",
                 "tool_args": {"pattern": "TODO", "path": "/src"},
-                "tool_result": "matches",
+                "tool_result": "matches"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -941,7 +941,7 @@ class TestAfterTool:
             {
                 "tool_name": "grep",
                 "tool_args": {"pattern": "FIXME", "path": "/lib"},
-                "tool_result": "matches",
+                "tool_result": "matches"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -956,7 +956,7 @@ class TestAfterTool:
             {
                 "tool_name": "web_fetch",
                 "tool_args": {"url": "https://example.com"},
-                "tool_result": "page content",
+                "tool_result": "page content"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -971,7 +971,7 @@ class TestAfterTool:
             {
                 "tool_name": "google_web_search",
                 "tool_args": {"query": "python async"},
-                "tool_result": "results",
+                "tool_result": "results"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -986,7 +986,7 @@ class TestAfterTool:
             {
                 "tool_name": "web_search",
                 "tool_args": {"query": "rust tutorial"},
-                "tool_result": "results",
+                "tool_result": "results"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1000,7 +1000,7 @@ class TestAfterTool:
             {
                 "tool_name": "custom_tool",
                 "tool_args": {"key": "value"},
-                "tool_result": "result",
+                "tool_result": "result"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1015,14 +1015,14 @@ class TestAfterTool:
 
     def test_redacts_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
         """tool input and output are redacted when log_tool_content is False."""
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
             {
                 "tool_name": "read_file",
                 "tool_args": {"file_path": "/secret.py"},
-                "tool_result": "secret file content",
+                "tool_result": "secret file content"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1031,14 +1031,14 @@ class TestAfterTool:
 
     def test_redacts_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
         """tool description/command/file_path/url/query redacted when log_tool_details is False."""
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
             {
                 "tool_name": "run_shell_command",
                 "tool_args": {"command": "rm -rf /"},
-                "tool_result": "output",
+                "tool_result": "output"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1047,15 +1047,15 @@ class TestAfterTool:
 
     def test_tool_name_not_redacted(self, mock_resolve, state, captured_spans, monkeypatch):
         """tool.name is NOT redacted (non-sensitive metadata)."""
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
             {
                 "tool_name": "read_file",
                 "tool_args": {"file_path": "/secret.py"},
-                "tool_result": "secret",
+                "tool_result": "secret"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1063,14 +1063,14 @@ class TestAfterTool:
 
     def test_conditional_redaction_only_nonempty(self, mock_resolve, state, captured_spans, monkeypatch):
         """Only non-empty tool details are redacted (empty strings are not set)."""
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
             {
                 "tool_name": "read_file",
                 "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content",
+                "tool_result": "content"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1088,7 +1088,7 @@ class TestAfterTool:
         _handle_after_tool(
             {
                 "tool_name": "custom_tool",
-                "tool_result": "result",
+                "tool_result": "result"
             }
         )
         assert len(captured_spans) == 1
@@ -1104,7 +1104,7 @@ class TestAfterTool:
             {
                 "tool_name": "run_shell_command",
                 "tool_args": {"command": long_command},
-                "tool_result": "output",
+                "tool_result": "output"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1119,7 +1119,7 @@ class TestAfterTool:
 class TestErrorHandling:
     def test_entry_point_catches_exception(self, monkeypatch, capsys):
         """Exception in handler -> entry point catches, calls error()."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.gemini.hooks.handlers._read_stdin", return_value={}),
             mock.patch("tracing.gemini.hooks.handlers.check_requirements", return_value=True),
@@ -1131,7 +1131,7 @@ class TestErrorHandling:
 
     def test_malformed_stdin_no_crash(self, monkeypatch):
         """Malformed stdin JSON doesn't crash entry point."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.gemini.hooks.handlers.check_requirements", return_value=True),
             mock.patch.object(sys, "stdin", new=io.StringIO("not json")),
@@ -1175,7 +1175,7 @@ ENTRY_POINTS = [
     ("before_model", before_model, "_handle_before_model"),
     ("after_model", after_model, "_handle_after_model"),
     ("before_tool", before_tool, "_handle_before_tool"),
-    ("after_tool", after_tool, "_handle_after_tool"),
+    ("after_tool", after_tool, "_handle_after_tool")
 ]
 
 
@@ -1268,7 +1268,7 @@ class TestTurnFlow:
             {
                 "model": "gemini-2.5-pro",
                 "response": {"content": "answer", "usage": {"prompt_tokens": 5, "candidates_tokens": 3}},
-                "model_call_id": "mc-1",
+                "model_call_id": "mc-1"
             }
         )
         assert len(captured_spans) == 1
@@ -1290,7 +1290,7 @@ class TestTurnFlow:
                 "tool_name": "read_file",
                 "tool_call_id": "tc-1",
                 "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content",
+                "tool_result": "content"
             }
         )
         assert len(captured_spans) == 1
@@ -1333,7 +1333,7 @@ class TestProjectNameOnAllSpans:
             {
                 "tool_name": "read_file",
                 "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content",
+                "tool_result": "content"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1367,10 +1367,10 @@ class TestSessionStartIntegration:
 
     def test_session_start_initializes_state(self, tmp_harness_dir, gemini_state_dir, monkeypatch, captured_spans_real):
         """Feed session_id/cwd payload to session_start. State file exists with correct keys."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
 
         _handle_session_start({"session_id": "sess-123", "cwd": "/tmp/proj"})
 
@@ -1379,7 +1379,7 @@ class TestSessionStartIntegration:
         assert state_file.exists()
 
         data = json.loads(state_file.read_text())
-        # session.id reuses the payload session_id so Arize spans correlate
+        # session.id reuses the payload session_id so Atatus spans correlate
         # back to the same Gemini session.
         assert data["session_id"] == "sess-123"
         assert data["trace_count"] == "0"
@@ -1389,10 +1389,10 @@ class TestSessionStartIntegration:
         self, tmp_harness_dir, gemini_state_dir, monkeypatch, captured_spans_real
     ):
         """GEMINI_SESSION_ID env is used when payload has no session_id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         monkeypatch.setenv("GEMINI_SESSION_ID", "env-sid")
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
 
         _handle_session_start({})
 
@@ -1402,10 +1402,10 @@ class TestSessionStartIntegration:
     def test_pid_fallback_when_both_missing(self, tmp_harness_dir, gemini_state_dir, monkeypatch, captured_spans_real):
         """When no env var and no payload session_id, the resolve key falls back
         to the grandparent PID (a positive-integer string)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
 
         _handle_session_start({})
 
@@ -1445,7 +1445,7 @@ class TestExtractTokensEdgeCases:
             "llm_response": {
                 "usageMetadata": {
                     "promptTokenCount": "not-a-number",
-                    "candidatesTokenCount": [1, 2],
+                    "candidatesTokenCount": [1, 2]
                 }
             }
         }
@@ -1464,15 +1464,15 @@ class TestExtractTokensEdgeCases:
 
 class TestSendSpanAsync:
     def test_disable_fork_env_uses_sync_send(self, monkeypatch):
-        """ARIZE_DISABLE_FORK=true short-circuits to synchronous send_span."""
-        monkeypatch.setenv("ARIZE_DISABLE_FORK", "true")
+        """ATATUS_DISABLE_FORK=true short-circuits to synchronous send_span."""
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
         with mock.patch("tracing.gemini.hooks.handlers.send_span") as send_mock:
             _send_span_async({"x": 1})
         send_mock.assert_called_once_with({"x": 1})
 
     def test_no_fork_attr_uses_sync_send(self, monkeypatch):
         """If os.fork is absent (Windows-like), fall back to sync send."""
-        monkeypatch.setenv("ARIZE_DISABLE_FORK", "false")
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "false")
         # Simulate Windows by removing os.fork from the module's view.
         import tracing.gemini.hooks.handlers as h
 
@@ -1489,7 +1489,7 @@ class TestSendSpanAsync:
 
     def test_fork_oserror_uses_sync_send(self, monkeypatch):
         """If os.fork() itself raises OSError, fall back to sync send."""
-        monkeypatch.setenv("ARIZE_DISABLE_FORK", "false")
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "false")
 
         def boom():
             raise OSError("EAGAIN")
@@ -1613,7 +1613,7 @@ class TestAfterToolEdgeCases:
             {
                 "tool_name": "raw_string_tool",
                 "tool_input": "not-a-dict-arg",
-                "tool_response": "result",
+                "tool_response": "result"
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -1628,7 +1628,7 @@ class TestAfterToolEdgeCases:
 class TestMainDispatcher:
     def test_no_args_prints_usage_and_exits(self, capsys, monkeypatch):
         """main() with no handler argument prints usage and exits with code 1."""
-        monkeypatch.setattr(sys, "argv", ["arize-hook"])
+        monkeypatch.setattr(sys, "argv", ["atatus-hook"])
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 1
@@ -1637,7 +1637,7 @@ class TestMainDispatcher:
 
     def test_unknown_handler_exits_with_error(self, capsys, monkeypatch):
         """main() rejects an unknown handler name with exit code 1."""
-        monkeypatch.setattr(sys, "argv", ["arize-hook", "not_a_real_handler"])
+        monkeypatch.setattr(sys, "argv", ["atatus-hook", "not_a_real_handler"])
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 1
@@ -1646,7 +1646,7 @@ class TestMainDispatcher:
 
     def test_dispatches_to_named_handler(self, monkeypatch):
         """main() routes argv[1] to the matching entry-point function."""
-        monkeypatch.setattr(sys, "argv", ["arize-hook", "session_start"])
+        monkeypatch.setattr(sys, "argv", ["atatus-hook", "session_start"])
         with mock.patch.object(handlers_mod, "session_start") as ss_mock:
             main()
         ss_mock.assert_called_once()

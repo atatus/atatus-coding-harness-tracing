@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Arize Copilot Tracing Plugin - Interactive Setup.
+"""Atatus Copilot Tracing Plugin - Interactive Setup.
 
 Configures tracing for GitHub Copilot in both VS Code and CLI modes.
-Writes config.json to ~/.arize/harness/config.json and installs hooks
+Writes config.json to ~/.atatus/harness/config.json and installs hooks
 into .github/hooks/ (project-local).
 
-The ``arize-setup-copilot`` entry point calls ``main()`` here, which runs the
+The ``atatus-setup-copilot`` entry point calls ``main()`` here, which runs the
 legacy interactive wizard.  The new ``tracing/copilot/install.py`` module
 provides the decomposed ``install()`` / ``uninstall()`` API used by the
 shell router.  ``install()`` and ``uninstall()`` below delegate to it.
@@ -29,7 +29,7 @@ def uninstall() -> None:
 
 
 def main() -> None:
-    """Entry point for arize-setup-copilot."""
+    """Entry point for atatus-setup-copilot."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):
@@ -40,7 +40,7 @@ def main() -> None:
 def _run() -> None:
     """Delegate to the install module in tracing/copilot/.
 
-    This replaces the old interactive flow so that ``arize-setup-copilot``
+    This replaces the old interactive flow so that ``atatus-setup-copilot``
     and the installer router share a single code path.
     """
     _install_mod.install()

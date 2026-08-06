@@ -24,8 +24,7 @@ body:
       label: Backend
       description: Which tracing backend are you sending spans to?
       options:
-        - Arize AX
-        - Phoenix
+        - Atatus
     validations:
       required: true
 

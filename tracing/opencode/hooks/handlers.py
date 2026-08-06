@@ -61,8 +61,8 @@ def _read_stdin() -> dict:
 
 def _send_span_async(span_dict: dict) -> None:
     """Send a span without blocking the host. Double-fork detached unless
-    ARIZE_DISABLE_FORK=true (tests) or fork() is unavailable (Windows)."""
-    if os.environ.get("ARIZE_DISABLE_FORK", "").lower() == "true":
+    ATATUS_DISABLE_FORK=true (tests) or fork() is unavailable (Windows)."""
+    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
         send_span(span_dict)
         return
     if not hasattr(os, "fork"):

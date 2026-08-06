@@ -1,0 +1,16 @@
+coding-harness-tracing
+Copyright 2026 Atatus (Namlabs Software Solutions)
+
+This product includes software originally developed by Arize AI, Inc. and
+distributed under the Apache License, Version 2.0.
+
+  Original work: coding-harness-tracing
+  Copyright 2026 Arize AI, Inc.
+
+Substantial modifications have been made by Atatus, including replacement of
+the telemetry transport, backend resolution, credential model, and setup flow.
+
+This NOTICE file exists to satisfy section 4 of the Apache License, Version
+2.0, which requires derivative works to retain the attribution notices of the
+original work. It is deliberately the only file in this repository that names
+the upstream project.

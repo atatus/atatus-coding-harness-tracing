@@ -20,10 +20,10 @@ KIRO_AGENTS_DIR = Path.home() / ".kiro" / "agents"
 KIRO_SESSIONS_DIR = Path.home() / ".kiro" / "sessions" / "cli"
 
 # Default agent name when the user doesn't specify one during install.
-DEFAULT_AGENT_NAME = "arize-traced"
+DEFAULT_AGENT_NAME = "atatus-traced"
 
 # Single hook binary; the handler dispatches by hook_event_name.
-HOOK_BIN_NAME = "arize-hook-kiro"
+HOOK_BIN_NAME = "atatus-hook-kiro"
 
 # Five Kiro CLI hook events (camelCase — these are the exact strings Kiro
 # accepts as keys in the agent config's `hooks` field).
@@ -35,12 +35,12 @@ HOOK_EVENTS = (
     "stop",
 )
 
-# Default body for a freshly-created `arize-traced` agent. The `hooks` field
+# Default body for a freshly-created `atatus-traced` agent. The `hooks` field
 # is filled in by install.py.  Shape verified 2026-05-08 against
 # `kiro-cli agent create` output.
 AGENT_SKELETON: dict = {
     "name": DEFAULT_AGENT_NAME,
-    "description": "Kiro agent with Arize tracing hooks installed.",
+    "description": "Kiro agent with Atatus tracing hooks installed.",
     "prompt": None,
     "mcpServers": {},
     "tools": ["*"],

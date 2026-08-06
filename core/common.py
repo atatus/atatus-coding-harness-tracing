@@ -15,9 +15,7 @@ import shutil
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Optional
 
@@ -34,23 +32,23 @@ class _Env:
 
     @property
     def trace_enabled(self) -> bool:
-        return os.environ.get("ARIZE_TRACE_ENABLED", "true").lower() == "true"
+        return os.environ.get("ATATUS_TRACE_ENABLED", "true").lower() == "true"
 
     @property
     def project_name(self) -> str:
-        return os.environ.get("ARIZE_PROJECT_NAME", "")
+        return os.environ.get("ATATUS_PROJECT_NAME", "")
 
     def get_user_id(self, service_name: str = "") -> str:
         """Resolve user id, checking highest precedence first and returning on
         the first hit:
 
-        1. ``ARIZE_USER_ID`` env var (env always wins; an explicit empty value
+        1. ``ATATUS_USER_ID`` env var (env always wins; an explicit empty value
            blanks it)
         2. ``harnesses.<service_name>.user_id`` in config.json (per-harness)
         3. top-level ``user_id`` in config.json (global)
         → ``""`` if none set
         """
-        raw = os.environ.get("ARIZE_USER_ID")
+        raw = os.environ.get("ATATUS_USER_ID")
         if raw is not None:
             return raw
         cfg = self._top_level_config
@@ -69,19 +67,19 @@ class _Env:
 
     @property
     def verbose(self) -> bool:
-        return os.environ.get("ARIZE_VERBOSE", "").lower() == "true"
+        return os.environ.get("ATATUS_VERBOSE", "").lower() == "true"
 
     @property
     def dry_run(self) -> bool:
-        return os.environ.get("ARIZE_DRY_RUN", "false").lower() == "true"
+        return os.environ.get("ATATUS_DRY_RUN", "false").lower() == "true"
 
     @property
     def log_file(self) -> str:
-        # Each harness adapter sets ARIZE_LOG_FILE to its per-harness path under
-        # ~/.arize/harness/logs/ at import time; the env var also acts as the
+        # Each harness adapter sets ATATUS_LOG_FILE to its per-harness path under
+        # ~/.atatus/harness/logs/ at import time; the env var also acts as the
         # explicit user override. Fall back to the shared kit log only when no
         # adapter has run (e.g. ad-hoc imports of core.common).
-        override = os.environ.get("ARIZE_LOG_FILE")
+        override = os.environ.get("ATATUS_LOG_FILE")
         if override:
             return override
         from core.constants import LOG_DIR
@@ -89,23 +87,18 @@ class _Env:
         return str(LOG_DIR / "agent-kit.log")
 
     @property
-    def phoenix_endpoint(self) -> str:
-        return os.environ.get("PHOENIX_ENDPOINT", "")
+    def otlp_endpoint(self) -> str:
+        """OTLP collector endpoint override.
 
-    @property
-    def phoenix_api_key(self) -> str:
-        # Phoenix auth token. Prefer the dedicated PHOENIX_API_KEY (written by the
-        # installers and documented in the README); fall back to ARIZE_API_KEY for
-        # backward compatibility with configs that reused the Arize key.
-        return os.environ.get("PHOENIX_API_KEY", "") or os.environ.get("ARIZE_API_KEY", "")
+        Env > config.json > DEFAULT_OTLP_ENDPOINT. Set this only if you have been
+        given a collector URL other than the default.
+        """
+        return os.environ.get("ATATUS_OTLP_ENDPOINT", "")
 
     @property
     def api_key(self) -> str:
-        return os.environ.get("ARIZE_API_KEY", "")
-
-    @property
-    def space_id(self) -> str:
-        return os.environ.get("ARIZE_SPACE_ID", "")
+        """Atatus license key. Sent as the ``api-key`` header on every export."""
+        return os.environ.get("ATATUS_API_KEY", "")
 
     @functools.cached_property
     def _top_level_config(self) -> dict:
@@ -210,15 +203,15 @@ class _Env:
 
     @property
     def log_prompts(self) -> bool:
-        return self._resolve_log_flag("ARIZE_LOG_PROMPTS", "prompts", True)
+        return self._resolve_log_flag("ATATUS_LOG_PROMPTS", "prompts", True)
 
     @property
     def log_tool_details(self) -> bool:
-        return self._resolve_log_flag("ARIZE_LOG_TOOL_DETAILS", "tool_details", True)
+        return self._resolve_log_flag("ATATUS_LOG_TOOL_DETAILS", "tool_details", True)
 
     @property
     def log_tool_content(self) -> bool:
-        return self._resolve_log_flag("ARIZE_LOG_TOOL_CONTENT", "tool_content", True)
+        return self._resolve_log_flag("ATATUS_LOG_TOOL_CONTENT", "tool_content", True)
 
 
 env = _Env()
@@ -262,18 +255,18 @@ def get_timestamp_ms() -> int:
 
 
 def _is_verbose() -> bool:
-    return os.environ.get("ARIZE_VERBOSE", "").lower() == "true"
+    return os.environ.get("ATATUS_VERBOSE", "").lower() == "true"
 
 
 def log(msg: str) -> None:
-    """Verbose log — only written when ARIZE_VERBOSE=true. Goes to stderr."""
+    """Verbose log — only written when ATATUS_VERBOSE=true. Goes to stderr."""
     if _is_verbose():
-        print(f"[arize] {msg}", file=sys.stderr, flush=True)
+        print(f"[atatus] {msg}", file=sys.stderr, flush=True)
 
 
 def error(msg: str) -> None:
     """Error log — always written. Goes to stderr."""
-    print(f"[arize:error] {msg}", file=sys.stderr, flush=True)
+    print(f"[atatus:error] {msg}", file=sys.stderr, flush=True)
 
 
 # Module-level handles for the active stderr redirect. Kept so tests (and any
@@ -283,14 +276,14 @@ _redirected_log_fh: Optional[IO] = None
 
 
 def redirect_stderr_to_log_file() -> None:
-    """Tee ``sys.stderr`` to ``ARIZE_LOG_FILE`` (append, line-buffered).
+    """Tee ``sys.stderr`` to ``ATATUS_LOG_FILE`` (append, line-buffered).
 
     Each hook invocation is a separate process. Adapters should call this
     once at module import time so every entry point in the harness benefits
     without needing to wrap every function. With the redirect in place:
 
       - ``error(...)`` always writes → always lands in the log file.
-      - ``log(...)`` writes only when ``ARIZE_VERBOSE=true`` → verbose
+      - ``log(...)`` writes only when ``ATATUS_VERBOSE=true`` → verbose
         noise lands in the file only when explicitly opted in.
 
     Idempotent: if a redirect is already active, this is a no-op. The original
@@ -301,14 +294,14 @@ def redirect_stderr_to_log_file() -> None:
 
     Fail-soft: if the path can't be opened, stderr is left untouched and
     output falls back to whatever the host CLI does with hook stderr.
-    No-op when ``ARIZE_LOG_FILE`` is unset.
+    No-op when ``ATATUS_LOG_FILE`` is unset.
     """
     global _original_stderr, _redirected_log_fh
 
     if _redirected_log_fh is not None:
         return  # already redirected
 
-    log_file = os.environ.get("ARIZE_LOG_FILE")
+    log_file = os.environ.get("ATATUS_LOG_FILE")
     if not log_file:
         return
     try:
@@ -350,12 +343,12 @@ def restore_stderr_from_log_file() -> None:
 
 
 def debug_dump(label: str, data: object) -> None:
-    """Trace-level debug dump — only when ARIZE_TRACE_DEBUG=true.
+    """Trace-level debug dump — only when ATATUS_TRACE_DEBUG=true.
 
     Writes JSON files to {STATE_DIR}/debug/{label}_{timestamp}.json.
     Used by Codex hooks for detailed payload inspection.
     """
-    if os.environ.get("ARIZE_TRACE_DEBUG", "").lower() != "true":
+    if os.environ.get("ATATUS_TRACE_DEBUG", "").lower() != "true":
         return
     try:
         from core.constants import STATE_BASE_DIR
@@ -374,15 +367,18 @@ def debug_dump(label: str, data: object) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Default Atatus OTLP collector. Override per-harness with ``ATATUS_OTLP_ENDPOINT``
+#: or an ``endpoint`` key in ``~/.atatus/harness/config.json``.
+DEFAULT_OTLP_ENDPOINT = "https://otel-rx.atatus.com"
+
+
 def get_target() -> str:
     """Detect backend target from env vars.
 
-    Returns "phoenix", "arize", or "none".
+    Returns "atatus" or "none".
     """
-    if env.phoenix_endpoint:
-        return "phoenix"
-    if env.api_key and env.space_id:
-        return "arize"
+    if env.api_key:
+        return "atatus"
     return "none"
 
 
@@ -390,22 +386,20 @@ def resolve_backend(span_dict: dict) -> dict:
     """Resolve backend config for a span payload.
 
     Precedence per field: env var > harnesses.<service_name> in
-    ~/.arize/harness/config.json > defaults. Used so marketplace-installed
+    ~/.atatus/harness/config.json > defaults. Used so marketplace-installed
     plugins (which skip the interactive wizard) can supply credentials
     purely via the runtime env block in ~/.claude/settings.json.
 
     Env vars consulted:
-      - PHOENIX_ENDPOINT     → target=phoenix (overrides config target)
-      - ARIZE_API_KEY        → target=arize when paired with ARIZE_SPACE_ID
-      - ARIZE_SPACE_ID       → required for arize when env-only
-      - ARIZE_PROJECT_NAME   → project_name override
+      - ATATUS_API_KEY        → license key
+      - ATATUS_OTLP_ENDPOINT  → collector URL override
+      - ATATUS_PROJECT_NAME   → project_name override
 
     service_name is pulled from the span's resource attributes
     (resource.attributes[service.name]).
 
     Returns:
-      {"target": "phoenix", "endpoint", "api_key", "project_name"} or
-      {"target": "arize",   "endpoint", "api_key", "space_id", "project_name"}
+      {"target": "atatus", "endpoint", "api_key", "project_name"}
 
     On any missing required field, logs a clear error via error() and
     returns {"target": "none", "project_name": project_name_or_""}.
@@ -439,196 +433,24 @@ def resolve_backend(span_dict: dict) -> dict:
     # Resolve project_name: env > config > service_name
     project_name = env.project_name or harness_cfg.get("project_name", "") or service_name
 
-    # Resolve target: env-derived backend takes precedence over config target
-    if env.phoenix_endpoint:
-        target = "phoenix"
-    elif env.api_key and env.space_id:
-        target = "arize"
-    else:
-        target = harness_cfg.get("target", "")
+    # Endpoint: env > config > default. Only the license key is mandatory.
+    endpoint = env.otlp_endpoint or harness_cfg.get("endpoint", "") or DEFAULT_OTLP_ENDPOINT
+    api_key = env.api_key or harness_cfg.get("api_key", "")
 
-    if not target:
+    if not api_key:
         error(
-            f"No backend configured for harness '{service_name}': set "
-            f"ARIZE_API_KEY+ARIZE_SPACE_ID (or PHOENIX_ENDPOINT) in env, "
-            f"or add a 'harnesses.{service_name}' entry to ~/.arize/harness/config.json."
+            f"No Atatus license key for harness '{service_name}': set ATATUS_API_KEY "
+            f"in env, or add a 'harnesses.{service_name}' entry with an 'api_key' to "
+            f"~/.atatus/harness/config.json."
         )
         return {"target": "none", "project_name": project_name}
 
-    if target == "phoenix":
-        endpoint = env.phoenix_endpoint or harness_cfg.get("endpoint", "")
-        if not endpoint:
-            error(
-                f"Incomplete phoenix config for harness '{service_name}': missing endpoint "
-                f"(set PHOENIX_ENDPOINT in env or add 'endpoint' to config.json)."
-            )
-            return {"target": "none", "project_name": project_name}
-        return {
-            "target": "phoenix",
-            "endpoint": endpoint,
-            "api_key": env.phoenix_api_key or harness_cfg.get("api_key", ""),
-            "project_name": project_name,
-        }
-
-    if target == "arize":
-        endpoint = harness_cfg.get("endpoint", "") or "otlp.arize.com:443"
-        api_key = env.api_key or harness_cfg.get("api_key", "")
-        space_id = env.space_id or harness_cfg.get("space_id", "")
-
-        missing = []
-        if not api_key:
-            missing.append("api_key (set ARIZE_API_KEY)")
-        if not space_id:
-            missing.append("space_id (set ARIZE_SPACE_ID)")
-        if missing:
-            error(
-                f"Incomplete arize config for harness '{service_name}': missing "
-                f"{', '.join(missing)} or add to config.json."
-            )
-            return {"target": "none", "project_name": project_name}
-        return {
-            "target": "arize",
-            "endpoint": endpoint,
-            "api_key": api_key,
-            "space_id": space_id,
-            "project_name": project_name,
-        }
-
-    error(f"Unknown target '{target}' for harness '{service_name}'. " f"Expected 'arize' or 'phoenix'.")
-    return {"target": "none", "project_name": project_name}
-
-
-def _inject_arize_project_name(span_dict: dict, project_name: str) -> dict:
-    """Return a copy of span_dict with arize.project.name on every span's attributes.
-
-    Arize requires this attribute on each span (not just the resource).
-    Modifies a shallow copy — does not mutate the original.
-    """
-    import copy
-
-    payload = copy.deepcopy(span_dict)
-    project_attr = {"key": "arize.project.name", "value": {"stringValue": project_name}}
-    for rs in payload.get("resourceSpans", []):
-        # Also add to resource attributes
-        rs.setdefault("resource", {}).setdefault("attributes", []).append(project_attr)
-        for ss in rs.get("scopeSpans", []):
-            for span in ss.get("spans", []):
-                span.setdefault("attributes", []).append(project_attr)
-    return payload
-
-
-def _otlp_attr_value_to_python(value: dict):
-    """Convert an OTLP AnyValue JSON object to a plain JSON value."""
-    if not isinstance(value, dict):
-        return value
-    if "stringValue" in value:
-        return value["stringValue"]
-    if "boolValue" in value:
-        return value["boolValue"]
-    if "intValue" in value:
-        try:
-            return int(value["intValue"])
-        except (TypeError, ValueError):
-            return value["intValue"]
-    if "doubleValue" in value:
-        return value["doubleValue"]
-    if "bytesValue" in value:
-        return value["bytesValue"]
-    if "arrayValue" in value:
-        values = value.get("arrayValue", {}).get("values", [])
-        return [_otlp_attr_value_to_python(item) for item in values]
-    if "kvlistValue" in value:
-        values = value.get("kvlistValue", {}).get("values", [])
-        return {item.get("key", ""): _otlp_attr_value_to_python(item.get("value", {})) for item in values}
-    return value
-
-
-def _otlp_attrs_to_dict(attrs: list) -> dict:
-    """Convert OTLP attribute arrays to the object shape Phoenix REST expects."""
-    result = {}
-    for attr in attrs or []:
-        key = attr.get("key")
-        if not key:
-            continue
-        result[key] = _otlp_attr_value_to_python(attr.get("value", {}))
-    return result
-
-
-def _unix_nano_to_iso(value) -> str:
-    """Convert OTLP Unix nanoseconds to an ISO-8601 UTC timestamp."""
-    try:
-        ns = int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid Unix nanosecond timestamp: {value!r}")
-    seconds, nanos = divmod(ns, 1_000_000_000)
-    dt = datetime.fromtimestamp(seconds, tz=timezone.utc).replace(microsecond=nanos // 1000)
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-def _phoenix_status_code(status: dict) -> str:
-    """Convert OTLP status code enum values to Phoenix status strings."""
-    if not isinstance(status, dict):
-        return "UNSET"
-    raw_code = status.get("code", 0)
-    if raw_code is None:
-        raw_code = 0
-    try:
-        code = int(raw_code)
-    except (TypeError, ValueError):
-        code = 0
-    return {1: "OK", 2: "ERROR"}.get(code, "UNSET")
-
-
-def _phoenix_span_kind(span: dict, attrs: dict) -> str:
-    """Prefer OpenInference span kind attributes, falling back to OTLP kind."""
-    oi_kind = attrs.get("openinference.span.kind")
-    if oi_kind:
-        return str(oi_kind).upper()
-    try:
-        otlp_kind = int(span.get("kind", 0))
-    except (TypeError, ValueError):
-        otlp_kind = 0
-    return {2: "SERVER", 3: "CLIENT", 4: "PRODUCER", 5: "CONSUMER"}.get(otlp_kind, "UNKNOWN")
-
-
-def _otlp_to_phoenix_payload(span_dict: dict) -> dict:
-    """Translate OTLP JSON into Phoenix's native REST create-spans schema."""
-    phoenix_spans = []
-    for rs in span_dict.get("resourceSpans", []):
-        resource_attrs = _otlp_attrs_to_dict(rs.get("resource", {}).get("attributes", []))
-        for ss in rs.get("scopeSpans", []):
-            for span in ss.get("spans", []):
-                attrs = {**resource_attrs, **_otlp_attrs_to_dict(span.get("attributes", []))}
-                item = {
-                    "name": span.get("name", "unknown"),
-                    "context": {
-                        "trace_id": span.get("traceId", ""),
-                        "span_id": span.get("spanId", ""),
-                    },
-                    "span_kind": _phoenix_span_kind(span, attrs),
-                    "start_time": _unix_nano_to_iso(span.get("startTimeUnixNano")),
-                    "end_time": _unix_nano_to_iso(span.get("endTimeUnixNano")),
-                    "status_code": _phoenix_status_code(span.get("status", {})),
-                    "status_message": (span.get("status", {}) or {}).get("message", ""),
-                    "attributes": attrs,
-                }
-                parent_id = span.get("parentSpanId")
-                if parent_id:
-                    item["parent_id"] = parent_id
-
-                events = []
-                for event in span.get("events", []) or []:
-                    events.append(
-                        {
-                            "name": event.get("name", "event"),
-                            "timestamp": _unix_nano_to_iso(event.get("timeUnixNano")),
-                            "attributes": _otlp_attrs_to_dict(event.get("attributes", [])),
-                        }
-                    )
-                if events:
-                    item["events"] = events
-                phoenix_spans.append(item)
-    return {"data": phoenix_spans}
+    return {
+        "target": "atatus",
+        "endpoint": endpoint,
+        "api_key": api_key,
+        "project_name": project_name,
+    }
 
 
 def _extract_span_name(span_dict: dict) -> str:
@@ -639,14 +461,73 @@ def _extract_span_name(span_dict: dict) -> str:
         return "unknown"
 
 
+def _set_resource_attr(resource: dict, key: str, value: str) -> None:
+    """Set (upsert) a string resource attribute in OTLP JSON form."""
+    attrs = resource.setdefault("attributes", [])
+    for attr in attrs:
+        if attr.get("key") == key:
+            attr["value"] = {"stringValue": value}
+            return
+    attrs.append({"key": key, "value": {"stringValue": value}})
+
+
+def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
+    """Stamp Atatus project identity onto a payload's resource attributes.
+
+    Atatus resolves (and auto-creates) a project from ``service.name`` on the
+    OTLP resource, so ``service.name`` must carry the **user's project name** —
+    not the harness slug. The harness slug moves to ``atatus.agent.harness``,
+    where the receiver reads it to pick the project's subType.
+
+    Resource attributes after this call:
+      service.name         = <project name>       (project identity)
+      atatus.project.type  = "llm"                (route to /llm, not /apm)
+      atatus.agent.harness = <harness slug>       (subType, e.g. "claude-code")
+      telemetry.sdk.name   = "atatus-coding-harness"
+
+    Mirrors what the upstream Arize path sent as ``arize.project.name``: the
+    project identity travels *in the payload*, not only in config. Kept at the
+    resource level rather than duplicated onto every span — Atatus reads it from
+    the resource, and each POST carries a single project.
+
+    Returns a deep copy; never mutates the caller's dict.
+    """
+    import copy
+
+    payload = copy.deepcopy(span_dict)
+    for rs in payload.get("resourceSpans", []):
+        resource = rs.setdefault("resource", {})
+
+        harness = ""
+        for attr in resource.get("attributes", []):
+            if attr.get("key") == "service.name":
+                harness = attr.get("value", {}).get("stringValue", "")
+                break
+
+        if project_name:
+            _set_resource_attr(resource, "service.name", project_name)
+        if harness:
+            _set_resource_attr(resource, "atatus.agent.harness", harness)
+        _set_resource_attr(resource, "atatus.project.type", "llm")
+        _set_resource_attr(resource, "telemetry.sdk.name", "atatus-coding-harness")
+
+    return payload
+
+
 def send_span(span_dict: dict) -> bool:
     """Send a span payload directly to the configured backend.
 
     Backend is resolved per harness via ``resolve_backend()``, which checks
-    env vars (ARIZE_API_KEY+ARIZE_SPACE_ID, PHOENIX_ENDPOINT,
-    ARIZE_PROJECT_NAME) before falling back to
-    ``~/.arize/harness/config.json``. If neither path yields a complete
-    backend, the span is dropped and an error is logged.
+    env vars (ATATUS_API_KEY, ATATUS_OTLP_ENDPOINT, ATATUS_PROJECT_NAME) before
+    falling back to ``~/.atatus/harness/config.json``. If neither path yields a
+    license key, the span is dropped and an error is logged.
+
+    Transport is OTLP/JSON over HTTP POST to ``<endpoint>/v1/traces``, with the
+    license key in the ``api-key`` header. No dependencies beyond urllib.
+
+    Before sending, ``_stamp_atatus_identity()`` rewrites the resource so
+    ``service.name`` carries the project name (Atatus resolves and auto-creates
+    projects from it) and the harness slug moves to ``atatus.agent.harness``.
 
     Never raises. Returns True on success, False on failure.
     """
@@ -661,67 +542,41 @@ def send_span(span_dict: dict) -> bool:
         backend = resolve_backend(span_dict)
         target = backend["target"]
 
-        if target == "phoenix":
-            project = backend["project_name"]
-            endpoint = backend["endpoint"]
-            api_key = backend.get("api_key", "")
-            project_identifier = urllib.parse.quote(project, safe="")
-            url = f"{endpoint.rstrip('/')}/v1/projects/{project_identifier}/spans"
-            body = json.dumps(_otlp_to_phoenix_payload(span_dict)).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return 200 <= resp.status < 300
-            except urllib.error.HTTPError as e:
-                try:
-                    detail = e.read().decode("utf-8", errors="replace")
-                except Exception:
-                    detail = ""
-                error(f"Phoenix send failed: HTTP {e.code}: {detail or e.reason}")
-                return False
-            except Exception as e:
-                error(f"Phoenix send failed: {e}")
-                return False
-        elif target == "arize":
-            project = backend["project_name"]
-            endpoint = backend.get("endpoint", "otlp.arize.com:443")
-            api_key = backend["api_key"]
-            space_id = backend.get("space_id", "")
+        if target != "atatus":
+            error("No backend configured (set ATATUS_API_KEY)")
+            return False
 
-            # Inject arize.project.name into span attributes (required by Arize)
-            payload = _inject_arize_project_name(span_dict, project)
+        endpoint = backend.get("endpoint", DEFAULT_OTLP_ENDPOINT)
+        api_key = backend["api_key"]
 
-            # Normalize endpoint to HTTPS URL for HTTP/JSON transport
-            if endpoint.startswith("http://") or endpoint.startswith("https://"):
-                url = f"{endpoint.rstrip('/')}/v1/traces"
-            else:
-                url = f"https://{endpoint}/v1/traces"
+        # Stamp project identity onto the resource. Atatus resolves/auto-creates
+        # the project from service.name, so this must run before serialization.
+        payload = _stamp_atatus_identity(span_dict, backend.get("project_name", ""))
 
-            body = json.dumps(payload).encode("utf-8")
-            headers = {
-                "Content-Type": "application/json",
-                "authorization": f"Bearer {api_key}",
-                "space_id": space_id,
-            }
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return 200 <= resp.status < 300
-            except urllib.error.HTTPError as e:
-                try:
-                    detail = e.read().decode("utf-8", errors="replace")
-                except Exception:
-                    detail = ""
-                error(f"Arize send failed: HTTP {e.code}: {detail or e.reason}")
-                return False
-            except Exception as e:
-                error(f"Arize send failed: {e}")
-                return False
+        # Normalize endpoint to an absolute URL for HTTP/JSON transport.
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            url = f"{endpoint.rstrip('/')}/v1/traces"
         else:
-            error("No backend configured (set PHOENIX_ENDPOINT or ARIZE_API_KEY+ARIZE_SPACE_ID)")
+            url = f"https://{endpoint}/v1/traces"
+
+        body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": api_key,
+        }
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            try:
+                detail = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                detail = ""
+            error(f"Atatus send failed: HTTP {e.code}: {detail or e.reason}")
+            return False
+        except Exception as e:
+            error(f"Atatus send failed: {e}")
             return False
     except Exception as e:
         error(f"send_span failed: {e}")

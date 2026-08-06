@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Config helper for Arize Coding Harness Tracing.
+Config helper for Atatus Coding Harness Tracing.
 
-Reads and writes ~/.arize/harness/config.json.
+Reads and writes ~/.atatus/harness/config.json.
 Used by shell scripts (via CLI subcommands) and Python modules (via import).
 
 CLI usage:

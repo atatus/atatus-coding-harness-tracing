@@ -19,17 +19,17 @@ from tracing.codex.constants import NOTIFY_BIN_NAME
 # ---------------------------------------------------------------------------
 
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "ak-xxx", "space_id": "U3Bh"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-xxx"},
 )
 
 
 @pytest.fixture()
 def fake_home(tmp_path, monkeypatch):
     """Redirect all paths to a temp directory."""
-    install_dir = tmp_path / ".arize" / "harness"
+    install_dir = tmp_path / ".atatus" / "harness"
     install_dir.mkdir(parents=True)
     config_file = install_dir / "config.json"
     codex_dir = tmp_path / ".codex"
@@ -51,7 +51,7 @@ def fake_home(tmp_path, monkeypatch):
 
     monkeypatch.setattr(codex_install, "CODEX_CONFIG_DIR", codex_dir)
     monkeypatch.setattr(codex_install, "CODEX_CONFIG_FILE", codex_dir / "config.toml")
-    monkeypatch.setattr(codex_install, "CODEX_ENV_FILE", codex_dir / "arize-env.sh")
+    monkeypatch.setattr(codex_install, "CODEX_ENV_FILE", codex_dir / "atatus-env.sh")
     monkeypatch.setattr(codex_install, "CONFIG_FILE", config_file)
 
     return tmp_path
@@ -70,30 +70,30 @@ def _stub_logging_prompts(monkeypatch):
 
 @pytest.fixture()
 def mock_prompts(monkeypatch):
-    """Mock interactive prompts to return phoenix defaults."""
+    """Mock interactive prompts to return atatus defaults."""
     monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
     monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         codex_install,
         "prompt_backend",
-        lambda existing_harnesses=None: PHOENIX_BACKEND,
+        lambda existing_harnesses=None: ATATUS_BACKEND,
     )
 
 
-def _mock_prompts_arize(monkeypatch):
-    """Mock interactive prompts to return arize defaults."""
+def _mock_prompts_atatus(monkeypatch):
+    """Mock interactive prompts to return atatus defaults."""
     monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
     monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         codex_install,
         "prompt_backend",
-        lambda existing_harnesses=None: ARIZE_BACKEND,
+        lambda existing_harnesses=None: ATATUS_BACKEND,
     )
 
 
 def _expected_notify_cmd(fake_home: Path) -> str:
     """Compute the venv-bin path the installer should write for notify."""
-    return str(fake_home / ".arize" / "harness" / "venv" / "bin" / NOTIFY_BIN_NAME)
+    return str(fake_home / ".atatus" / "harness" / "venv" / "bin" / NOTIFY_BIN_NAME)
 
 
 def _hook_commands(toml_data: dict, event: str) -> list[str]:
@@ -119,7 +119,7 @@ class TestTomlHelpers:
     def test_roundtrip_simple(self, tmp_path):
         data = {
             "notify": ["/usr/bin/hook"],
-            "model": {"name": "gpt-4"},
+            "model": {"name": "gpt-4"}
         }
         p = tmp_path / "config.toml"
         codex_toml._toml_write(data, p)
@@ -139,7 +139,7 @@ class TestTomlHelpers:
         assert parsed == data
 
     def test_roundtrip_windows_path_with_backslashes(self, tmp_path):
-        win_path = r"C:\Users\foo\.arize\harness\venv\Scripts\arize-hook-codex-notify.exe"
+        win_path = r"C:\Users\foo\.atatus\harness\venv\Scripts\atatus-hook-codex-notify.exe"
         data = {"notify": [win_path]}
         p = tmp_path / "config.toml"
         codex_toml._toml_write(data, p)
@@ -168,30 +168,17 @@ class TestTomlHelpers:
 class TestInstall:
     """Tests for install() under the v2 hooks layout."""
 
-    def test_install_fresh_writes_flat_phoenix_entry(self, fake_home, mock_prompts):
+
+    def test_install_fresh_writes_flat_atatus_entry(self, fake_home, monkeypatch):
+        _mock_prompts_atatus(monkeypatch)
         codex_install.install()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         entry = config["harnesses"]["codex"]
-        assert entry["target"] == "phoenix"
-        assert entry["endpoint"] == "http://localhost:6006"
-        assert entry["api_key"] == ""
-        assert entry["project_name"] == "codex"
-        assert "backend" not in config
-        assert "collector" not in config
-
-    def test_install_fresh_writes_flat_arize_entry(self, fake_home, monkeypatch):
-        _mock_prompts_arize(monkeypatch)
-        codex_install.install()
-
-        config_file = fake_home / ".arize" / "harness" / "config.json"
-        config = json.loads(config_file.read_text())
-        entry = config["harnesses"]["codex"]
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "ak-xxx"
-        assert entry["space_id"] == "U3Bh"
         assert entry["project_name"] == "codex"
 
     def test_install_writes_notify_only_layout(self, fake_home, mock_prompts):
@@ -226,23 +213,22 @@ class TestInstall:
     def test_install_writes_env_file(self, fake_home, mock_prompts):
         codex_install.install()
 
-        env_path = fake_home / ".codex" / "arize-env.sh"
+        env_path = fake_home / ".codex" / "atatus-env.sh"
         assert env_path.is_file()
         env_text = env_path.read_text()
-        assert "export ARIZE_TRACE_ENABLED=true" in env_text
+        assert "export ATATUS_TRACE_ENABLED=true" in env_text
 
     def test_install_existing_codex_entry_only_updates_project_name(self, fake_home, monkeypatch):
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.write_text(
             json.dumps(
                 {
                     "harnesses": {
                         "codex": {
                             "project_name": "old-name",
-                            "target": "arize",
-                            "endpoint": "otlp.arize.com:443",
-                            "api_key": "ak-existing",
-                            "space_id": "S123",
+                            "target": "atatus",
+                            "endpoint": "https://otel-rx.atatus.com",
+                            "api_key": "ak-existing"
                         }
                     }
                 },
@@ -258,22 +244,20 @@ class TestInstall:
         config = json.loads(config_file.read_text())
         entry = config["harnesses"]["codex"]
         assert entry["project_name"] == "new-name"
-        assert entry["target"] == "arize"
+        assert entry["target"] == "atatus"
         assert entry["api_key"] == "ak-existing"
-        assert entry["space_id"] == "S123"
 
-    def test_install_offers_copy_from_existing_arize_harness(self, fake_home, monkeypatch):
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+    def test_install_offers_copy_from_existing_atatus_harness(self, fake_home, monkeypatch):
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.write_text(
             json.dumps(
                 {
                     "harnesses": {
                         "claude-code": {
                             "project_name": "claude-code",
-                            "target": "arize",
-                            "endpoint": "otlp.arize.com:443",
-                            "api_key": "ak-shared",
-                            "space_id": "S-shared",
+                            "target": "atatus",
+                            "endpoint": "https://otel-rx.atatus.com",
+                            "api_key": "ak-shared"
                         }
                     }
                 },
@@ -286,11 +270,10 @@ class TestInstall:
         def fake_prompt_backend(existing_harnesses=None):
             captured_kwargs["existing_harnesses"] = existing_harnesses
             return (
-                "arize",
+                "atatus",
                 {
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-shared",
-                    "space_id": "S-shared",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-shared"
                 },
             )
 
@@ -304,9 +287,8 @@ class TestInstall:
 
         config = json.loads(config_file.read_text())
         codex_entry = config["harnesses"]["codex"]
-        assert codex_entry["target"] == "arize"
+        assert codex_entry["target"] == "atatus"
         assert codex_entry["api_key"] == "ak-shared"
-        assert codex_entry["space_id"] == "S-shared"
 
     def test_reinstall_is_idempotent(self, fake_home, mock_prompts):
         """Running install twice produces the same TOML — no duplicates."""
@@ -329,13 +311,13 @@ class TestInstall:
         monkeypatch.setattr(
             codex_install,
             "prompt_backend",
-            lambda existing_harnesses=None: PHOENIX_BACKEND,
+            lambda existing_harnesses=None: ATATUS_BACKEND,
         )
 
         codex_install.install()
 
-        env_text = (fake_home / ".codex" / "arize-env.sh").read_text()
-        assert "export ARIZE_USER_ID=test-user" in env_text
+        env_text = (fake_home / ".codex" / "atatus-env.sh").read_text()
+        assert "export ATATUS_USER_ID=test-user" in env_text
 
     def test_install_with_skills_calls_symlink(self, fake_home, mock_prompts):
         with patch.object(codex_install, "symlink_skills") as m_symlink:
@@ -372,7 +354,7 @@ class TestUninstall:
         codex_install.install()
         codex_install.uninstall()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         assert "codex" not in config.get("harnesses", {})
 
@@ -392,7 +374,7 @@ class TestUninstall:
         assert "notify" not in remaining
         assert "hooks" not in remaining
 
-        assert not (fake_home / ".codex" / "arize-env.sh").is_file()
+        assert not (fake_home / ".codex" / "atatus-env.sh").is_file()
 
     def test_uninstall_preserves_foreign_notify(self, fake_home, mock_prompts):
         codex_install.install()
@@ -408,7 +390,7 @@ class TestUninstall:
         assert remaining["notify"] == ["/usr/local/bin/my-custom-hook"]
 
     def test_uninstall_preserves_foreign_hook_entries(self, fake_home, mock_prompts):
-        """A non-arize hook entry under [[hooks.PreToolUse]] survives uninstall."""
+        """A non-atatus hook entry under [[hooks.PreToolUse]] survives uninstall."""
         codex_install.install()
 
         # Manually add a foreign hook entry (current install layout has no hooks).
@@ -437,7 +419,7 @@ class TestUninstall:
         # Second uninstall should not raise.
         codex_install.uninstall()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         if config_file.is_file():
             config = json.loads(config_file.read_text())
             assert "codex" not in config.get("harnesses", {})
@@ -452,26 +434,26 @@ class TestDryRun:
     """Tests for dry-run mode."""
 
     def test_install_dry_run_writes_nothing(self, fake_home, mock_prompts, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
 
         codex_install.install()
 
         codex_dir = fake_home / ".codex"
         assert not (codex_dir / "config.toml").exists()
-        assert not (codex_dir / "arize-env.sh").exists()
+        assert not (codex_dir / "atatus-env.sh").exists()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert not config_file.exists()
 
     def test_dry_run_uninstall_preserves_files(self, fake_home, mock_prompts, monkeypatch):
         codex_install.install()
 
         toml_path = fake_home / ".codex" / "config.toml"
-        env_path = fake_home / ".codex" / "arize-env.sh"
+        env_path = fake_home / ".codex" / "atatus-env.sh"
         assert toml_path.is_file()
         assert env_path.is_file()
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         codex_install.uninstall()
 
         assert toml_path.is_file()
@@ -487,18 +469,18 @@ class TestEnvFileHeuristic:
     """Tests for _is_our_env_file()."""
 
     def test_recognizes_our_file(self, tmp_path):
-        p = tmp_path / "arize-env.sh"
-        p.write_text("export ARIZE_TRACE_ENABLED=true\nexport ARIZE_CODEX_BUFFER_PORT=4318\n")
+        p = tmp_path / "atatus-env.sh"
+        p.write_text("export ATATUS_TRACE_ENABLED=true\nexport ATATUS_CODEX_BUFFER_PORT=4318\n")
         assert codex_install._is_our_env_file(p) is True
 
     def test_rejects_foreign_file(self, tmp_path):
-        p = tmp_path / "arize-env.sh"
+        p = tmp_path / "atatus-env.sh"
         p.write_text("#!/bin/bash\necho hello\nexport SOMETHING=else\n")
         assert codex_install._is_our_env_file(p) is False
 
     def test_rejects_large_file(self, tmp_path):
-        p = tmp_path / "arize-env.sh"
-        lines = [f"export ARIZE_VAR_{i}=val" for i in range(20)]
+        p = tmp_path / "atatus-env.sh"
+        lines = [f"export ATATUS_VAR_{i}=val" for i in range(20)]
         p.write_text("\n".join(lines) + "\n")
         assert codex_install._is_our_env_file(p) is False
 
@@ -552,16 +534,16 @@ class TestTomlApplyRemove:
         """apply does not touch pre-existing [[hooks.<Event>]] entries."""
         p = tmp_path / "config.toml"
         p.write_text(
-            "[[hooks.PreToolUse]]\n" "hooks = [{ type = 'command', command = '/venv/bin/arize-hook-codex-tool' }]\n"
+            "[[hooks.PreToolUse]]\n" "hooks = [{ type = 'command', command = '/venv/bin/atatus-hook-codex-tool' }]\n"
         )
         self._apply(p)
         data = codex_toml._toml_load(p)
         assert data["notify"] == ["/venv/bin/notify"]
         cmds = _hook_commands(data, "PreToolUse")
-        assert "/venv/bin/arize-hook-codex-tool" in cmds
+        assert "/venv/bin/atatus-hook-codex-tool" in cmds
 
     def test_apply_dry_run_no_write(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         p = tmp_path / "config.toml"
         self._apply(p)
         assert not p.exists()
@@ -578,14 +560,14 @@ class TestTomlApplyRemove:
         assert remaining["notify"] == ["/usr/bin/other"]
 
     def test_remove_strips_legacy_hook_entries(self, tmp_path):
-        """remove strips both our notify entry and any leftover arize-managed hooks."""
+        """remove strips both our notify entry and any leftover atatus-managed hooks."""
         p = tmp_path / "config.toml"
         p.write_text(
             'notify = ["/venv/bin/notify"]\n'
             "[[hooks.PreToolUse]]\n"
-            "hooks = [{ type = 'command', command = '/venv/bin/arize-hook-codex-tool' }]\n"
+            "hooks = [{ type = 'command', command = '/venv/bin/atatus-hook-codex-tool' }]\n"
             "[[hooks.SessionStart]]\n"
-            "hooks = [{ type = 'command', command = '/venv/bin/arize-hook-codex-session' }]\n"
+            "hooks = [{ type = 'command', command = '/venv/bin/atatus-hook-codex-session' }]\n"
         )
         codex_install._codex_toml_remove(p, "/venv/bin/notify")
         remaining = codex_toml._toml_load(p)
@@ -601,7 +583,7 @@ class TestTomlApplyRemove:
         p = tmp_path / "config.toml"
         self._apply(p)
         original = p.read_text()
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         codex_install._codex_toml_remove(p, "/venv/bin/notify")
         assert p.read_text() == original
 
@@ -659,14 +641,14 @@ class TestWriteEnvFile:
         p = tmp_path / "env.sh"
         codex_install._write_env_file(p)
         text = p.read_text()
-        assert "ARIZE_USER_ID" not in text
-        assert "ARIZE_TRACE_ENABLED=true" in text
+        assert "ATATUS_USER_ID" not in text
+        assert "ATATUS_TRACE_ENABLED=true" in text
 
     def test_env_file_with_user_id(self, tmp_path):
         p = tmp_path / "env.sh"
         codex_install._write_env_file(p, user_id="alice")
         text = p.read_text()
-        assert "export ARIZE_USER_ID=alice" in text
+        assert "export ATATUS_USER_ID=alice" in text
 
     def test_env_file_creates_parent_dirs(self, tmp_path):
         p = tmp_path / "subdir" / "env.sh"
@@ -674,7 +656,7 @@ class TestWriteEnvFile:
         assert p.is_file()
 
     def test_env_file_dry_run(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         p = tmp_path / "env.sh"
         codex_install._write_env_file(p)
         assert not p.exists()
@@ -755,7 +737,7 @@ class TestTomlFallbackQuoting:
             "with/slash",
             'with"quote',
             "with\\backslash",
-            "@scope/server",
+            "@scope/server"
         ]
         for s in inputs:
             assert codex_toml._toml_unkey(codex_toml._toml_key(s)) == s, f"roundtrip failed for {s!r}"
@@ -766,7 +748,7 @@ class TestTomlFallbackQuoting:
             ('mcp_servers."@scope/server"', ["mcp_servers", "@scope/server"]),
             ('plugins."browser-use@openai-bundled"', ["plugins", "browser-use@openai-bundled"]),
             ('mcp_servers."a.b.c"', ["mcp_servers", "a.b.c"]),
-            ('  outer . "inner.path"  ', ["outer", "inner.path"]),
+            ('  outer . "inner.path"  ', ["outer", "inner.path"])
         ]
         for path, expected in cases:
             assert codex_toml._toml_split_key_path(path) == expected, f"split failed for {path!r}"
@@ -788,7 +770,7 @@ class TestTomlFallbackQuoting:
             "mcp_servers": {
                 "@scope/server": {
                     "command": "npx",
-                    "args": ["-y", "@scope/server"],
+                    "args": ["-y", "@scope/server"]
                 }
             }
         }
@@ -879,7 +861,7 @@ class TestTomlFallbackQuoting:
         assert data == {
             "servers": {
                 "@org/alpha": {"port": 8080},
-                "@org/beta": {"port": 9090},
+                "@org/beta": {"port": 9090}
             }
         }
 
@@ -903,11 +885,11 @@ class TestTomlFallbackQuoting:
         data = {
             "mcp_servers": {
                 "@anthropic/server": {"command": "run", "args": ["--flag"]},
-                "normal-server": {"command": "exec"},
+                "normal-server": {"command": "exec"}
             },
             "projects": {
-                "/Users/someone/proj": {"enabled": True},
-            },
+                "/Users/someone/proj": {"enabled": True}
+            }
         }
         p = tmp_path / "out.toml"
         codex_toml._toml_write(data, p)

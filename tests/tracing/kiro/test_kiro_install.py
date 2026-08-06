@@ -11,7 +11,7 @@ import pytest
 from tracing.kiro.constants import AGENT_SKELETON, DEFAULT_AGENT_NAME, HOOK_EVENTS
 
 # The hook command string that install.py should write into agent configs.
-FAKE_VENV_BIN = Path("/fake/venv/bin/arize-hook-kiro")
+FAKE_VENV_BIN = Path("/fake/venv/bin/atatus-hook-kiro")
 HOOK_CMD = str(FAKE_VENV_BIN)
 
 # Derive expected keys from the constant so the test stays in sync.
@@ -35,7 +35,7 @@ def _mock_venv_bin(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_dry_run(monkeypatch):
     """Default: dry-run is off."""
-    monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
+    monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
 
 
 @pytest.fixture()
@@ -74,15 +74,15 @@ class TestRegisterKiroHooks:
     def test_creates_new_agent_file(self, agents_dir, mock_subprocess, mock_shutil_which):
         from tracing.kiro.install import _register_kiro_hooks
 
-        agent_path = agents_dir / "arize-traced.json"
-        _register_kiro_hooks(agent_path, "arize-traced")
+        agent_path = agents_dir / "atatus-traced.json"
+        _register_kiro_hooks(agent_path, "atatus-traced")
 
         assert agent_path.exists()
         data = json.loads(agent_path.read_text())
 
         # All 12 skeleton keys present
         assert set(data.keys()) == EXPECTED_SKELETON_KEYS
-        assert data["name"] == "arize-traced"
+        assert data["name"] == "atatus-traced"
         assert data["description"] == AGENT_SKELETON["description"]
 
         # hooks has one key per event
@@ -91,8 +91,8 @@ class TestRegisterKiroHooks:
     def test_each_event_has_hook_entry(self, agents_dir, mock_subprocess, mock_shutil_which):
         from tracing.kiro.install import _register_kiro_hooks
 
-        agent_path = agents_dir / "arize-traced.json"
-        _register_kiro_hooks(agent_path, "arize-traced")
+        agent_path = agents_dir / "atatus-traced.json"
+        _register_kiro_hooks(agent_path, "atatus-traced")
 
         data = json.loads(agent_path.read_text())
         for event in HOOK_EVENTS:
@@ -115,11 +115,11 @@ class TestRegisterKiroHooks:
             "allowedTools": [],
             "resources": [],
             "hooks": {
-                "userPromptSubmit": [{"command": "/usr/bin/other"}],
+                "userPromptSubmit": [{"command": "/usr/bin/other"}]
             },
             "toolsSettings": {},
             "includeMcpJson": True,
-            "model": None,
+            "model": None
         }
         agent_path.write_text(json.dumps(existing))
 
@@ -136,9 +136,9 @@ class TestRegisterKiroHooks:
     def test_idempotent(self, agents_dir, mock_subprocess, mock_shutil_which):
         from tracing.kiro.install import _register_kiro_hooks
 
-        agent_path = agents_dir / "arize-traced.json"
-        _register_kiro_hooks(agent_path, "arize-traced")
-        _register_kiro_hooks(agent_path, "arize-traced")
+        agent_path = agents_dir / "atatus-traced.json"
+        _register_kiro_hooks(agent_path, "atatus-traced")
+        _register_kiro_hooks(agent_path, "atatus-traced")
 
         data = json.loads(agent_path.read_text())
         for event in HOOK_EVENTS:
@@ -148,9 +148,9 @@ class TestRegisterKiroHooks:
     def test_dry_run_no_write(self, agents_dir, monkeypatch, mock_subprocess, mock_shutil_which):
         from tracing.kiro.install import _register_kiro_hooks
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
-        agent_path = agents_dir / "arize-traced.json"
-        _register_kiro_hooks(agent_path, "arize-traced")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
+        agent_path = agents_dir / "atatus-traced.json"
+        _register_kiro_hooks(agent_path, "atatus-traced")
 
         assert not agent_path.exists()
 
@@ -179,10 +179,10 @@ class TestUnregisterAllKiroHooks:
                 "hooks": {
                     "agentSpawn": [
                         {"command": HOOK_CMD},
-                        {"command": "/usr/bin/other-hook"},
+                        {"command": "/usr/bin/other-hook"}
                     ],
-                    "stop": [{"command": HOOK_CMD}],
-                },
+                    "stop": [{"command": HOOK_CMD}]
+                }
             },
         )
 
@@ -205,7 +205,7 @@ class TestUnregisterAllKiroHooks:
             {
                 "name": "ours-only",
                 "description": "custom agent",
-                "hooks": hooks,
+                "hooks": hooks
             },
         )
 
@@ -217,13 +217,13 @@ class TestUnregisterAllKiroHooks:
     def test_deletes_agent_when_we_created_it(self, agents_dir):
         from tracing.kiro.install import _unregister_all_kiro_hooks
 
-        agent_path = agents_dir / "arize-traced.json"
+        agent_path = agents_dir / "atatus-traced.json"
         hooks = {event: [{"command": HOOK_CMD}] for event in HOOK_EVENTS}
         self._write_agent(
             agent_path,
             {
                 **AGENT_SKELETON,
-                "hooks": hooks,
+                "hooks": hooks
             },
         )
 
@@ -241,7 +241,7 @@ class TestUnregisterAllKiroHooks:
             {
                 "name": "my-agent",
                 "description": "my agent",
-                "hooks": hooks,
+                "hooks": hooks
             },
         )
 
@@ -315,11 +315,11 @@ class TestMaybeSetDefault:
         monkeypatch.setattr("builtins.input", lambda _: "y")
         mock_shutil_which.return_value = "/fake/kiro-cli"
 
-        _maybe_set_default("arize-traced")
+        _maybe_set_default("atatus-traced")
 
         mock_subprocess.assert_called_once()
         args = mock_subprocess.call_args[0][0]
-        assert args == ["/fake/kiro-cli", "agent", "set-default", "arize-traced"]
+        assert args == ["/fake/kiro-cli", "agent", "set-default", "atatus-traced"]
         # Hooks must never raise — check=False is critical
         assert mock_subprocess.call_args[1].get("check") is False
 
@@ -328,7 +328,7 @@ class TestMaybeSetDefault:
 
         monkeypatch.setattr("builtins.input", lambda _: "")
 
-        _maybe_set_default("arize-traced")
+        _maybe_set_default("atatus-traced")
 
         mock_subprocess.assert_not_called()
 
@@ -344,7 +344,7 @@ class TestMaybeSetDefault:
         )
 
         with mock.patch("tracing.kiro.install.info") as mock_info:
-            _maybe_set_default("arize-traced")
+            _maybe_set_default("atatus-traced")
 
         mock_subprocess.assert_not_called()
         # Should have printed a hint about running manually
@@ -353,11 +353,11 @@ class TestMaybeSetDefault:
     def test_dry_run_skips_subprocess(self, monkeypatch, mock_subprocess, mock_shutil_which):
         from tracing.kiro.install import _maybe_set_default
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         monkeypatch.setattr("builtins.input", lambda _: "y")
         mock_shutil_which.return_value = "/fake/kiro-cli"
 
-        _maybe_set_default("arize-traced")
+        _maybe_set_default("atatus-traced")
 
         mock_subprocess.assert_not_called()
 

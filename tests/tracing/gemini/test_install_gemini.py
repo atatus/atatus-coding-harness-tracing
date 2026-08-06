@@ -17,10 +17,10 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "test-key", "space_id": "test-space"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
 
 
@@ -37,7 +37,7 @@ def _fake_stdout():
         {
             "isatty": lambda self: False,
             "write": lambda self, s: None,
-            "flush": lambda self: None,
+            "flush": lambda self: None
         },
     )()
 
@@ -45,7 +45,7 @@ def _fake_stdout():
 def _mock_prompts(monkeypatch, backend=None):
     """Patch prompt functions on the install module (where they're bound after import)."""
     if backend is None:
-        backend = PHOENIX_BACKEND
+        backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
         _install,
@@ -70,22 +70,22 @@ def cwd_tmp(tmp_path, monkeypatch):
 
     import core.setup as setup_mod
 
-    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".arize" / "harness" / "venv")
-    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
-    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".arize" / "harness" / "bin")
-    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".arize" / "harness" / "run")
-    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".arize" / "harness" / "logs")
-    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".arize" / "harness" / "state")
+    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".atatus" / "harness" / "venv")
+    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
+    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".atatus" / "harness" / "bin")
+    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".atatus" / "harness" / "run")
+    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".atatus" / "harness" / "logs")
+    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".atatus" / "harness" / "state")
 
     import core.constants as c
 
-    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
+    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
 
     import core.config as config_mod
 
-    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".arize" / "harness" / "config.json"))
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".atatus" / "harness" / "config.json"))
 
     # Redirect gemini settings to temp dir (the fixture does NOT do this automatically)
     gemini_settings_dir = tmp_path / ".gemini"
@@ -112,16 +112,16 @@ class TestInstallFreshWritesFlatHarnessEntry:
     @pytest.mark.parametrize(
         "backend,expected_target",
         [
-            (PHOENIX_BACKEND, "phoenix"),
-            (ARIZE_BACKEND, "arize"),
+            (ATATUS_BACKEND, "atatus"),
+            (ATATUS_BACKEND, "atatus")
         ],
-        ids=["phoenix", "arize"],
+        ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch, backend, expected_target):
         _mock_prompts(monkeypatch, backend=backend)
         install()
 
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert config_path.is_file()
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["gemini"]
@@ -130,8 +130,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
 
-        if expected_target == "arize":
-            assert entry["space_id"] == backend[1]["space_id"]
 
         # No collector for gemini
         assert "collector" not in entry
@@ -186,7 +184,7 @@ class TestInstallFreshWritesFlatHarnessEntry:
         first_event = list(_gc.EVENTS.keys())[0]
         cmd = data["hooks"][first_event][0]["hooks"][0]["command"]
         # Should contain venv path component
-        assert "venv" in cmd or ".arize" in cmd
+        assert "venv" in cmd or ".atatus" in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +197,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
     def test_copy_from_populates_credentials(self, cwd_tmp, monkeypatch):
         """Pre-seed a claude-code entry; gemini install should receive it in prompt_backend."""
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -207,12 +205,11 @@ class TestInstallSecondHarnessOffersCopyFrom:
             "harnesses": {
                 "claude-code": {
                     "project_name": "claude-code",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -220,7 +217,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
         def fake_prompt_backend(existing_harnesses=None):
             captured["existing_harnesses"] = existing_harnesses
-            return ARIZE_BACKEND
+            return ATATUS_BACKEND
 
         monkeypatch.setattr(_install, "prompt_backend", fake_prompt_backend)
         monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
@@ -238,15 +235,14 @@ class TestInstallSecondHarnessOffersCopyFrom:
         # prompt_backend should have received the existing harnesses dict
         assert captured["existing_harnesses"] is not None
         assert "claude-code" in captured["existing_harnesses"]
-        assert captured["existing_harnesses"]["claude-code"]["target"] == "arize"
+        assert captured["existing_harnesses"]["claude-code"]["target"] == "atatus"
 
         # Verify the gemini entry was actually written
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["gemini"]
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == ARIZE_BACKEND[1]["endpoint"]
-        assert entry["api_key"] == ARIZE_BACKEND[1]["api_key"]
-        assert entry["space_id"] == ARIZE_BACKEND[1]["space_id"]
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == ATATUS_BACKEND[1]["endpoint"]
+        assert entry["api_key"] == ATATUS_BACKEND[1]["api_key"]
         assert entry["project_name"] == "gemini"
 
 
@@ -259,7 +255,7 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
     """Re-install with existing gemini config only updates project_name."""
 
     def test_existing_entry_preserves_target(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -267,12 +263,11 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
             "harnesses": {
                 "gemini": {
                     "project_name": "gemini",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -292,10 +287,9 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
         entry = config["harnesses"]["gemini"]
         assert entry["project_name"] == "my-gemini"
         # Other fields preserved
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "ak-existing"
-        assert entry["space_id"] == "space-existing"
 
 
 # ---------------------------------------------------------------------------
@@ -307,12 +301,12 @@ class TestInstallExistingLoggingBlockSkipsPrompt:
     """When config.json already has a logging block, skip the logging prompt."""
 
     def test_existing_logging_not_reprompted(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
         seed_config = {
-            "logging": {"prompts": False, "tool_details": True, "tool_content": False},
+            "logging": {"prompts": False, "tool_details": True, "tool_content": False}
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -387,7 +381,7 @@ class TestInstallPreservesUserSettings:
             "hooks": {
                 "CustomEvent": [
                     {"matcher": "", "hooks": [{"type": "command", "name": "user-hook", "command": "/usr/bin/custom"}]}
-                ],
+                ]
             }
         }
         settings_file.write_text(json.dumps(existing, indent=2) + "\n")
@@ -407,9 +401,9 @@ class TestInstallPreservesUserSettings:
                 "BeforeTool": [
                     {
                         "matcher": "grep",
-                        "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}],
-                    },
-                ],
+                        "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}]
+                    }
+                ]
             }
         }
         settings_file.write_text(json.dumps(existing, indent=2) + "\n")
@@ -464,7 +458,7 @@ class TestUninstallRemovesHarnessEntry:
         _mock_prompts(monkeypatch)
         install()
         uninstall()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text())
             harnesses = config.get("harnesses", {})
@@ -492,7 +486,7 @@ class TestUninstallRemovesHarnessEntry:
         uninstall()
         # Second uninstall should be a no-op, no exception
         uninstall()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text())
             harnesses = config.get("harnesses", {})
@@ -512,7 +506,7 @@ class TestUninstallPreservesUserHooks:
         data["hooks"]["BeforeTool"].append(
             {
                 "matcher": "grep",
-                "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}],
+                "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}]
             }
         )
         settings_file.write_text(json.dumps(data, indent=2) + "\n")
@@ -614,16 +608,16 @@ class TestInstallDryRunWritesNothing:
     """Dry-run mode writes nothing."""
 
     def test_dry_run_no_settings_file(self, settings_file, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
         assert not settings_file.is_file()
 
     def test_dry_run_no_config(self, cwd_tmp, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert not config_path.is_file()
 
     def test_dry_run_does_not_modify_existing_settings(self, settings_file, monkeypatch):
@@ -632,7 +626,7 @@ class TestInstallDryRunWritesNothing:
         original = {"telemetry": {"enabled": True}}
         settings_file.write_text(json.dumps(original, indent=2) + "\n")
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
 
@@ -697,12 +691,12 @@ class TestDedupeByHookName:
                             {
                                 "type": "command",
                                 "name": _gc.HOOK_NAME,
-                                "command": "/old/path/venv/bin/arize-hook-gemini-session-start",
-                                "timeout": _gc.HOOK_TIMEOUT_MS,
+                                "command": "/old/path/venv/bin/atatus-hook-gemini-session-start",
+                                "timeout": _gc.HOOK_TIMEOUT_MS
                             }
-                        ],
+                        ]
                     }
-                ],
+                ]
             }
         }
         settings_file.write_text(json.dumps(old_data, indent=2) + "\n")
@@ -754,7 +748,7 @@ class TestUninstallDryRunWritesNothing:
 
         original = settings_file.read_text()
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         uninstall()
 
         assert settings_file.is_file()
@@ -762,7 +756,7 @@ class TestUninstallDryRunWritesNothing:
 
     def test_dry_run_uninstall_no_settings_no_error(self, cwd_tmp, monkeypatch):
         """Dry-run uninstall with no settings.json should not error."""
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         monkeypatch.setattr("sys.stdout", _fake_stdout())
         # Should not raise
         uninstall()
@@ -808,8 +802,8 @@ class TestConstants:
     def test_harness_name_is_gemini(self):
         assert _gc.HARNESS_NAME == "gemini"
 
-    def test_hook_name_is_arize_tracing(self):
-        assert _gc.HOOK_NAME == "arize-tracing"
+    def test_hook_name_is_atatus_tracing(self):
+        assert _gc.HOOK_NAME == "atatus-tracing"
 
     def test_settings_file_is_under_settings_dir(self):
         assert _gc.SETTINGS_FILE.parent == _gc.SETTINGS_DIR
@@ -822,9 +816,9 @@ class TestConstants:
         assert _gc.HOOK_TIMEOUT_MS > 0
 
     def test_all_entry_points_have_gemini_prefix(self):
-        """All entry point names should start with arize-hook-gemini-."""
+        """All entry point names should start with atatus-hook-gemini-."""
         for ep in _gc.EVENTS.values():
-            assert ep.startswith("arize-hook-gemini-"), f"Unexpected entry point: {ep}"
+            assert ep.startswith("atatus-hook-gemini-"), f"Unexpected entry point: {ep}"
 
     def test_events_keys_are_camelcase(self):
         """Event names should be CamelCase as per Gemini spec."""
@@ -860,7 +854,7 @@ class TestHandlersImportable:
             before_model,
             after_model,
             before_tool,
-            after_tool,
+            after_tool
         ]:
             assert callable(fn)
 
@@ -956,7 +950,7 @@ class TestInstallPromptsForLogging:
         monkeypatch.setattr(
             _install,
             "prompt_backend",
-            lambda existing_harnesses=None: PHOENIX_BACKEND,
+            lambda existing_harnesses=None: ATATUS_BACKEND,
         )
         monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
         monkeypatch.setattr(_install, "prompt_user_id", lambda: "")

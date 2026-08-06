@@ -18,11 +18,11 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["gemini"]
 SERVICE_NAME = _HARNESS["service_name"]  # "gemini"
-SCOPE_NAME = _HARNESS["scope_name"]  # "arize-gemini-plugin"
-STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.arize/harness/state/gemini
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-gemini-plugin"
+STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/gemini
 
 # Route hook stderr to a per-harness log file unless the user already set one.
-os.environ.setdefault("ARIZE_LOG_FILE", str(_HARNESS["default_log_file"]))
+os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 
@@ -132,7 +132,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     if existing is not None:
         return
 
-    # Prefer the Gemini-provided session identifier so Arize spans correlate
+    # Prefer the Gemini-provided session identifier so Atatus spans correlate
     # back to the same session in Gemini. Fall back to a generated trace ID
     # (never the PID, which can collide across runs).
     session_id = (

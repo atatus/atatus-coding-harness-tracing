@@ -48,10 +48,10 @@ def kiro_state_dir(tmp_harness_dir, monkeypatch):
 @pytest.fixture
 def disable_env_vars(monkeypatch):
     """Clear env vars that could influence session resolution."""
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
     monkeypatch.delenv("KIRO_SESSION_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def sidecar_dir(tmp_path, monkeypatch):
 class TestCheckRequirements:
     def test_disabled_returns_false_no_dir(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=False -> returns False and STATE_DIR not created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         state_dir = tmp_harness_dir / "state" / "kiro-nope"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is False
@@ -93,7 +93,7 @@ class TestCheckRequirements:
 
     def test_enabled_creates_dir(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=True -> returns True and STATE_DIR exists."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         state_dir = tmp_harness_dir / "state" / "kiro-check"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is True
@@ -157,7 +157,7 @@ class TestEnsureSessionInitialized:
         """session_id in state preserves the Kiro UUID, not a generated trace ID.
 
         This is the comment-4 pattern from PR #28: the Kiro UUID is the
-        correlation ID that lets users find a Kiro session in Arize.
+        correlation ID that lets users find a Kiro session in Atatus.
         """
         sm = self._make_state(kiro_state_dir, "uuid-preserve")
         kiro_uuid = "00000000-0000-0000-0000-000000000001"
@@ -180,10 +180,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("session_start_time") == original_start
 
     def test_project_name_from_env(self, kiro_state_dir, monkeypatch):
-        """ARIZE_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "my-proj")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-proj")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         monkeypatch.delenv("KIRO_SESSION_ID", raising=False)
         sm = self._make_state(kiro_state_dir, "proj-env")
         adapter.ensure_session_initialized(sm, {"session_id": "s1", "cwd": "/foo/bar/other"})
@@ -292,7 +292,7 @@ class TestExtractSidecarAttrs:
         attrs = adapter.extract_sidecar_attrs(sidecar_complete)
 
         assert attrs["llm.model_name"] == "claude-sonnet-4"
-        assert attrs["kiro.agent_name"] == "arize-traced"
+        assert attrs["kiro.agent_name"] == "atatus-traced"
         assert attrs["llm.token_count.prompt"] == 1234
         assert attrs["llm.token_count.completion"] == 567
         assert attrs["llm.token_count.total"] == 1801
@@ -325,7 +325,7 @@ class TestExtractSidecarAttrs:
         attrs = adapter.extract_sidecar_attrs(sidecar_no_turns)
 
         assert attrs["llm.model_name"] == "auto"
-        assert attrs["kiro.agent_name"] == "arize-traced"
+        assert attrs["kiro.agent_name"] == "atatus-traced"
 
         # No turn-level attributes
         assert "llm.token_count.prompt" not in attrs

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-session-start"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-session-start"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-user-prompt-submit"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-user-prompt-submit"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-pre-tool-use"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-pre-tool-use"
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-post-tool-use"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-post-tool-use"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-stop"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-stop"
           }
         ]
       }
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-subagent-stop"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-subagent-stop"
           }
         ]
       }
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-stop-failure"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-stop-failure"
           }
         ]
       }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-notification"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-notification"
           }
         ]
       }
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-permission-request"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-permission-request"
           }
         ]
       }
@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" arize-hook-session-end"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-session-end"
           }
         ]
       }

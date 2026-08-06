@@ -21,12 +21,12 @@ PROBE_FILES = [
     "user_prompt_submit.json",
     "pre_tool_use.json",
     "post_tool_use.json",
-    "stop.json",
+    "stop.json"
 ]
 
 SIDECAR_FILES = [
     "session_complete.json",
-    "session_no_turns.json",
+    "session_no_turns.json"
 ]
 
 # Expected per-event extra keys beyond the common {hook_event_name, cwd, session_id}.
@@ -35,7 +35,7 @@ EVENT_EXTRA_KEYS: dict[str, set[str]] = {
     "userPromptSubmit": {"prompt"},
     "preToolUse": {"tool_name", "tool_input"},
     "postToolUse": {"tool_name", "tool_input", "tool_response"},
-    "stop": {"assistant_response"},
+    "stop": {"assistant_response"}
 }
 
 
@@ -81,12 +81,12 @@ class TestHookEventsMatchKiroSchema:
     def test_hook_bin_name(self):
         from tracing.kiro.constants import HOOK_BIN_NAME
 
-        assert HOOK_BIN_NAME == "arize-hook-kiro"
+        assert HOOK_BIN_NAME == "atatus-hook-kiro"
 
     def test_default_agent_name(self):
         from tracing.kiro.constants import DEFAULT_AGENT_NAME
 
-        assert DEFAULT_AGENT_NAME == "arize-traced"
+        assert DEFAULT_AGENT_NAME == "atatus-traced"
 
     def test_harness_home(self):
         from tracing.kiro.constants import HARNESS_HOME
@@ -128,7 +128,7 @@ EXPECTED_SKELETON_KEYS = {
     "hooks",
     "toolsSettings",
     "includeMcpJson",
-    "model",
+    "model"
 }
 
 
@@ -319,7 +319,7 @@ class TestSidecarFixturesLoad:
 
     def test_complete_sidecar_agent_name(self):
         data = json.loads((SIDECAR_DIR / "session_complete.json").read_text())
-        assert data["session_state"]["agent_name"] == "arize-traced"
+        assert data["session_state"]["agent_name"] == "atatus-traced"
 
     def test_complete_sidecar_context_usage(self):
         data = json.loads((SIDECAR_DIR / "session_complete.json").read_text())

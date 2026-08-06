@@ -2,7 +2,7 @@
 """Codex harness install / uninstall module.
 
 Self-contained module that handles:
-- Writing ~/.codex/arize-env.sh (env file)
+- Writing ~/.codex/atatus-env.sh (env file)
 - Updating ~/.codex/config.toml (notify + five hook entry points)
 - Managing the shared config.json harness entry
 - Symlinking skills
@@ -64,9 +64,9 @@ _HOOK_EVENTS = (
 # ---------------------------------------------------------------------------
 
 
-def _entry_is_arize_managed(entry: object) -> bool:
+def _entry_is_atatus_managed(entry: object) -> bool:
     """Return True if *entry* is a hook-array element whose ``command`` path
-    looks like one of our managed entry points (``arize-hook-codex-*``)."""
+    looks like one of our managed entry points (``atatus-hook-codex-*``)."""
     if not isinstance(entry, dict):
         return False
     inner = entry.get("hooks")
@@ -76,16 +76,16 @@ def _entry_is_arize_managed(entry: object) -> bool:
         if not isinstance(h, dict):
             continue
         cmd = h.get("command") or ""
-        if isinstance(cmd, str) and "arize-hook-codex-" in cmd:
+        if isinstance(cmd, str) and "atatus-hook-codex-" in cmd:
             return True
     return False
 
 
-def _strip_arize_hooks(data: dict) -> bool:
+def _strip_atatus_hooks(data: dict) -> bool:
     """Remove any ``[[hooks.<Event>]]`` entries we previously wrote.
 
     Walks every known event and drops entries whose command path matches an
-    ``arize-hook-codex-*`` pattern (covers session/tool/stop from older
+    ``atatus-hook-codex-*`` pattern (covers session/tool/stop from older
     installer versions). Returns True if anything was removed.
     """
     hooks = data.get("hooks")
@@ -96,7 +96,7 @@ def _strip_arize_hooks(data: dict) -> bool:
         existing = hooks.get(event)
         if not isinstance(existing, list):
             continue
-        kept = [e for e in existing if not _entry_is_arize_managed(e)]
+        kept = [e for e in existing if not _entry_is_atatus_managed(e)]
         if len(kept) != len(existing):
             changed = True
             if kept:
@@ -157,7 +157,7 @@ def _codex_toml_remove(path: Path, notify_cmd: str) -> None:
         del data["notify"]
         changed = True
 
-    if _strip_arize_hooks(data):
+    if _strip_atatus_hooks(data):
         changed = True
 
     if changed:
@@ -170,14 +170,14 @@ def _codex_toml_remove(path: Path, notify_cmd: str) -> None:
 
 
 def _write_env_file(path: Path, user_id: str = "") -> None:
-    """Write the codex env file with ARIZE env exports."""
+    """Write the codex env file with ATATUS env exports."""
     if dry_run():
         info(f"would write env file {path}")
         return
 
-    lines = ["export ARIZE_TRACE_ENABLED=true"]
+    lines = ["export ATATUS_TRACE_ENABLED=true"]
     if user_id:
-        lines.append(f"export ARIZE_USER_ID={user_id}")
+        lines.append(f"export ATATUS_USER_ID={user_id}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
@@ -196,7 +196,7 @@ def _is_our_env_file(path: Path) -> bool:
         lines = [ln for ln in text.strip().splitlines() if ln.strip()]
         if len(lines) > 10:
             return False
-        return all(re.match(r"^export ARIZE_", line) for line in lines)
+        return all(re.match(r"^export ATATUS_", line) for line in lines)
     except OSError:
         return False
 

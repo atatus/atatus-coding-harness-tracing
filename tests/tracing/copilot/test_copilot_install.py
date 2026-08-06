@@ -30,29 +30,29 @@ class TestCopilotEntryPoints:
         self.text = PYPROJECT.read_text()
 
     def test_session_start_entry_point(self):
-        assert 'arize-hook-copilot-session-start = "tracing.copilot.hooks.handlers:session_start"' in self.text
+        assert 'atatus-hook-copilot-session-start = "tracing.copilot.hooks.handlers:session_start"' in self.text
 
     def test_user_prompt_entry_point(self):
-        assert 'arize-hook-copilot-user-prompt = "tracing.copilot.hooks.handlers:user_prompt_submitted"' in self.text
+        assert 'atatus-hook-copilot-user-prompt = "tracing.copilot.hooks.handlers:user_prompt_submitted"' in self.text
 
     def test_pre_tool_entry_point(self):
-        assert 'arize-hook-copilot-pre-tool = "tracing.copilot.hooks.handlers:pre_tool_use"' in self.text
+        assert 'atatus-hook-copilot-pre-tool = "tracing.copilot.hooks.handlers:pre_tool_use"' in self.text
 
     def test_post_tool_entry_point(self):
-        assert 'arize-hook-copilot-post-tool = "tracing.copilot.hooks.handlers:post_tool_use"' in self.text
+        assert 'atatus-hook-copilot-post-tool = "tracing.copilot.hooks.handlers:post_tool_use"' in self.text
 
     def test_stop_entry_point(self):
-        assert 'arize-hook-copilot-stop = "tracing.copilot.hooks.handlers:stop"' in self.text
+        assert 'atatus-hook-copilot-stop = "tracing.copilot.hooks.handlers:stop"' in self.text
 
     def test_subagent_stop_entry_point(self):
-        assert 'arize-hook-copilot-subagent-stop = "tracing.copilot.hooks.handlers:subagent_stop"' in self.text
+        assert 'atatus-hook-copilot-subagent-stop = "tracing.copilot.hooks.handlers:subagent_stop"' in self.text
 
     def test_setup_entry_point(self):
-        assert 'arize-setup-copilot = "core.setup.copilot:main"' in self.text
+        assert 'atatus-setup-copilot = "core.setup.copilot:main"' in self.text
 
     def test_exactly_6_hook_entry_points(self):
         """There should be exactly 6 copilot hook entry points."""
-        count = self.text.count("arize-hook-copilot-")
+        count = self.text.count("atatus-hook-copilot-")
         assert count == 6, f"Expected 6 copilot hook entries, got {count}"
 
     def test_entry_points_importable(self):
@@ -72,6 +72,6 @@ class TestCopilotEntryPoints:
             pre_tool_use,
             post_tool_use,
             stop,
-            subagent_stop,
+            subagent_stop
         ]:
             assert callable(fn)

@@ -24,13 +24,13 @@ from core.constants import STATE_BASE_DIR
 from tracing.kiro.constants import HARNESS_NAME, KIRO_SESSIONS_DIR
 
 STATE_DIR: Path = STATE_BASE_DIR / HARNESS_NAME
-SCOPE_NAME = "arize-kiro-plugin"
+SCOPE_NAME = "atatus-kiro-plugin"
 SERVICE_NAME = HARNESS_NAME
 
-# Route hook stderr to a per-harness log file unless ARIZE_LOG_FILE is set.
+# Route hook stderr to a per-harness log file unless ATATUS_LOG_FILE is set.
 os.environ.setdefault(
-    "ARIZE_LOG_FILE",
-    str(Path.home() / ".arize" / "harness" / "logs" / "kiro.log"),
+    "ATATUS_LOG_FILE",
+    str(Path.home() / ".atatus" / "harness" / "logs" / "kiro.log"),
 )
 redirect_stderr_to_log_file()
 
@@ -72,8 +72,8 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     if state.get("session_id") is not None:
         return
 
-    # Preserve Kiro's payload UUID as the Arize session.id. This is what lets
-    # users find a Kiro session in Arize. NEVER substitute a fresh trace ID.
+    # Preserve Kiro's payload UUID as the Atatus session.id. This is what lets
+    # users find a Kiro session in Atatus. NEVER substitute a fresh trace ID.
     session_id = input_json.get("session_id") or os.environ.get("KIRO_SESSION_ID") or ""
 
     project_name = env.project_name

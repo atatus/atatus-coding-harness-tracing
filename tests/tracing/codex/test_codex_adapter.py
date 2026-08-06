@@ -72,9 +72,9 @@ class TestLoadEnvFile:
 class TestCheckRequirements:
 
     def test_enabled_returns_true(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         assert adapter.check_requirements() is True
 
     def test_disabled_returns_false(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         assert adapter.check_requirements() is False

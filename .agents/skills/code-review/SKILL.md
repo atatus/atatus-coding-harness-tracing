@@ -44,7 +44,7 @@ Be specific. Cite the file and line numbers; quote the offending lines when usef
 
 ## Check Repo Conventions
 
-This repo emits OpenTelemetry / OpenInference spans from AI coding-assistant harnesses to Arize AX or Phoenix. Shared logic lives in `core/`; each harness lives under `tracing/<harness>/`.
+This repo emits OpenTelemetry / OpenInference spans from AI coding-assistant harnesses to Atatus. Shared logic lives in `core/`; each harness lives under `tracing/<harness>/`.
 
 ### New harness integrations
 
@@ -52,7 +52,7 @@ A new harness must mirror the existing layout used by `claude_code`, `codex`, `c
 
 - A `tracing/<harness>/` package (with hooks, span builders, and any harness-specific helpers).
 - A `core/setup/<harness>.py` setup wizard.
-- Console-script entry points registered in `pyproject.toml` under `[project.scripts]` (hooks and a `arize-setup-<harness>` wizard).
+- Console-script entry points registered in `pyproject.toml` under `[project.scripts]` (hooks and a `atatus-setup-<harness>` wizard).
 
 Flag any new harness that skips one of these.
 

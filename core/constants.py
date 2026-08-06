@@ -17,7 +17,7 @@ class HarnessMetadata(TypedDict):
 
 
 # --- Base layout ---
-BASE_DIR = Path.home() / ".arize" / "harness"
+BASE_DIR = Path.home() / ".atatus" / "harness"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 # --- Runtime directories ---
@@ -35,49 +35,49 @@ STATE_BASE_DIR = BASE_DIR / "state"
 HARNESSES: dict[str, HarnessMetadata] = {
     "claude-code": {
         "service_name": "claude-code",
-        "scope_name": "arize-claude-plugin",
+        "scope_name": "atatus-claude-plugin",
         "default_project_name": "claude-code",
         "state_subdir": "claude-code",
         "default_log_file": LOG_DIR / "claude-code.log",
     },
     "codex": {
         "service_name": "codex",
-        "scope_name": "arize-codex-plugin",
+        "scope_name": "atatus-codex-plugin",
         "default_project_name": "codex",
         "state_subdir": "codex",
         "default_log_file": LOG_DIR / "codex.log",
     },
     "cursor": {
         "service_name": "cursor",
-        "scope_name": "arize-cursor-plugin",
+        "scope_name": "atatus-cursor-plugin",
         "default_project_name": "cursor",
         "state_subdir": "cursor",
         "default_log_file": LOG_DIR / "cursor.log",
     },
     "copilot": {
         "service_name": "copilot",
-        "scope_name": "arize-copilot-plugin",
+        "scope_name": "atatus-copilot-plugin",
         "default_project_name": "copilot",
         "state_subdir": "copilot",
         "default_log_file": LOG_DIR / "copilot.log",
     },
     "gemini": {
         "service_name": "gemini",
-        "scope_name": "arize-gemini-plugin",
+        "scope_name": "atatus-gemini-plugin",
         "default_project_name": "gemini",
         "state_subdir": "gemini",
         "default_log_file": LOG_DIR / "gemini.log",
     },
     "opencode": {
         "service_name": "opencode",
-        "scope_name": "arize-opencode-plugin",
+        "scope_name": "atatus-opencode-plugin",
         "default_project_name": "opencode",
         "state_subdir": "opencode",
         "default_log_file": LOG_DIR / "opencode.log",
     },
     "omp": {
         "service_name": "omp",
-        "scope_name": "arize-omp-plugin",
+        "scope_name": "atatus-omp-plugin",
         "default_project_name": "omp",
         "state_subdir": "omp",
         "default_log_file": LOG_DIR / "omp.log",

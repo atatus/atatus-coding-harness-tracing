@@ -37,8 +37,8 @@ from tracing.copilot.hooks.transcript import parse_transcript
 def _read_stdin(event: str) -> dict:
     """Read JSON from stdin. Returns {} on empty/invalid input.
 
-    When ARIZE_TRACE_DEBUG=true, the parsed payload is written to
-    ~/.arize/harness/state/debug/copilot_<event>_<ts>.json so we can
+    When ATATUS_TRACE_DEBUG=true, the parsed payload is written to
+    ~/.atatus/harness/state/debug/copilot_<event>_<ts>.json so we can
     inspect the actual field schema Copilot is sending.
     """
     try:
@@ -346,7 +346,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
 
 
 def session_start():
-    """Entry point for arize-hook-copilot-session-start."""
+    """Entry point for atatus-hook-copilot-session-start."""
     try:
         input_json = _read_stdin("session_start")
         if check_requirements():
@@ -358,7 +358,7 @@ def session_start():
 
 
 def user_prompt_submitted():
-    """Entry point for arize-hook-copilot-user-prompt."""
+    """Entry point for atatus-hook-copilot-user-prompt."""
     try:
         input_json = _read_stdin("user_prompt_submitted")
         if check_requirements():
@@ -370,7 +370,7 @@ def user_prompt_submitted():
 
 
 def pre_tool_use():
-    """Entry point for arize-hook-copilot-pre-tool."""
+    """Entry point for atatus-hook-copilot-pre-tool."""
     try:
         input_json = _read_stdin("pre_tool_use")
         if check_requirements():
@@ -382,7 +382,7 @@ def pre_tool_use():
 
 
 def post_tool_use():
-    """Entry point for arize-hook-copilot-post-tool."""
+    """Entry point for atatus-hook-copilot-post-tool."""
     try:
         input_json = _read_stdin("post_tool_use")
         if check_requirements():
@@ -394,7 +394,7 @@ def post_tool_use():
 
 
 def stop():
-    """Entry point for arize-hook-copilot-stop."""
+    """Entry point for atatus-hook-copilot-stop."""
     try:
         input_json = _read_stdin("stop")
         if check_requirements():
@@ -406,7 +406,7 @@ def stop():
 
 
 def subagent_stop():
-    """Entry point for arize-hook-copilot-subagent-stop."""
+    """Entry point for atatus-hook-copilot-subagent-stop."""
     try:
         input_json = _read_stdin("subagent_stop")
         if check_requirements():

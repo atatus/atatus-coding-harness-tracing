@@ -15,11 +15,11 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["copilot"]
 SERVICE_NAME = _HARNESS["service_name"]  # "copilot"
-SCOPE_NAME = _HARNESS["scope_name"]  # "arize-copilot-plugin"
-STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.arize/harness/state/copilot
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-copilot-plugin"
+STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/copilot
 
 # Route hook stderr to a per-harness log file unless the user already set one.
-os.environ.setdefault("ARIZE_LOG_FILE", str(_HARNESS["default_log_file"]))
+os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 

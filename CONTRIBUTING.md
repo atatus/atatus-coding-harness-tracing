@@ -1,6 +1,6 @@
 # Contributing to Coding Harness Tracing
 
-Thanks for your interest in contributing! This repo emits OpenTelemetry / OpenInference spans from AI coding-assistant harnesses (Claude Code, Codex, Copilot, Cursor, Gemini, Kiro) to [Arize AX](https://arize.com) or [Phoenix](https://github.com/Arize-ai/phoenix).
+Thanks for your interest in contributing! This repo emits OpenTelemetry / OpenInference spans from AI coding-assistant harnesses (Claude Code, Codex, Copilot, Cursor, Gemini, Kiro) to [Atatus](https://atatus.com).
 
 ## What we welcome
 
@@ -17,7 +17,7 @@ For larger features or behavior changes, please **open an issue first** so we ca
 
 Before starting non-trivial work:
 
-1. Search [existing issues](https://github.com/Arize-ai/coding-harness-tracing/issues) to see if it's already being tracked.
+1. Search [existing issues](https://github.com/atatus/coding-harness-tracing/issues) to see if it's already being tracked.
 2. If not, open one using the issue templates (bug report, feature request, or new harness integration).
 3. Wait for a quick maintainer ack on the approach for anything beyond a small fix.
 
@@ -94,7 +94,7 @@ First-time contributors need to sign our CLA. After you open your first PR, the 
 I have read the CLA Document and I hereby sign the CLA.
 ```
 
-A bot tracks signatures, so you only need to do this once across all Arize repos. See [`CLA.md`](CLA.md) for the full text.
+A bot tracks signatures, so you only need to do this once across all Atatus repos. See [`CLA.md`](CLA.md) for the full text.
 
 ## Code of Conduct
 

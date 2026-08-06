@@ -48,9 +48,9 @@ def disable_env_vars(monkeypatch):
     fixture combined with ``tmp_harness_dir``'s ``CONFIG_FILE`` redirect, so this
     only needs to clear the env-var inputs.
     """
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
 
 
 # ── Module-level constants tests ──────────────────────────────────────────────
@@ -63,7 +63,7 @@ class TestModuleConstants:
 
     def test_scope_name(self):
         """SCOPE_NAME matches the omp harness metadata."""
-        assert adapter.SCOPE_NAME == "arize-omp-plugin"
+        assert adapter.SCOPE_NAME == "atatus-omp-plugin"
 
     def test_state_dir_matches_harness_subdir(self):
         """STATE_DIR derives from HARNESSES['omp']['state_subdir']."""
@@ -77,7 +77,7 @@ class TestModuleConstants:
 class TestCheckRequirements:
     def test_enabled_returns_true(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=True -> returns True and STATE_DIR exists."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         state_dir = tmp_harness_dir / "state" / "omp-check"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is True
@@ -85,7 +85,7 @@ class TestCheckRequirements:
 
     def test_disabled_returns_false(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=False -> returns False, STATE_DIR not created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         state_dir = tmp_harness_dir / "state" / "omp-nope"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is False
@@ -187,7 +187,7 @@ class TestEnsureSessionInitialized:
         """First call sets all expected keys."""
         # Source user_id from env so the assertion is hermetic, not leaked from
         # the developer's on-disk config.json.
-        monkeypatch.setenv("ARIZE_USER_ID", "test-user-all-keys")
+        monkeypatch.setenv("ATATUS_USER_ID", "test-user-all-keys")
         sm = self._make_state(omp_state_dir, "all-keys")
         adapter.ensure_session_initialized(sm, {"sessionId": "ses_all"})
         assert sm.get("session_id") is not None
@@ -221,10 +221,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("session_start_time") == start_time
 
     def test_project_name_from_env(self, omp_state_dir, monkeypatch):
-        """ARIZE_PROJECT_NAME env var takes priority."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        """ATATUS_PROJECT_NAME env var takes priority."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         sm = self._make_state(omp_state_dir, "proj-env")
         adapter.ensure_session_initialized(sm, {"sessionId": "ses_e"})
         assert sm.get("project_name") == "my-env-project"
@@ -255,10 +255,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("tool_count") == "0"
 
     def test_user_id_from_env(self, omp_state_dir, monkeypatch):
-        """user_id is resolved via env (ARIZE_USER_ID)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_USER_ID", "test-user-456")
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
+        """user_id is resolved via env (ATATUS_USER_ID)."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_USER_ID", "test-user-456")
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
         sm = self._make_state(omp_state_dir, "user-env")
         adapter.ensure_session_initialized(sm, {"sessionId": "ses_u"})
         assert sm.get("user_id") == "test-user-456"
@@ -386,12 +386,12 @@ class TestGcStaleStateFiles:
 
 class TestLogFileEnv:
     def test_log_file_default_points_to_omp_log(self):
-        """The adapter sets ARIZE_LOG_FILE on import unless already set.
+        """The adapter sets ATATUS_LOG_FILE on import unless already set.
 
         Either it ends with ``omp.log`` (default from this adapter) or it
         was overridden by the user before import (also acceptable).
         """
-        val = os.environ.get("ARIZE_LOG_FILE", "")
+        val = os.environ.get("ATATUS_LOG_FILE", "")
         assert val  # set on import either way
         # Default-case: ends with omp.log
         # User-override case: simply non-empty.

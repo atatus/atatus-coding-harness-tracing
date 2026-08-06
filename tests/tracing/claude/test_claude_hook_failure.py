@@ -16,9 +16,9 @@ from tracing.claude_code.hooks.handlers import _handle_post_tool_use_failure
 @pytest.fixture(autouse=True)
 def _enable_logging(monkeypatch):
     """Existing assertions expect raw content in spans; opt in to all logging."""
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def test_emits_tool_span_with_error_attrs(mock_resolve, captured_spans):
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
         "tool_response": "",
-        "error": "exit code 1",
+        "error": "exit code 1"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -82,7 +82,7 @@ def test_falls_back_to_error_when_response_empty(mock_resolve, captured_spans):
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
         "tool_response": "",
-        "error": "boom",
+        "error": "boom"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -97,7 +97,7 @@ def test_uses_response_when_present(mock_resolve, captured_spans):
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
         "tool_response": "partial output",
-        "error": "boom",
+        "error": "boom"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -112,7 +112,7 @@ def test_span_name_marked_failed(mock_resolve, captured_spans):
         "session_id": "test-session-123",
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
-        "error": "fail",
+        "error": "fail"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -125,7 +125,7 @@ def test_increments_tool_count(mock_resolve, captured_spans, state):
         "session_id": "test-session-123",
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
-        "error": "fail",
+        "error": "fail"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -138,7 +138,7 @@ def test_no_session_id_returns_early(mock_resolve, captured_spans, state):
         "session_id": "test-session-123",
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
-        "error": "fail",
+        "error": "fail"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -152,7 +152,7 @@ def test_uses_pre_tool_start_time_when_present(mock_resolve, captured_spans, sta
         "tool_use_id": "xxx",
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
-        "error": "fail",
+        "error": "fail"
     }
     _handle_post_tool_use_failure(payload)
 
@@ -161,13 +161,13 @@ def test_uses_pre_tool_start_time_when_present(mock_resolve, captured_spans, sta
 
 
 def test_redacts_when_logging_disabled(mock_resolve, captured_spans, monkeypatch):
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
     payload = {
         "session_id": "test-session-123",
         "tool_name": "Bash",
         "tool_input": {"command": "false"},
         "tool_response": "",
-        "error": "secret error details",
+        "error": "secret error details"
     }
     _handle_post_tool_use_failure(payload)
 

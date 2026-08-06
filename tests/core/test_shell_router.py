@@ -84,7 +84,7 @@ class TestFunctionsDefined:
             "setup_venv",
             "harness_dir",
             "usage",
-            "main",
+            "main"
         ],
     )
     def test_function_defined(self, func):
@@ -104,7 +104,7 @@ class TestFunctionsDefined:
             "update_install",
             "write_config",
             "collect_backend_credentials",
-            "install_skills",
+            "install_skills"
         ]:
             pattern = rf"^{old_func}\s*\(\)"
             assert not re.search(
@@ -156,7 +156,7 @@ class TestUsageOutput:
         self.text = _read_install_sh()
 
     def test_title(self):
-        assert "Arize Coding Harness Tracing Installer" in self.text
+        assert "Atatus Coding Harness Tracing Installer" in self.text
 
     @pytest.mark.parametrize(
         "cmd",
@@ -195,7 +195,7 @@ class TestSmokeTests:
     def test_help_exits_zero(self):
         result = self._run("--help")
         assert result.returncode == 0
-        assert "Arize Coding Harness Tracing Installer" in result.stdout
+        assert "Atatus Coding Harness Tracing Installer" in result.stdout
 
     def test_help_flag_h(self):
         result = self._run("-h")
@@ -222,9 +222,9 @@ class TestSmokeTests:
         assert result.returncode != 0
 
     def test_update_without_install_fails(self):
-        """update should fail if no venv exists at ~/.arize/harness/venv."""
+        """update should fail if no venv exists at ~/.atatus/harness/venv."""
         # Use a fake HOME so we don't touch real install
-        result = self._run("update", env_extra={"HOME": "/tmp/arize-test-nonexistent"})
+        result = self._run("update", env_extra={"HOME": "/tmp/atatus-test-nonexistent"})
         assert result.returncode != 0
 
 
@@ -323,7 +323,7 @@ class TestFlagParsing:
         assert "INSTALL_BRANCH=" in self.text
 
     def test_env_var_default_branch(self):
-        assert "ARIZE_INSTALL_BRANCH" in self.text
+        assert "ATATUS_INSTALL_BRANCH" in self.text
 
 
 # ---------------------------------------------------------------------------
@@ -339,10 +339,10 @@ class TestConstants:
         self.text = _read_install_sh()
 
     def test_repo_url(self):
-        assert "https://github.com/Arize-ai/coding-harness-tracing.git" in self.text
+        assert "https://github.com/atatus/coding-harness-tracing.git" in self.text
 
     def test_install_dir(self):
-        assert "${HOME}/.arize/harness" in self.text
+        assert "${HOME}/.atatus/harness" in self.text
 
     def test_venv_dir(self):
         assert "${INSTALL_DIR}/venv" in self.text

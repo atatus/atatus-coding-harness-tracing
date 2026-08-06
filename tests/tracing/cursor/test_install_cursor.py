@@ -32,7 +32,7 @@ def fake_home(tmp_path, monkeypatch):
     # Patch INSTALL_DIR / VENV_DIR / CONFIG_FILE in core.setup
     import core.setup as setup_mod
 
-    install_dir = tmp_path / ".arize" / "harness"
+    install_dir = tmp_path / ".atatus" / "harness"
     venv_dir = install_dir / "venv"
     config_file = install_dir / "config.json"
 
@@ -74,15 +74,15 @@ def _fake_stdout():
         {
             "isatty": lambda self: False,
             "write": lambda self, s: None,
-            "flush": lambda self: None,
+            "flush": lambda self: None
         },
     )()
 
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "test-key", "space_id": "test-space"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
 
 
@@ -91,7 +91,7 @@ def _mock_prompts(monkeypatch, backend=None):
     cursor_install = _load_cursor_module("install")
 
     if backend is None:
-        backend = PHOENIX_BACKEND
+        backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
         cursor_install,
@@ -115,10 +115,10 @@ class TestFreshInstall:
     @pytest.mark.parametrize(
         "backend,expected_target",
         [
-            (PHOENIX_BACKEND, "phoenix"),
-            (ARIZE_BACKEND, "arize"),
+            (ATATUS_BACKEND, "atatus"),
+            (ATATUS_BACKEND, "atatus")
         ],
-        ids=["phoenix", "arize"],
+        ids=["atatus", "atatus"],
     )
     def test_install_fresh_writes_flat_harness_entry(self, fake_home, monkeypatch, backend, expected_target):
         """With no existing config, install() prompts and writes a flat harness entry."""
@@ -129,7 +129,7 @@ class TestFreshInstall:
         cursor_install.install(with_skills=False)
 
         # Check config.json was written with flat schema
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert config_file.exists()
         config = json.loads(config_file.read_text())
 
@@ -139,8 +139,6 @@ class TestFreshInstall:
         assert entry["project_name"] == "cursor"
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
-        if expected_target == "arize":
-            assert entry["space_id"] == backend[1]["space_id"]
 
         # No top-level backend or collector blocks
         assert "backend" not in config
@@ -177,7 +175,7 @@ class TestFreshInstall:
         _mock_prompts(monkeypatch)
         cursor_install.install(with_skills=False)
 
-        state_dir = fake_home / ".arize" / "harness" / "state" / "cursor"
+        state_dir = fake_home / ".atatus" / "harness" / "state" / "cursor"
         assert state_dir.is_dir()
 
 
@@ -189,18 +187,17 @@ class TestCopyFrom:
         cursor_install = _load_cursor_module("install")
 
         # Pre-seed config with an existing claude-code harness entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.parent.mkdir(parents=True, exist_ok=True)
         existing_config = {
             "harnesses": {
                 "claude-code": {
                     "project_name": "claude-code",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "existing-key",
-                    "space_id": "existing-space",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "existing-key"
+                }
+            }
         }
         config_file.write_text(json.dumps(existing_config, indent=2))
 
@@ -209,7 +206,7 @@ class TestCopyFrom:
 
         def fake_prompt_backend(existing_harnesses=None):
             received_harnesses["value"] = existing_harnesses
-            return ARIZE_BACKEND
+            return ATATUS_BACKEND
 
         monkeypatch.setattr(cursor_install, "prompt_backend", fake_prompt_backend)
         monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default: default)
@@ -226,7 +223,7 @@ class TestCopyFrom:
 
         # prompt_backend should have received the existing harnesses dict
         assert "claude-code" in received_harnesses["value"]
-        assert received_harnesses["value"]["claude-code"]["target"] == "arize"
+        assert received_harnesses["value"]["claude-code"]["target"] == "atatus"
 
         # Both harnesses should exist in config
         config = json.loads(config_file.read_text())
@@ -242,17 +239,17 @@ class TestExistingEntry:
         cursor_install = _load_cursor_module("install")
 
         # Pre-seed config with an existing cursor entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.parent.mkdir(parents=True, exist_ok=True)
         existing_config = {
             "harnesses": {
                 "cursor": {
                     "project_name": "cursor",
-                    "target": "phoenix",
-                    "endpoint": "http://localhost:6006",
-                    "api_key": "",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": ""
+                }
+            }
         }
         config_file.write_text(json.dumps(existing_config, indent=2))
 
@@ -261,7 +258,7 @@ class TestExistingEntry:
 
         def fail_prompt_backend(existing_harnesses=None):
             prompt_backend_called["called"] = True
-            return PHOENIX_BACKEND
+            return ATATUS_BACKEND
 
         monkeypatch.setattr(cursor_install, "prompt_backend", fail_prompt_backend)
         monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default: "my-cursor")
@@ -283,8 +280,8 @@ class TestExistingEntry:
         config = json.loads(config_file.read_text())
         entry = config["harnesses"]["cursor"]
         assert entry["project_name"] == "my-cursor"
-        assert entry["target"] == "phoenix"
-        assert entry["endpoint"] == "http://localhost:6006"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
 
 
 class TestIdempotent:
@@ -327,7 +324,7 @@ class TestUninstall:
         assert hooks_data.get("hooks", {}) == {}
 
         # config.json should have no cursor entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         harnesses = config.get("harnesses", {})
         assert "cursor" not in harnesses
@@ -427,7 +424,7 @@ class TestUninstall:
         cursor_install.uninstall()
 
         # config.json should still have no cursor entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         harnesses = config.get("harnesses", {})
         assert "cursor" not in harnesses
@@ -437,10 +434,10 @@ class TestDryRun:
     """Dry-run mode should not write files."""
 
     def test_install_dry_run_writes_nothing(self, fake_home, monkeypatch):
-        """With ARIZE_DRY_RUN=true, install() logs but does not write files."""
+        """With ATATUS_DRY_RUN=true, install() logs but does not write files."""
         cursor_install = _load_cursor_module("install")
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
 
         cursor_install.install(with_skills=False)
@@ -448,5 +445,5 @@ class TestDryRun:
         hooks_file = fake_home / ".cursor" / "hooks.json"
         assert not hooks_file.exists()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert not config_file.exists()

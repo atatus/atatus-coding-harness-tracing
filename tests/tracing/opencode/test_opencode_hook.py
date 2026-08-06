@@ -29,7 +29,7 @@ import pytest
 from core.common import StateManager
 
 # Force synchronous send_span path in any handler that spawns a fork.
-os.environ["ARIZE_DISABLE_FORK"] = "true"
+os.environ["ATATUS_DISABLE_FORK"] = "true"
 
 # Import handlers (this import is what fails first in pure-TDD: the module
 # does not exist yet). The remaining tests then exercise its surface.
@@ -144,8 +144,8 @@ class TestReadStdin:
 
 class TestSendSpanAsync:
     def test_uses_sync_send_when_fork_disabled(self, monkeypatch):
-        """ARIZE_DISABLE_FORK=true -> bypass fork, call send_span synchronously."""
-        monkeypatch.setenv("ARIZE_DISABLE_FORK", "true")
+        """ATATUS_DISABLE_FORK=true -> bypass fork, call send_span synchronously."""
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
         with mock.patch("tracing.opencode.hooks.handlers.send_span") as ss:
             _send_span_async({"resourceSpans": []})
         ss.assert_called_once_with({"resourceSpans": []})
@@ -472,7 +472,7 @@ class TestRedaction:
     def test_redacts_prompt_and_response_when_log_prompts_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         llm = _by_kind(captured_spans, "LLM")[0]
         attrs = _get_attrs(llm)
@@ -482,7 +482,7 @@ class TestRedaction:
     def test_redacts_tool_content_when_log_tool_content_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         tools = _by_kind(captured_spans, "TOOL")
         for t in tools:
@@ -493,7 +493,7 @@ class TestRedaction:
     def test_redacts_tool_details_when_log_tool_details_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         bash = next(s for s in _by_kind(captured_spans, "TOOL") if _name(s) == "bash")
         attrs = _get_attrs(bash)
@@ -502,8 +502,8 @@ class TestRedaction:
         assert "redacted" in attrs["tool.description"]["stringValue"]
 
     def test_tool_name_not_redacted(self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         bash = next(s for s in _by_kind(captured_spans, "TOOL") if _name(s) == "bash")
         attrs = _get_attrs(bash)
@@ -525,7 +525,7 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                     "id": "msg_user_x",
                     "sessionID": "ses_t",
                     "role": "user",
-                    "time": {"created": 100},
+                    "time": {"created": 100}
                 },
                 "parts": [
                     {
@@ -533,9 +533,9 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                         "sessionID": "ses_t",
                         "messageID": "msg_user_x",
                         "type": "text",
-                        "text": "do thing",
+                        "text": "do thing"
                     }
-                ],
+                ]
             },
             {
                 "info": {
@@ -549,7 +549,7 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                     "mode": "build",
                     "path": {"cwd": "/x", "root": "/"},
                     "cost": 0,
-                    "tokens": {"input": 1, "output": 1, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+                    "tokens": {"input": 1, "output": 1, "reasoning": 0, "cache": {"read": 0, "write": 0}}
                 },
                 "parts": [
                     {
@@ -557,7 +557,7 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                         "sessionID": "ses_t",
                         "messageID": "msg_assist_x",
                         "type": "text",
-                        "text": "ok",
+                        "text": "ok"
                     },
                     {
                         "id": "p3",
@@ -572,12 +572,12 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                             "output": "tool-out",
                             "title": "tool-title",
                             "metadata": {},
-                            "time": {"start": 210, "end": 220},
-                        },
-                    },
-                ],
-            },
-        ],
+                            "time": {"start": 210, "end": 220}
+                        }
+                    }
+                ]
+            }
+        ]
     }
 
 
@@ -715,7 +715,7 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                 "role": "user",
                 "time": {"created": 10000},
                 "agent": "build",
-                "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"},
+                "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"}
             },
             "parts": [
                 {
@@ -723,9 +723,9 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                     "sessionID": "ses_basic",
                     "messageID": "msg_user_2",
                     "type": "text",
-                    "text": "do something else",
+                    "text": "do something else"
                 }
-            ],
+            ]
         },
         {
             "info": {
@@ -743,8 +743,8 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                     "input": 5,
                     "output": 3,
                     "reasoning": 0,
-                    "cache": {"read": 0, "write": 0},
-                },
+                    "cache": {"read": 0, "write": 0}
+                }
             },
             "parts": [
                 {
@@ -752,10 +752,10 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                     "sessionID": "ses_basic",
                     "messageID": "msg_assist_2",
                     "type": "text",
-                    "text": "done.",
+                    "text": "done."
                 }
-            ],
-        },
+            ]
+        }
     ]
     return {**base, "type": ptype, "messages": base["messages"] + turn2}
 
@@ -873,7 +873,7 @@ class TestMultiTurnSnapshotDedup:
                         "id": "msg_user_prior",
                         "sessionID": "ses_basic",
                         "role": "user",
-                        "time": {"created": 500},
+                        "time": {"created": 500}
                     },
                     "parts": [
                         {
@@ -881,11 +881,11 @@ class TestMultiTurnSnapshotDedup:
                             "sessionID": "ses_basic",
                             "messageID": "msg_user_prior",
                             "type": "text",
-                            "text": "prior prompt",
+                            "text": "prior prompt"
                         }
-                    ],
+                    ]
                 }
-            ],
+            ]
         }
         chains_before = len(_by_kind(captured_spans, "CHAIN"))
         trace_count_before = state.get("trace_count")
@@ -904,7 +904,7 @@ class TestMultiTurnSnapshotDedup:
 
 class TestMainEntryPoint:
     def test_dispatches_reconcile(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "reconcile", "sessionID": "ses_d", "messages": []}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
@@ -917,7 +917,7 @@ class TestMainEntryPoint:
         ch.assert_not_called()
 
     def test_dispatches_close(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "close", "sessionID": "ses_d", "messages": []}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
@@ -930,7 +930,7 @@ class TestMainEntryPoint:
         rh.assert_not_called()
 
     def test_unknown_type_does_not_dispatch(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "something-else", "sessionID": "ses_d"}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
@@ -943,7 +943,7 @@ class TestMainEntryPoint:
         ch.assert_not_called()
 
     def test_requirements_not_met_short_circuits(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         payload = {"type": "reconcile", "sessionID": "ses_d", "messages": []}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=False),
@@ -956,7 +956,7 @@ class TestMainEntryPoint:
         ch.assert_not_called()
 
     def test_malformed_stdin_no_crash(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
             mock.patch.object(sys, "stdin", new=io.StringIO("not-json")),
@@ -969,7 +969,7 @@ class TestMainEntryPoint:
 
     def test_handler_exception_is_caught(self, monkeypatch, capsys):
         """A raised exception in a handler must be caught — never escape main()."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "reconcile", "sessionID": "ses_d", "messages": []}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
@@ -983,7 +983,7 @@ class TestMainEntryPoint:
 
     def test_no_system_exit_on_unknown(self, monkeypatch):
         """main() must never raise SystemExit on unknown types."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "???"}
         with (
             mock.patch("tracing.opencode.hooks.handlers.check_requirements", return_value=True),
@@ -1008,8 +1008,8 @@ class TestSpanServiceMetadata:
         assert svc["key"] == "service.name"
         assert svc["value"]["stringValue"] == "opencode"
 
-    def test_scope_name_arize_opencode_plugin(self, mock_resolve, mock_ensure, state, captured_spans):
+    def test_scope_name_atatus_opencode_plugin(self, mock_resolve, mock_ensure, state, captured_spans):
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         s = captured_spans[0]
         scope = s["resourceSpans"][0]["scopeSpans"][0]["scope"]
-        assert scope["name"] == "arize-opencode-plugin"
+        assert scope["name"] == "atatus-opencode-plugin"

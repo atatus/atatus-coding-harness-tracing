@@ -23,6 +23,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://github.com/Arize-ai/coding-harness-tracing/blob/main/CLA.md'
+          path-to-document: 'https://github.com/atatus/coding-harness-tracing/blob/main/CLA.md'
           branch: 'cla'
           allowlist: dependabot[bot],github-actions,claude,cursoragent

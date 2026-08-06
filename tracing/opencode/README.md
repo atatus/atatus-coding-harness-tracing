@@ -1,6 +1,6 @@
 # opencode Tracing
 
-Automatic [OpenInference](https://github.com/Arize-ai/openinference) tracing for [opencode](https://opencode.ai) terminal coding sessions. Spans are exported to [Arize AX](https://arize.com) or [Phoenix](https://github.com/Arize-ai/phoenix).
+Automatic OpenInference tracing for [opencode](https://opencode.ai) terminal coding sessions. Spans are exported to [Atatus](https://atatus.com).
 
 ## What gets traced
 
@@ -18,13 +18,13 @@ Timestamps come from opencode's own millisecond clocks (`message.time.created` /
 
 opencode is fundamentally different from every other harness in this repo: extensions are [plugins](https://opencode.ai/docs/plugins/) that opencode loads **in-process** inside its Bun runtime — there is no per-event subprocess and no stdin payload. The integration is split into two pieces:
 
-1. **TypeScript plugin shim** (`~/.config/opencode/plugin/arize-tracing.ts`). A dumb bridge. On `message.updated` (assistant completed) and `session.idle` it pulls the authoritative session snapshot via `client.session.messages({ path: { id } })` (see the [opencode SDK docs](https://opencode.ai/docs/sdk/)), then spawns `arize-hook-opencode` detached and pipes the snapshot to stdin. The shim contains no tracing logic.
-2. **Python snapshot reconciler** (`arize-hook-opencode`). Reads the snapshot, walks `{info, parts}[]`, and emits any NEW `Turn`/`LLM`/`TOOL` spans deduped by message id and tool `callID`. opencode's `AssistantMessage` already carries final, cumulative `tokens` and `cost`, so no per-delta coalescing is needed.
+1. **TypeScript plugin shim** (`~/.config/opencode/plugin/atatus-tracing.ts`). A dumb bridge. On `message.updated` (assistant completed) and `session.idle` it pulls the authoritative session snapshot via `client.session.messages({ path: { id } })` (see the [opencode SDK docs](https://opencode.ai/docs/sdk/)), then spawns `atatus-hook-opencode` detached and pipes the snapshot to stdin. The shim contains no tracing logic.
+2. **Python snapshot reconciler** (`atatus-hook-opencode`). Reads the snapshot, walks `{info, parts}[]`, and emits any NEW `Turn`/`LLM`/`TOOL` spans deduped by message id and tool `callID`. opencode's `AssistantMessage` already carries final, cumulative `tokens` and `cost`, so no per-delta coalescing is needed.
 
 Snapshots repeat across firings — that's what dedup is for. There is no streaming-chunk forwarding.
 
 ## Setup
-The installer prompts for your backend (Phoenix or Arize AX) and project name, writes credentials to `~/.arize/harness/config.json`, and copies the plugin shim into `~/.config/opencode/plugin/arize-tracing.ts`. opencode auto-discovers plugins in that directory ([config docs](https://opencode.ai/docs/config/)) — no `opencode.json` edit is required. Spans are sent directly to the backend from the reconciler — no separate buffer/collector service is required.
+The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and copies the plugin shim into `~/.config/opencode/plugin/atatus-tracing.ts`. opencode auto-discovers plugins in that directory ([config docs](https://opencode.ai/docs/config/)) — no `opencode.json` edit is required. Spans are sent directly to the backend from the reconciler — no separate buffer/collector service is required.
 
 Pass `--with-skills` to also symlink the `manage-opencode-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage opencode tracing configuration.
 
@@ -35,13 +35,13 @@ Pass `--with-skills` to also symlink the `manage-opencode-tracing` skill into th
 Install:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.sh | bash -s -- opencode
+curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- opencode
 ```
 
 Uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.sh | bash -s -- uninstall opencode
+curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- uninstall opencode
 ```
 
 #### Windows (PowerShell)
@@ -49,21 +49,21 @@ curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main
 Install:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat opencode
 ```
 
 Uninstall:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat uninstall opencode
 ```
 
 ### Local setup
 
 ```bash
-git clone https://github.com/Arize-ai/coding-harness-tracing.git
+git clone https://github.com/atatus/coding-harness-tracing.git
 cd coding-harness-tracing
 ```
 
@@ -95,7 +95,7 @@ Uninstall:
 install.bat uninstall opencode
 ```
 
-Uninstall deletes the plugin file at `~/.config/opencode/plugin/arize-tracing.ts` (only if it carries the Arize header marker — your own plugins are left alone) and removes the `harnesses.opencode` block from `~/.arize/harness/config.json`.
+Uninstall deletes the plugin file at `~/.config/opencode/plugin/atatus-tracing.ts` (only if it carries the Atatus header marker — your own plugins are left alone) and removes the `harnesses.opencode` block from `~/.atatus/harness/config.json`.
 
 ## Default Settings
 
@@ -103,24 +103,23 @@ Uninstall deletes the plugin file at `~/.config/opencode/plugin/arize-tracing.ts
 |---------|---------|
 | Harness key | `opencode` |
 | Project name | `opencode` |
-| Phoenix endpoint | `http://localhost:6006` |
-| Arize AX endpoint | `otlp.arize.com:443` |
-| Plugin file | `~/.config/opencode/plugin/arize-tracing.ts` |
+| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Plugin file | `~/.config/opencode/plugin/atatus-tracing.ts` |
 | Lifecycle events forwarded | `message.updated` (assistant completed), `session.idle` |
 | Span tree | `Turn` (CHAIN) → `LLM` → `TOOL` |
 | Trace granularity | one trace per turn |
-| State directory | `~/.arize/harness/state/opencode/` |
-| Log file | `~/.arize/harness/logs/opencode.log` |
+| State directory | `~/.atatus/harness/state/opencode/` |
+| Log file | `~/.atatus/harness/logs/opencode.log` |
 
 ## Verifying tracing
 
 Run any opencode session as you normally would. opencode loads the plugin on startup; the shim listens for completion events and forwards snapshots to the Python reconciler.
 
-- Errors and reconciler stderr land in `~/.arize/harness/logs/opencode.log` always (the adapter redirects Python stderr there via `ARIZE_LOG_FILE`); set `export ARIZE_VERBOSE=true` before launching opencode to also see routine reconciler activity (snapshot ingest, span emits, dedup hits).
-- Confirm spans appear in your configured project in Arize AX or Phoenix.
-- Set `ARIZE_TRACE_DEBUG=true` to dump the raw snapshot payloads under `~/.arize/harness/state/debug/` (files are named `opencode_reconcile_<ts>.json` / `opencode_close_<ts>.json`) for inspection.
+- Errors and reconciler stderr land in `~/.atatus/harness/logs/opencode.log` always (the adapter redirects Python stderr there via `ATATUS_LOG_FILE`); set `export ATATUS_VERBOSE=true` before launching opencode to also see routine reconciler activity (snapshot ingest, span emits, dedup hits).
+- Confirm spans appear in your configured project in Atatus.
+- Set `ATATUS_TRACE_DEBUG=true` to dump the raw snapshot payloads under `~/.atatus/harness/state/debug/` (files are named `opencode_reconcile_<ts>.json` / `opencode_close_<ts>.json`) for inspection.
 
-See the [main README's Environment variables section](../../README.md#environment-variables) for the full list of runtime overrides (`ARIZE_TRACE_ENABLED`, `ARIZE_DRY_RUN`, `ARIZE_USER_ID`, `ARIZE_PROJECT_NAME`, `ARIZE_VERBOSE`, `ARIZE_TRACE_DEBUG`, etc.).
+See the [main README's Environment variables section](../../README.md#environment-variables) for the full list of runtime overrides (`ATATUS_TRACE_ENABLED`, `ATATUS_DRY_RUN`, `ATATUS_USER_ID`, `ATATUS_PROJECT_NAME`, `ATATUS_VERBOSE`, `ATATUS_TRACE_DEBUG`, etc.).
 
 ## Limitations
 

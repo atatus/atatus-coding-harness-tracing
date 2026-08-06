@@ -25,7 +25,7 @@ from core.setup import (
     write_logging_config,
 )
 from tracing.claude_code.constants import (
-    ARIZE_ENV_KEYS,
+    ATATUS_ENV_KEYS,
     DISPLAY_NAME,
     HARNESS_BIN,
     HARNESS_HOME,
@@ -108,7 +108,7 @@ def _save_settings(settings: dict) -> None:
 def _register_claude_hooks(project_name: str = HARNESS_NAME) -> None:
     """Read SETTINGS_FILE (or init to {}), add plugin reference + hook commands.
 
-    Registering the local plugin (path → ~/.arize/harness/tracing/claude_code)
+    Registering the local plugin (path → ~/.atatus/harness/tracing/claude_code)
     makes Claude Code auto-load its bundled hooks even in non-interactive
     (-p) mode, where ``--setting-sources`` defaults to ``project,local`` and
     user-level hooks would otherwise be skipped.
@@ -131,9 +131,9 @@ def _register_claude_hooks(project_name: str = HARNESS_NAME) -> None:
 
     # Set env vars (only if absent)
     env_block = settings.setdefault("env", {})
-    if not env_block.get("ARIZE_PROJECT_NAME"):
-        env_block["ARIZE_PROJECT_NAME"] = project_name
-    env_block.setdefault("ARIZE_TRACE_ENABLED", "true")
+    if not env_block.get("ATATUS_PROJECT_NAME"):
+        env_block["ATATUS_PROJECT_NAME"] = project_name
+    env_block.setdefault("ATATUS_TRACE_ENABLED", "true")
 
     # Register hooks
     hooks = settings.setdefault("hooks", {})
@@ -197,7 +197,7 @@ def _unregister_claude_hooks() -> None:
     # Remove our env keys so stale values don't linger post-uninstall.
     if "env" in settings and isinstance(settings["env"], dict):
         env_block = settings["env"]
-        for key in ARIZE_ENV_KEYS:
+        for key in ATATUS_ENV_KEYS:
             env_block.pop(key, None)
         if not env_block:
             del settings["env"]

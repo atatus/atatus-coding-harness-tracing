@@ -16,9 +16,9 @@ from tracing.claude_code.hooks.handlers import _handle_post_compact, _handle_pre
 @pytest.fixture(autouse=True)
 def _enable_logging(monkeypatch):
     """Opt in to all logging so assertions see raw content."""
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture

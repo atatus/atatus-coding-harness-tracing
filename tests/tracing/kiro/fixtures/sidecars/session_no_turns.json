@@ -3,7 +3,7 @@
   "cwd": "/tmp/test-project",
   "session_state": {
     "version": 1,
-    "agent_name": "arize-traced",
+    "agent_name": "atatus-traced",
     "rts_model_state": {
       "model_info": {
         "model_id": "auto",

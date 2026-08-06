@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Arize Claude Code Plugin - Interactive Setup.
+"""Atatus Claude Code Plugin - Interactive Setup.
 
-Entry point for ``arize-setup-claude``.  The heavy lifting now lives in
+Entry point for ``atatus-setup-claude``.  The heavy lifting now lives in
 ``tracing/claude_code/install.py``; this module is kept for backwards
 compatibility with the existing entry point and for helper functions used
 by tests.
@@ -48,22 +48,15 @@ def _check_existing_configuration(settings_path: Path) -> bool:
     settings = _load_settings(settings_path)
     env_block = settings.get("env", {})
 
-    existing_phoenix = env_block.get("PHOENIX_ENDPOINT", "")
-    existing_arize = env_block.get("ARIZE_API_KEY", "")
+    # Either key is evidence of a prior install: the endpoint is written for every
+    # install, the license key only when credentials were supplied inline.
+    existing_endpoint = env_block.get("ATATUS_OTLP_ENDPOINT", "")
+    existing_key = env_block.get("ATATUS_API_KEY", "")
 
-    if existing_phoenix:
+    if existing_endpoint or existing_key:
+        where = f" at {existing_endpoint}" if existing_endpoint else ""
         print_color(
-            f"Existing config found in {settings_path}: Phoenix at {existing_phoenix}",
-            "yellow",
-        )
-        overwrite = input("Overwrite? [y/N]: ").strip()
-        if overwrite.lower() != "y":
-            print("Setup cancelled.")
-            return False
-        print("")
-    elif existing_arize:
-        print_color(
-            f"Existing config found in {settings_path}: Arize AX",
+            f"Existing config found in {settings_path}: Atatus{where}",
             "yellow",
         )
         overwrite = input("Overwrite? [y/N]: ").strip()
@@ -81,7 +74,7 @@ def _check_existing_configuration(settings_path: Path) -> bool:
 
 
 def main() -> None:
-    """Entry point for arize-setup-claude."""
+    """Entry point for atatus-setup-claude."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):
@@ -92,7 +85,7 @@ def main() -> None:
 def _run() -> None:
     """Delegate to the install module in tracing/claude_code/.
 
-    This replaces the old interactive flow so that ``arize-setup-claude``
+    This replaces the old interactive flow so that ``atatus-setup-claude``
     and the installer router share a single code path.
     """
     _install_mod.install(with_skills=False)

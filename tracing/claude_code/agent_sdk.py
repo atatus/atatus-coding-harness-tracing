@@ -13,11 +13,11 @@ The returned ``ClaudeAgentOptions`` is pre-configured with:
   - ``plugins=[{"type": "local", "path": "<install-dir>/tracing/claude_code"}]``
     so the SDK loads the local plugin and fires our hooks.
   - ``setting_sources=["user"]`` so user-level settings (including the
-    Arize env vars written by ``install.py``) are honored.
+    Atatus env vars written by ``install.py``) are honored.
 
 Any keyword argument passed to ``claude_options(**overrides)`` is merged on
 top of these defaults, with overrides winning. Pass ``plugins=[...]`` to
-add to (not replace) the Arize plugin entry; pass ``setting_sources=[...]``
+add to (not replace) the Atatus plugin entry; pass ``setting_sources=[...]``
 to override sources entirely.
 
 This module imports lazily — if ``claude_agent_sdk`` isn't installed,
@@ -32,7 +32,7 @@ import core.setup
 
 
 def claude_options(**overrides: Any) -> Any:
-    """Return a ClaudeAgentOptions pre-configured for Arize tracing.
+    """Return a ClaudeAgentOptions pre-configured for Atatus tracing.
 
     Raises ImportError if `claude_agent_sdk` is not installed.
     """

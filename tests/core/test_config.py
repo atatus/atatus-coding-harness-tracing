@@ -77,8 +77,8 @@ class TestGetValue:
         assert get_value({"a": 1}, "a") == 1
 
     def test_nested_key(self):
-        cfg = {"backend": {"target": "phoenix"}}
-        assert get_value(cfg, "backend.target") == "phoenix"
+        cfg = {"backend": {"target": "atatus"}}
+        assert get_value(cfg, "backend.target") == "atatus"
 
     def test_missing_key(self):
         assert get_value({"a": 1}, "b") is None
@@ -214,7 +214,7 @@ class TestMainGet:
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 0
-        assert capsys.readouterr().out.strip() == "phoenix"
+        assert capsys.readouterr().out.strip() == "atatus"
 
     def test_get_nonexistent_key(self, cli_config, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["config.py", "get", "nonexistent.key"])
@@ -232,12 +232,12 @@ class TestMainGet:
 
 class TestMainSet:
     def test_set_value(self, cli_config, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["config.py", "set", "harnesses.codex.collector.port", "9999"])
+        monkeypatch.setattr("sys.argv", ["config.py", "set", "harnesses.codex.retry.max_attempts", "9999"])
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 0
         data = json.loads(Path(cli_config).read_text())
-        assert data["harnesses"]["codex"]["collector"]["port"] == 9999
+        assert data["harnesses"]["codex"]["retry"]["max_attempts"] == 9999
 
     def test_set_missing_args(self, cli_config, monkeypatch):
         monkeypatch.setattr("sys.argv", ["config.py", "set", "key"])
@@ -270,7 +270,7 @@ class TestMainDump:
         assert exc.value.code == 0
         output = capsys.readouterr().out
         data = json.loads(output)
-        assert data["harnesses"]["claude-code"]["target"] == "phoenix"
+        assert data["harnesses"]["claude-code"]["target"] == "atatus"
 
 
 class TestMainExists:

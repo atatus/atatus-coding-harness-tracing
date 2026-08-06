@@ -122,10 +122,10 @@ def _send_span_async(span_dict: dict) -> None:
     immediately so the hook exits in milliseconds.
 
     Falls back to synchronous send when fork() is unavailable (Windows) or
-    when ARIZE_DISABLE_FORK=true (used by tests so spans are visible to
+    when ATATUS_DISABLE_FORK=true (used by tests so spans are visible to
     captured_spans fixtures in the parent process).
     """
-    if os.environ.get("ARIZE_DISABLE_FORK", "").lower() == "true":
+    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
         send_span(span_dict)
         return
     if not hasattr(os, "fork"):
@@ -174,7 +174,7 @@ def _send_span_async(span_dict: dict) -> None:
 
 # ---------------------------------------------------------------------------
 # Model-call accumulation: Gemini fires AfterModel once per streaming chunk.
-# We coalesce all chunks for a single BeforeModel into one LLM span so Arize
+# We coalesce all chunks for a single BeforeModel into one LLM span so Atatus
 # shows one row per model call instead of N near-empty rows.
 # ---------------------------------------------------------------------------
 
@@ -264,7 +264,7 @@ def _close_pending_turn(state, reason: str) -> None:
     Gemini does not always fire AfterAgent (cancellation, errors, slash commands),
     which leaves child LLM/TOOL spans pointing at a parent_span_id that was
     never sent. This fail-safe closes the dangling root so traces are connected
-    in Arize. Called from both BeforeAgent (before starting a new turn) and
+    in Atatus. Called from both BeforeAgent (before starting a new turn) and
     SessionEnd. No-op if no pending trace state exists.
     """
     pending_trace_id = state.get("current_trace_id")
@@ -479,7 +479,7 @@ def _handle_after_model(input_json: dict) -> None:
 
     Gemini fires AfterModel once per chunk: early chunks carry text, the final
     chunk carries usage tokens. Instead of emitting a span per chunk (the old
-    behavior produced 4-30+ near-empty LLM rows per turn in Arize), we
+    behavior produced 4-30+ near-empty LLM rows per turn in Atatus), we
     accumulate text + tokens + model_name in state and only emit a single
     LLM span when the final chunk arrives -- detected by non-zero token
     counts. Non-final chunks just append text and return.
@@ -664,7 +664,7 @@ def _handle_after_tool(input_json: dict) -> None:
 
 
 def session_start():
-    """Entry point for arize-hook-gemini-session-start."""
+    """Entry point for atatus-hook-gemini-session-start."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -677,7 +677,7 @@ def session_start():
 
 
 def session_end():
-    """Entry point for arize-hook-gemini-session-end."""
+    """Entry point for atatus-hook-gemini-session-end."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -690,7 +690,7 @@ def session_end():
 
 
 def before_agent():
-    """Entry point for arize-hook-gemini-before-agent."""
+    """Entry point for atatus-hook-gemini-before-agent."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -703,7 +703,7 @@ def before_agent():
 
 
 def after_agent():
-    """Entry point for arize-hook-gemini-after-agent."""
+    """Entry point for atatus-hook-gemini-after-agent."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -716,7 +716,7 @@ def after_agent():
 
 
 def before_model():
-    """Entry point for arize-hook-gemini-before-model."""
+    """Entry point for atatus-hook-gemini-before-model."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -729,7 +729,7 @@ def before_model():
 
 
 def after_model():
-    """Entry point for arize-hook-gemini-after-model."""
+    """Entry point for atatus-hook-gemini-after-model."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -742,7 +742,7 @@ def after_model():
 
 
 def before_tool():
-    """Entry point for arize-hook-gemini-before-tool."""
+    """Entry point for atatus-hook-gemini-before-tool."""
     input_json = {}
     try:
         input_json = _read_stdin()
@@ -755,7 +755,7 @@ def before_tool():
 
 
 def after_tool():
-    """Entry point for arize-hook-gemini-after-tool."""
+    """Entry point for atatus-hook-gemini-after-tool."""
     input_json = {}
     try:
         input_json = _read_stdin()

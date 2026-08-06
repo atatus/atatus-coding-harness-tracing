@@ -18,7 +18,7 @@ class TestParseTranscriptHappyPath:
             f,
             [
                 {"type": "session.start", "data": {"copilotVersion": "1.0.40"}},
-                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}},
+                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}}
             ],
         )
         s = parse_transcript(f)
@@ -34,9 +34,9 @@ class TestParseTranscriptHappyPath:
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "do the thing"},
-                    },
-                },
+                        "input": {"prompt": "do the thing"}
+                    }
+                }
             ],
         )
         s = parse_transcript(f)
@@ -49,7 +49,7 @@ class TestParseTranscriptHappyPath:
             [
                 {"type": "hook.start", "data": {"hookType": "preToolUse", "input": {}}},
                 {"type": "hook.start", "data": {"hookType": "preToolUse", "input": {}}},
-                {"type": "hook.start", "data": {"hookType": "postToolUse", "input": {}}},
+                {"type": "hook.start", "data": {"hookType": "postToolUse", "input": {}}}
             ],
         )
         s = parse_transcript(f)
@@ -106,7 +106,7 @@ class TestParseTranscriptOverwriteSemantics:
             f,
             [
                 {"type": "session.model_change", "data": {"newModel": "gpt-4"}},
-                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}},
+                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}}
             ],
         )
         s = parse_transcript(f)
@@ -121,16 +121,16 @@ class TestParseTranscriptOverwriteSemantics:
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "first prompt"},
-                    },
+                        "input": {"prompt": "first prompt"}
+                    }
                 },
                 {
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "second prompt"},
-                    },
-                },
+                        "input": {"prompt": "second prompt"}
+                    }
+                }
             ],
         )
         s = parse_transcript(f)
@@ -142,7 +142,7 @@ class TestParseTranscriptOverwriteSemantics:
             f,
             [
                 {"type": "session.model_change", "data": {"newModel": "gpt-4"}},
-                {"type": "session.model_change", "data": {"newModel": ""}},
+                {"type": "session.model_change", "data": {"newModel": ""}}
             ],
         )
         s = parse_transcript(f)
@@ -157,16 +157,16 @@ class TestParseTranscriptOverwriteSemantics:
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "real prompt"},
-                    },
+                        "input": {"prompt": "real prompt"}
+                    }
                 },
                 {
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": ""},
-                    },
-                },
+                        "input": {"prompt": ""}
+                    }
+                }
             ],
         )
         s = parse_transcript(f)
@@ -184,7 +184,7 @@ class TestParseTranscriptReturnShape:
             "input_text",
             "output_text",
             "tool_count",
-            "events_seen",
+            "events_seen"
         }
 
     def test_output_text_always_empty_string(self, tmp_path):
@@ -198,9 +198,9 @@ class TestParseTranscriptReturnShape:
                     "type": "hook.start",
                     "data": {
                         "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "hello"},
-                    },
-                },
+                        "input": {"prompt": "hello"}
+                    }
+                }
             ],
         )
         s = parse_transcript(f)

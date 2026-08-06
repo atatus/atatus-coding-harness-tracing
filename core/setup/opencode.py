@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arize setup wizard shim for opencode tracing.
+"""Atatus setup wizard shim for opencode tracing.
 
 Delegates to tracing.opencode.install for the actual install/uninstall logic.
 """
@@ -22,7 +22,7 @@ def uninstall() -> None:
 
 
 def main() -> None:
-    """Entry point for arize-setup-opencode."""
+    """Entry point for atatus-setup-opencode."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):

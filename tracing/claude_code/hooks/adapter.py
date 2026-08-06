@@ -16,11 +16,11 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["claude-code"]
 SERVICE_NAME = _HARNESS["service_name"]  # "claude-code"
-SCOPE_NAME = _HARNESS["scope_name"]  # "arize-claude-plugin"
-STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.arize/harness/state/claude-code
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-claude-plugin"
+STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/claude-code
 
 # Route hook stderr to a per-harness log file unless the user already set one.
-os.environ.setdefault("ARIZE_LOG_FILE", str(_HARNESS["default_log_file"]))
+os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 
@@ -119,7 +119,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     Sets the following state keys (matching bash lines 71-82):
     - session_id: from input_json or generate_trace_id()
     - session_start_time: get_timestamp_ms() as string
-    - project_name: from ARIZE_PROJECT_NAME env, or basename of input_json["cwd"], or cwd
+    - project_name: from ATATUS_PROJECT_NAME env, or basename of input_json["cwd"], or cwd
     - trace_count: "0"
     - tool_count: "0"
     - user_id: from env.get_user_id(SERVICE_NAME), then input_json["user_id"], then ""
@@ -237,7 +237,7 @@ def check_requirements() -> bool:
     """Check if tracing is enabled and initialize state directory.
 
     Returns False (and the hook should exit 0) if tracing is disabled.
-    Matches bash: [[ "$ARIZE_TRACE_ENABLED" != "true" ]] && exit 0
+    Matches bash: [[ "$ATATUS_TRACE_ENABLED" != "true" ]] && exit 0
     """
     if not env.trace_enabled:
         return False

@@ -20,7 +20,7 @@ def fake_install(tmp_path, monkeypatch):
 
     Returns the install dir Path.
     """
-    install_dir = tmp_path / ".arize" / "harness"
+    install_dir = tmp_path / ".atatus" / "harness"
     install_dir.mkdir(parents=True)
 
     import core.setup as setup_mod
@@ -49,11 +49,11 @@ def populated_config(fake_install):
         "harnesses": {
             "claude-code": {
                 "project_name": "claude-code",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
-                "api_key": "",
-            },
-        },
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": ""
+            }
+        }
     }
     config_path = fake_install / "config.json"
     fd = os.open(str(config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -70,20 +70,20 @@ def populated_config(fake_install):
 class TestDryRun:
     @pytest.mark.parametrize("val", ["1", "true", "yes", "TRUE", "True", "YES"])
     def test_truthy_values(self, monkeypatch, val):
-        monkeypatch.setenv("ARIZE_DRY_RUN", val)
+        monkeypatch.setenv("ATATUS_DRY_RUN", val)
         from core.setup import dry_run
 
         assert dry_run() is True
 
     @pytest.mark.parametrize("val", ["0", "false", "", "no", "FALSE"])
     def test_falsy_values(self, monkeypatch, val):
-        monkeypatch.setenv("ARIZE_DRY_RUN", val)
+        monkeypatch.setenv("ATATUS_DRY_RUN", val)
         from core.setup import dry_run
 
         assert dry_run() is False
 
     def test_unset(self, monkeypatch):
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
         from core.setup import dry_run
 
         assert dry_run() is False
@@ -119,18 +119,18 @@ class TestEnsureSharedRuntime:
         # Create subdirs and legacy files
         for d in ("bin", "run", "logs"):
             (fake_install / d).mkdir(parents=True, exist_ok=True)
-        (fake_install / "bin" / "arize-collector").write_text("legacy")
+        (fake_install / "bin" / "atatus-collector").write_text("legacy")
         (fake_install / "run" / "collector.pid").write_text("123")
         (fake_install / "logs" / "collector.log").write_text("log")
 
         ensure_shared_runtime()
 
-        assert not (fake_install / "bin" / "arize-collector").exists()
+        assert not (fake_install / "bin" / "atatus-collector").exists()
         assert not (fake_install / "run" / "collector.pid").exists()
         assert not (fake_install / "logs" / "collector.log").exists()
 
     def test_dry_run_does_not_create(self, fake_install, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         from core.setup import ensure_shared_runtime
 
         ensure_shared_runtime()
@@ -186,7 +186,7 @@ class TestMergeHarnessEntry:
             config = json.load(f)
         # Original harness preserved
         assert config["harnesses"]["claude-code"]["project_name"] == "claude-code"
-        assert config["harnesses"]["claude-code"]["target"] == "phoenix"
+        assert config["harnesses"]["claude-code"]["target"] == "atatus"
         # New harness added
         assert config["harnesses"]["copilot"]["project_name"] == "my-copilot"
 
@@ -196,21 +196,20 @@ class TestMergeHarnessEntry:
         merge_harness_entry(
             "copilot",
             "my-copilot",
-            target="arize",
-            credentials={"endpoint": "otlp.arize.com:443", "api_key": "ak-xxx", "space_id": "sp-1"},
+            target="atatus",
+            credentials={"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-xxx"},
         )
 
         with open(fake_install / "config.json") as f:
             config = json.load(f)
         entry = config["harnesses"]["copilot"]
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "ak-xxx"
-        assert entry["space_id"] == "sp-1"
         assert entry["project_name"] == "my-copilot"
 
     def test_dry_run_no_write(self, fake_install, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         from core.setup import merge_harness_entry
 
         merge_harness_entry("copilot", "my-copilot")
@@ -250,7 +249,7 @@ class TestRemoveHarnessEntry:
         assert "claude-code" in config["harnesses"]
 
     def test_dry_run_no_write(self, fake_install, populated_config, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         from core.setup import remove_harness_entry
 
         remove_harness_entry("claude-code")
@@ -426,7 +425,7 @@ class TestWipeSharedRuntime:
         wipe_shared_runtime()
 
     def test_dry_run_preserves(self, fake_install, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         from core.setup.wipe import wipe_shared_runtime
 
         (fake_install / "config.json").write_text('{"test": true}')
@@ -549,38 +548,14 @@ class TestEnsureHarnessInstalled:
 
 
 class TestWriteConfigFlat:
-    def test_write_config_writes_flat_arize_entry(self, fake_install):
+
+    def test_write_config_writes_flat_atatus_entry(self, fake_install):
         from core.setup import write_config
 
         config_path = str(fake_install / "config.json")
         write_config(
-            "arize",
-            {"endpoint": "otlp.arize.com:443", "api_key": "ak-1", "space_id": "sp-1"},
-            "claude-code",
-            "claude-code",
-            config_path=config_path,
-        )
-
-        with open(config_path) as f:
-            cfg = json.load(f)
-        entry = cfg["harnesses"]["claude-code"]
-        assert entry == {
-            "project_name": "claude-code",
-            "target": "arize",
-            "endpoint": "otlp.arize.com:443",
-            "api_key": "ak-1",
-            "space_id": "sp-1",
-        }
-        assert "backend" not in cfg
-        assert "collector" not in cfg
-
-    def test_write_config_writes_flat_phoenix_entry(self, fake_install):
-        from core.setup import write_config
-
-        config_path = str(fake_install / "config.json")
-        write_config(
-            "phoenix",
-            {"endpoint": "http://localhost:6006", "api_key": ""},
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -591,11 +566,10 @@ class TestWriteConfigFlat:
         entry = cfg["harnesses"]["cursor"]
         assert entry == {
             "project_name": "cursor",
-            "target": "phoenix",
-            "endpoint": "http://localhost:6006",
-            "api_key": "",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
+            "api_key": ""
         }
-        assert "space_id" not in entry
         assert "backend" not in cfg
 
     def test_write_config_writes_collector_for_codex(self, fake_install):
@@ -603,8 +577,8 @@ class TestWriteConfigFlat:
 
         config_path = str(fake_install / "config.json")
         write_config(
-            "phoenix",
-            {"endpoint": "http://localhost:6006", "api_key": ""},
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
             "codex",
             "codex",
             collector={"host": "127.0.0.1", "port": 4318},
@@ -622,15 +596,15 @@ class TestWriteConfigFlat:
 
         config_path = str(fake_install / "config.json")
         write_config(
-            "phoenix",
-            {"endpoint": "http://localhost:6006", "api_key": ""},
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
             "claude-code",
             "claude-code",
             config_path=config_path,
         )
         write_config(
-            "arize",
-            {"endpoint": "otlp.arize.com:443", "api_key": "ak-1", "space_id": "sp-1"},
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-1"},
             "copilot",
             "copilot",
             config_path=config_path,
@@ -640,8 +614,8 @@ class TestWriteConfigFlat:
             cfg = json.load(f)
         assert "claude-code" in cfg["harnesses"]
         assert "copilot" in cfg["harnesses"]
-        assert cfg["harnesses"]["claude-code"]["target"] == "phoenix"
-        assert cfg["harnesses"]["copilot"]["target"] == "arize"
+        assert cfg["harnesses"]["claude-code"]["target"] == "atatus"
+        assert cfg["harnesses"]["copilot"]["target"] == "atatus"
 
     def test_write_config_strips_top_level_backend_and_collector(self, fake_install):
         from core.setup import write_config
@@ -649,16 +623,16 @@ class TestWriteConfigFlat:
         config_path = str(fake_install / "config.json")
         # Pre-write a config with legacy top-level keys
         legacy = {
-            "backend": {"target": "phoenix"},
+            "backend": {"target": "atatus"},
             "collector": {"host": "127.0.0.1", "port": 4318},
-            "harnesses": {},
+            "harnesses": {}
         }
         with open(config_path, "w") as f:
             json.dump(legacy, f, indent=2)
 
         write_config(
-            "phoenix",
-            {"endpoint": "http://localhost:6006", "api_key": ""},
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -688,26 +662,25 @@ class TestMergeHarnessEntryFlat:
         entry = cfg["harnesses"]["claude-code"]
         assert entry["project_name"] == "renamed-project"
         # Other fields preserved
-        assert entry["target"] == "phoenix"
-        assert entry["endpoint"] == "http://localhost:6006"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
 
     def test_full_update(self, fake_install, populated_config):
-        """credentials param replaces target, endpoint, api_key, space_id."""
+        """credentials param replaces target, endpoint and api_key."""
         from core.setup import merge_harness_entry
 
         merge_harness_entry(
             "claude-code",
             "claude-code",
-            target="arize",
-            credentials={"endpoint": "otlp.arize.com:443", "api_key": "ak-new", "space_id": "sp-new"},
+            target="atatus",
+            credentials={"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-new"},
         )
 
         with open(fake_install / "config.json") as f:
             cfg = json.load(f)
         entry = cfg["harnesses"]["claude-code"]
-        assert entry["target"] == "arize"
+        assert entry["target"] == "atatus"
         assert entry["api_key"] == "ak-new"
-        assert entry["space_id"] == "sp-new"
 
     def test_creates_file(self, fake_install):
         """From nothing, writes minimal {harnesses: {name: {project_name: ...}}}."""
@@ -758,35 +731,33 @@ class TestPromptBackendCopyFrom:
         existing = {
             "claude-code": {
                 "project_name": "claude-code",
-                "target": "arize",
-                "endpoint": "otlp.arize.com:443",
-                "api_key": "ak-1",
-                "space_id": "sp-1",
-            },
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": "ak-1"
+            }
         }
-        # Choose arize (2), then copy from entry 1
-        inputs = iter(["2", "1"])
+        # No backend menu any more — the first prompt is the copy-from choice
+        inputs = iter(["1"])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
         target, creds = prompt_backend(existing_harnesses=existing)
-        assert target == "arize"
+        assert target == "atatus"
         assert creds["api_key"] == "ak-1"
-        assert creds["space_id"] == "sp-1"
-        assert creds["endpoint"] == "otlp.arize.com:443"
+        assert creds["endpoint"] == "https://otel-rx.atatus.com"
 
     def test_no_copy_when_no_matching_target(self, monkeypatch):
-        """Only phoenix harnesses installed, user picks arize — no menu shown."""
+        """Only atatus harnesses installed, user picks atatus — no menu shown."""
         from core.setup import prompt_backend
 
         existing = {
             "claude-code": {
                 "project_name": "claude-code",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
-                "api_key": "",
-            },
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": ""
+            }
         }
-        # Choose arize (2), then provide fresh credentials
+        # Choose atatus (2), then provide fresh credentials
         getpass_calls = []
 
         def mock_getpass(prompt=""):
@@ -799,7 +770,7 @@ class TestPromptBackendCopyFrom:
         monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
 
         target, creds = prompt_backend(existing_harnesses=existing)
-        assert target == "arize"
+        assert target == "atatus"
         assert creds["api_key"] == "my-key"
 
     def test_enter_new_from_menu(self, monkeypatch):
@@ -809,32 +780,33 @@ class TestPromptBackendCopyFrom:
         existing = {
             "claude-code": {
                 "project_name": "claude-code",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
-                "api_key": "",
-            },
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": ""
+            }
         }
-        # Choose phoenix (1), pick "Enter new credentials" (2), then provide endpoint + key
+        # An entry with a blank api_key is not copyable, so no menu appears —
+        # the wizard goes straight to fresh prompts.
         getpass_calls = []
 
         def mock_getpass(prompt=""):
             getpass_calls.append(prompt)
-            return ""
+            return "fresh-key"
 
-        inputs = iter(["1", "2", "http://custom:9999"])
+        inputs = iter(["http://custom:9999"])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", mock_getpass)
 
         target, creds = prompt_backend(existing_harnesses=existing)
-        assert target == "phoenix"
+        assert target == "atatus"
         assert creds["endpoint"] == "http://custom:9999"
         # Should have gone through fresh prompts
         assert len(getpass_calls) == 1  # api_key prompt
 
 
 class TestPromptBackendMasking:
-    def test_arize_masks_api_key(self, monkeypatch):
-        """api_key prompt routes through getpass, space_id/endpoint through input."""
+    def test_atatus_masks_api_key(self, monkeypatch):
+        """The licence key routes through getpass; the endpoint through plain input."""
         from core.setup import prompt_backend
 
         getpass_calls = []
@@ -844,7 +816,7 @@ class TestPromptBackendMasking:
             getpass_calls.append(prompt)
             return "secret-key"
 
-        real_inputs = iter(["2", "my-space", ""])
+        real_inputs = iter([""])
 
         def mock_input(prompt=""):
             input_calls.append(prompt)
@@ -855,36 +827,9 @@ class TestPromptBackendMasking:
         monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
 
         target, creds = prompt_backend()
-        assert target == "arize"
+        assert target == "atatus"
         assert creds["api_key"] == "secret-key"
         # getpass was called for api_key
         assert len(getpass_calls) == 1
-        assert "API Key" in getpass_calls[0]
-        # space_id went through input
-        assert any("Space ID" in p for p in input_calls)
+        assert "License Key" in getpass_calls[0]
 
-    def test_phoenix_masks_api_key(self, monkeypatch):
-        """Phoenix api_key prompt routes through getpass."""
-        from core.setup import prompt_backend
-
-        getpass_calls = []
-        input_calls = []
-
-        def mock_getpass(prompt=""):
-            getpass_calls.append(prompt)
-            return ""
-
-        real_inputs = iter(["1", ""])
-
-        def mock_input(prompt=""):
-            input_calls.append(prompt)
-            return next(real_inputs)
-
-        monkeypatch.setattr("builtins.input", mock_input)
-        monkeypatch.setattr("core.setup.getpass", mock_getpass)
-
-        target, creds = prompt_backend()
-        assert target == "phoenix"
-        # getpass was called for api_key
-        assert len(getpass_calls) == 1
-        assert "API Key" in getpass_calls[0]

@@ -20,7 +20,7 @@ def fake_home(tmp_path, monkeypatch):
     # Patch INSTALL_DIR / VENV_DIR / CONFIG_FILE in core.setup
     import core.setup as setup_mod
 
-    install_dir = tmp_path / ".arize" / "harness"
+    install_dir = tmp_path / ".atatus" / "harness"
     venv_dir = install_dir / "venv"
     config_file = install_dir / "config.json"
 
@@ -62,15 +62,15 @@ def _fake_stdout():
         {
             "isatty": lambda self: False,
             "write": lambda self, s: None,
-            "flush": lambda self: None,
+            "flush": lambda self: None
         },
     )()
 
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "test-key", "space_id": "test-space"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
 
 
@@ -79,7 +79,7 @@ def _mock_prompts(monkeypatch, backend=None):
     import tracing.claude_code.install as claude_install
 
     if backend is None:
-        backend = PHOENIX_BACKEND
+        backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
         claude_install,
@@ -101,10 +101,10 @@ class TestFreshInstall:
     @pytest.mark.parametrize(
         "backend,expected_target",
         [
-            (PHOENIX_BACKEND, "phoenix"),
-            (ARIZE_BACKEND, "arize"),
+            (ATATUS_BACKEND, "atatus"),
+            (ATATUS_BACKEND, "atatus")
         ],
-        ids=["phoenix", "arize"],
+        ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config_and_hooks(self, fake_home, monkeypatch, backend, expected_target):
         """With no existing config, install() prompts and writes config.json + settings.json."""
@@ -115,7 +115,7 @@ class TestFreshInstall:
         claude_install.install(with_skills=False)
 
         # Check config.json was written
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert config_file.exists()
         config = json.loads(config_file.read_text())
         assert config["harnesses"]["claude-code"]["target"] == expected_target
@@ -133,27 +133,26 @@ class TestFreshInstall:
         assert len(hooks) == 16
 
         env = settings.get("env", {})
-        assert env.get("ARIZE_TRACE_ENABLED") == "true"
-        assert env.get("ARIZE_PROJECT_NAME") == "claude-code"
+        assert env.get("ATATUS_TRACE_ENABLED") == "true"
+        assert env.get("ATATUS_PROJECT_NAME") == "claude-code"
 
     def test_install_fresh_writes_flat_harness_entry(self, fake_home, monkeypatch):
         """Fresh install writes all backend fields directly under harnesses.claude-code."""
         import tracing.claude_code.install as claude_install
 
-        _mock_prompts(monkeypatch, backend=ARIZE_BACKEND)
+        _mock_prompts(monkeypatch, backend=ATATUS_BACKEND)
 
         claude_install.install(with_skills=False)
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         entry = config["harnesses"]["claude-code"]
 
         # All fields at the same level — no nested backend block
         assert entry["project_name"] == "claude-code"
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "test-key"
-        assert entry["space_id"] == "test-space"
 
         # No legacy top-level backend block
         assert "backend" not in config
@@ -191,17 +190,16 @@ class TestExistingEntry:
         """When harnesses.claude-code already exists, re-install updates only project_name."""
         import tracing.claude_code.install as claude_install
 
-        _mock_prompts(monkeypatch, backend=ARIZE_BACKEND)
+        _mock_prompts(monkeypatch, backend=ATATUS_BACKEND)
 
         # Pre-populate config with an existing claude-code entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.parent.mkdir(parents=True, exist_ok=True)
         original_entry = {
             "project_name": "old-name",
-            "target": "arize",
-            "endpoint": "otlp.arize.com:443",
-            "api_key": "original-key",
-            "space_id": "original-space",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
+            "api_key": "original-key"
         }
         config_file.write_text(json.dumps({"harnesses": {"claude-code": original_entry}}, indent=2))
 
@@ -216,41 +214,38 @@ class TestExistingEntry:
         # project_name updated
         assert entry["project_name"] == "new-project-name"
         # credentials preserved
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "original-key"
-        assert entry["space_id"] == "original-space"
 
 
 class TestCopyFrom:
     """Copy-from: install offers to reuse credentials from another harness."""
 
     def test_install_second_harness_offers_copy_from(self, fake_home, monkeypatch):
-        """Pre-populate codex with arize creds; verify claude-code gets them via copy-from."""
+        """Pre-populate codex with atatus creds; verify claude-code gets them via copy-from."""
         import tracing.claude_code.install as claude_install
 
-        # Pre-populate config with a codex entry using arize
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        # Pre-populate config with a codex entry using atatus
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config_file.parent.mkdir(parents=True, exist_ok=True)
         codex_entry = {
             "project_name": "codex",
-            "target": "arize",
-            "endpoint": "otlp.arize.com:443",
-            "api_key": "codex-key",
-            "space_id": "codex-space",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
+            "api_key": "codex-key"
         }
         config_file.write_text(json.dumps({"harnesses": {"codex": codex_entry}}, indent=2))
 
-        # Mock prompt_backend to return arize target with codex's credentials (simulating copy-from)
+        # Mock prompt_backend to return atatus target with codex's credentials (simulating copy-from)
         copied_creds = {
-            "endpoint": "otlp.arize.com:443",
-            "api_key": "codex-key",
-            "space_id": "codex-space",
+            "endpoint": "https://otel-rx.atatus.com",
+            "api_key": "codex-key"
         }
         monkeypatch.setattr(
             claude_install,
             "prompt_backend",
-            lambda existing_harnesses=None: ("arize", copied_creds),
+            lambda existing_harnesses=None: ("atatus", copied_creds),
         )
         monkeypatch.setattr(claude_install, "prompt_project_name", lambda default: default)
         monkeypatch.setattr(claude_install, "prompt_user_id", lambda: "")
@@ -268,10 +263,9 @@ class TestCopyFrom:
         entry = config["harnesses"]["claude-code"]
 
         # claude-code got codex's credentials
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "codex-key"
-        assert entry["space_id"] == "codex-space"
         assert entry["project_name"] == "claude-code"
 
         # codex entry is preserved
@@ -297,7 +291,7 @@ class TestUninstall:
         assert "plugins" not in settings
 
         # config.json should have no claude-code entry
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         harnesses = config.get("harnesses", {})
         assert "claude-code" not in harnesses
@@ -312,14 +306,13 @@ class TestUninstall:
         claude_install.install(with_skills=False)
 
         # Add another harness entry to config
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         config = json.loads(config_file.read_text())
         config["harnesses"]["copilot"] = {
             "project_name": "copilot",
-            "target": "arize",
-            "endpoint": "otlp.arize.com:443",
-            "api_key": "copilot-key",
-            "space_id": "copilot-space",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
+            "api_key": "copilot-key"
         }
         config_file.write_text(json.dumps(config, indent=2))
 
@@ -340,11 +333,11 @@ class TestUninstall:
         # Second uninstall should be a no-op, not raise
         claude_install.uninstall()
 
-    def test_uninstall_clears_arize_env_keys(self, fake_home, monkeypatch):
-        """Uninstall pops Arize env vars from settings.json.
+    def test_uninstall_clears_atatus_env_keys(self, fake_home, monkeypatch):
+        """Uninstall pops Atatus env vars from settings.json.
 
         Regression guard: the previous bash installer cleaned
-        ARIZE_PROJECT_NAME / ARIZE_TRACE_ENABLED / etc. out of
+        ATATUS_PROJECT_NAME / ATATUS_TRACE_ENABLED / etc. out of
         settings.json on uninstall. The Python port only removed hooks
         and plugins, leaving stale env entries.
         """
@@ -354,16 +347,15 @@ class TestUninstall:
 
         claude_install.install(with_skills=False)
 
-        # Inject extra Arize env keys + a non-Arize key that must be preserved.
+        # Inject extra Atatus env keys + a non-Atatus key that must be preserved.
         settings_file = fake_home / ".claude" / "settings.json"
         settings = json.loads(settings_file.read_text())
         settings["env"].update(
             {
-                "ARIZE_USER_ID": "user-42",
-                "ARIZE_API_KEY": "ak-secret",
-                "ARIZE_SPACE_ID": "sp-abc",
-                "PHOENIX_ENDPOINT": "http://localhost:6006",
-                "UNRELATED_VAR": "keep-me",
+                "ATATUS_USER_ID": "user-42",
+                "ATATUS_API_KEY": "ak-secret",
+                "ATATUS_OTLP_ENDPOINT": "https://otel-rx.atatus.com",
+                "UNRELATED_VAR": "keep-me"
             }
         )
         settings_file.write_text(json.dumps(settings, indent=2) + "\n")
@@ -373,22 +365,21 @@ class TestUninstall:
         settings = json.loads(settings_file.read_text())
         env = settings.get("env", {})
 
-        # All Arize keys are gone
+        # All Atatus keys are gone
         for key in (
-            "ARIZE_PROJECT_NAME",
-            "ARIZE_TRACE_ENABLED",
-            "ARIZE_USER_ID",
-            "ARIZE_API_KEY",
-            "ARIZE_SPACE_ID",
-            "PHOENIX_ENDPOINT",
+            "ATATUS_PROJECT_NAME",
+            "ATATUS_TRACE_ENABLED",
+            "ATATUS_USER_ID",
+            "ATATUS_API_KEY",
+            "ATATUS_OTLP_ENDPOINT",
         ):
             assert key not in env, f"{key} should have been removed from env"
 
-        # Non-Arize env survives
+        # Non-Atatus env survives
         assert env.get("UNRELATED_VAR") == "keep-me"
 
     def test_uninstall_drops_env_block_when_emptied(self, fake_home, monkeypatch):
-        """If removing Arize keys leaves env empty, the env block is dropped."""
+        """If removing Atatus keys leaves env empty, the env block is dropped."""
         import tracing.claude_code.install as claude_install
 
         _mock_prompts(monkeypatch)
@@ -397,7 +388,7 @@ class TestUninstall:
 
         settings_file = fake_home / ".claude" / "settings.json"
         settings = json.loads(settings_file.read_text())
-        # install only set ARIZE_* keys, so removing them leaves env empty
+        # install only set ATATUS_* keys, so removing them leaves env empty
         assert "env" not in settings
 
     def test_uninstall_preserves_third_party_hooks(self, fake_home, monkeypatch):
@@ -436,10 +427,10 @@ class TestDryRun:
     """Dry-run mode should not write files."""
 
     def test_install_dry_run_writes_nothing(self, fake_home, monkeypatch):
-        """With ARIZE_DRY_RUN=true, install() logs but does not write files."""
+        """With ATATUS_DRY_RUN=true, install() logs but does not write files."""
         import tracing.claude_code.install as claude_install
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
 
         claude_install.install(with_skills=False)
@@ -447,5 +438,5 @@ class TestDryRun:
         settings_file = fake_home / ".claude" / "settings.json"
         assert not settings_file.exists()
 
-        config_file = fake_home / ".arize" / "harness" / "config.json"
+        config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert not config_file.exists()

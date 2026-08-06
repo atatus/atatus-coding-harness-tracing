@@ -82,11 +82,11 @@ def _disable_env_vars(monkeypatch):
     """Clear env vars that could influence session resolution."""
     monkeypatch.delenv("KIRO_SESSION_ID", raising=False)
     monkeypatch.delenv("KIRO_AGENT_PATH", raising=False)
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture
@@ -201,11 +201,11 @@ class TestUserPromptSubmit:
         assert sm2.get("trace_count") == "2"
 
     def test_stores_raw_prompt_not_redacted(self, captured_spans, tmp_path, monkeypatch):
-        """Even with ARIZE_LOG_PROMPTS=false, the raw prompt is stored in state.
+        """Even with ATATUS_LOG_PROMPTS=false, the raw prompt is stored in state.
 
         Redaction happens at span emission time (in stop), not at storage time.
         """
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         payload = _load_fixture("user_prompt_submit.json")
         _invoke_main(payload)
 
@@ -255,8 +255,8 @@ class TestToolFlow:
         assert "items" in output_val
 
     def test_log_tool_content_false_redacts(self, captured_spans, monkeypatch):
-        """With ARIZE_LOG_TOOL_CONTENT=false, input.value and output.value are redacted."""
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        """With ATATUS_LOG_TOOL_CONTENT=false, input.value and output.value are redacted."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         pre = _load_fixture("pre_tool_use.json")
         post = _load_fixture("post_tool_use.json")
         _invoke_main(pre)
@@ -338,8 +338,8 @@ class TestStop:
         assert attrs["session.id"] == SESSION_1
 
     def test_log_prompts_false_redacts_both_input_and_output(self, captured_spans, monkeypatch):
-        """With ARIZE_LOG_PROMPTS=false, both input.value and output.value are redacted."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        """With ATATUS_LOG_PROMPTS=false, both input.value and output.value are redacted."""
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         prompt = _load_fixture("user_prompt_submit.json")
         stop = _load_fixture("stop.json")
         _invoke_main(prompt)
@@ -352,7 +352,7 @@ class TestStop:
 
     def test_llm_output_messages_carries_redacted_output(self, captured_spans, monkeypatch):
         """llm.output_messages JSON contains the same redacted text as output.value."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         prompt = _load_fixture("user_prompt_submit.json")
         stop = _load_fixture("stop.json")
         _invoke_main(prompt)
@@ -465,7 +465,7 @@ class TestStopSidecarEnrichment:
 
         attrs = _span_attrs(captured_spans[0])
         assert attrs["kiro.turn_duration_ms"] == 10151
-        assert attrs["kiro.agent_name"] == "arize-traced"
+        assert attrs["kiro.agent_name"] == "atatus-traced"
         assert attrs["kiro.context_usage_percentage"] == 4.7
 
     def test_no_sidecar_no_enrichment(self, captured_spans, tmp_path):
@@ -506,7 +506,7 @@ class TestStopSidecarEnrichment:
 
         attrs = _span_attrs(captured_spans[0])
         assert attrs["llm.model_name"] == "auto"
-        assert attrs["kiro.agent_name"] == "arize-traced"
+        assert attrs["kiro.agent_name"] == "atatus-traced"
         assert attrs["kiro.context_usage_percentage"] == 0.0
         # Turn-level attrs absent
         for key in (
@@ -603,7 +603,7 @@ class TestMain:
         payload = {
             "hook_event_name": "unknown",
             "session_id": SESSION_1,
-            "cwd": "/tmp",
+            "cwd": "/tmp"
         }
         rc = _invoke_main(payload)
         assert rc == 0
@@ -628,8 +628,8 @@ class TestMain:
         assert rc == 0
 
     def test_trace_disabled_returns_early(self, captured_spans, tmp_path, monkeypatch):
-        """With ARIZE_TRACE_ENABLED=false, main() returns 0, no state created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        """With ATATUS_TRACE_ENABLED=false, main() returns 0, no state created."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         payload = _load_fixture("agent_spawn.json")
         rc = _invoke_main(payload)
         assert rc == 0

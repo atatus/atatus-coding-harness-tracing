@@ -9,9 +9,9 @@ from core.setup import INSTALL_DIR, dry_run, info
 
 
 def wipe_shared_runtime() -> None:
-    """Remove ~/.arize/harness entirely.
+    """Remove ~/.atatus/harness entirely.
 
-    Respects ARIZE_DRY_RUN. Does NOT touch harness-specific config files
+    Respects ATATUS_DRY_RUN. Does NOT touch harness-specific config files
     (~/.claude/settings.json, .github/hooks/*, ~/.codex/config.toml,
     ~/.cursor/hooks.json) — those belong to per-harness uninstall.
     """

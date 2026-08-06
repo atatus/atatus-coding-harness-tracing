@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arize setup wizard shim for omp (Oh My Pi) tracing.
+"""Atatus setup wizard shim for omp (Oh My Pi) tracing.
 
 Delegates to tracing.omp.install for the actual install/uninstall logic.
 """
@@ -22,7 +22,7 @@ def uninstall() -> None:
 
 
 def main() -> None:
-    """Entry point for arize-setup-omp."""
+    """Entry point for atatus-setup-omp."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):

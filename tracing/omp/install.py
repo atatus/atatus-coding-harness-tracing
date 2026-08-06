@@ -43,7 +43,7 @@ from core.setup import (
 
 # Header-marker the installer writes into the shim and checks on uninstall so
 # we never delete a user's own extension file.
-_HEADER_MARKER = "// Arize omp tracing hook (shim)."
+_HEADER_MARKER = "// Atatus omp tracing hook (shim)."
 
 # ---------------------------------------------------------------------------
 # Path helpers (re-read constants each call so tests can monkeypatch them)
@@ -78,13 +78,13 @@ def _plugin_source():
     """Resolve the bundled shim asset relative to THIS installer file.
 
     Deliberately NOT via ``constants.PLUGIN_SOURCE``: at runtime the shell router
-    executes install.py from the rsynced ~/.arize/harness tree (where the .ts
+    executes install.py from the rsynced ~/.atatus/harness tree (where the .ts
     ships alongside it), while ``tracing.omp.constants`` is imported from the venv
     site-packages copy, which does not carry the data asset. Resolving from
     install.py's own location works in every delivery (repo, INSTALL_DIR) and
     avoids the FileNotFoundError seen in real installs.
     """
-    return Path(__file__).resolve().parent / "plugin" / "arize-tracing.ts"
+    return Path(__file__).resolve().parent / "plugin" / "atatus-tracing.ts"
 
 
 # ---------------------------------------------------------------------------

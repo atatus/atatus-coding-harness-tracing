@@ -1,10 +1,10 @@
 #!/bin/sh
-# Arize tracing hook dispatcher.
+# Atatus tracing hook dispatcher.
 # Called by every Claude Code hook. Bootstraps the venv on first run,
 # then dispatches to the named entry point.
 #
 # Usage: run-hook <entry-point-name>
-#   e.g. run-hook arize-hook-session-start
+#   e.g. run-hook atatus-hook-session-start
 #
 # Requires CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA env vars
 # (set automatically by Claude Code for plugin hooks).
@@ -53,7 +53,7 @@ needs_install() {
 # --- Bootstrap venv ---
 bootstrap() {
     PYTHON_CMD=$(find_python) || {
-        echo "[arize] No Python 3.9+ found — tracing will not be available" >&2
+        echo "[atatus] No Python 3.9+ found — tracing will not be available" >&2
         return 1
     }
 
@@ -61,11 +61,11 @@ bootstrap() {
         return 0
     fi
 
-    echo "[arize] Setting up tracing venv..." >&2
+    echo "[atatus] Setting up tracing venv..." >&2
     mkdir -p "$DATA_DIR"
 
     "$PYTHON_CMD" -m venv "$VENV_DIR" 2>&1 | tail -3 >&2 || {
-        echo "[arize] Failed to create venv" >&2
+        echo "[atatus] Failed to create venv" >&2
         return 1
     }
 
@@ -76,13 +76,13 @@ bootstrap() {
     elif [ -x "$VENV_DIR/Scripts/pip.exe" ]; then PIP="$VENV_DIR/Scripts/pip.exe"
     fi
     if [ -z "$PIP" ]; then
-        echo "[arize] pip not found in venv" >&2
+        echo "[atatus] pip not found in venv" >&2
         return 1
     fi
 
-    echo "[arize] Installing claude-code-tracing from $PLUGIN_ROOT..." >&2
+    echo "[atatus] Installing claude-code-tracing from $PLUGIN_ROOT..." >&2
     if ! "$PIP" install --quiet "$PLUGIN_ROOT" >&2; then
-        echo "[arize] pip install failed" >&2
+        echo "[atatus] pip install failed" >&2
         rm -f "$MARKER"
         return 1
     fi
@@ -91,7 +91,7 @@ bootstrap() {
     "$PYTHON_CMD" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" \
         "$PLUGIN_ROOT/pyproject.toml" > "$MARKER"
 
-    echo "[arize] Tracing venv ready" >&2
+    echo "[atatus] Tracing venv ready" >&2
 }
 
 # --- Main ---
@@ -100,7 +100,7 @@ bootstrap || exit 0
 
 # Find and exec the entry point
 EP=$(find_entry_point) || {
-    echo "[arize] Entry point '$HOOK_NAME' not found in venv" >&2
+    echo "[atatus] Entry point '$HOOK_NAME' not found in venv" >&2
     exit 0
 }
 

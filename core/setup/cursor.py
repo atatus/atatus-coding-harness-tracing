@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Arize Cursor Tracing - Interactive Setup.
+"""Atatus Cursor Tracing - Interactive Setup.
 
-Entry point for ``arize-setup-cursor``.  The heavy lifting now lives in
+Entry point for ``atatus-setup-cursor``.  The heavy lifting now lives in
 ``tracing/cursor/install.py``; this module is kept for backwards
 compatibility with the existing entry point.
 """
@@ -14,7 +14,7 @@ from tracing.cursor import install as _install_mod
 
 
 def main() -> None:
-    """Entry point for arize-setup-cursor."""
+    """Entry point for atatus-setup-cursor."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):
@@ -25,7 +25,7 @@ def main() -> None:
 def _run() -> None:
     """Delegate to the install module in tracing/cursor/.
 
-    This replaces the old interactive flow so that ``arize-setup-cursor``
+    This replaces the old interactive flow so that ``atatus-setup-cursor``
     and the installer router share a single code path.
     """
     _install_mod.install(with_skills=False)

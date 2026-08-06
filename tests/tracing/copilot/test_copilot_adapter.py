@@ -25,9 +25,9 @@ def copilot_state_dir(tmp_harness_dir, monkeypatch):
 @pytest.fixture
 def disable_env_vars(monkeypatch):
     """Clear env vars that could influence session resolution."""
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
 
 
 # ── resolve_session tests ────────────────────────────────────────────────────
@@ -155,10 +155,10 @@ class TestEnsureSessionInitialized:
         int(sid, 16)
 
     def test_project_name_from_env(self, copilot_state_dir, monkeypatch):
-        """ARIZE_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         sm = self._make_state(copilot_state_dir, "proj-env")
         adapter.ensure_session_initialized(sm, {"cwd": "/home/user/other-project"})
         assert sm.get("project_name") == "my-env-project"
@@ -185,9 +185,9 @@ class TestEnsureSessionInitialized:
 
     def test_user_id_from_env(self, copilot_state_dir, monkeypatch):
         """user_id is taken from env.user_id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_USER_ID", "env-user-42")
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_USER_ID", "env-user-42")
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
         sm = self._make_state(copilot_state_dir, "user-env")
         adapter.ensure_session_initialized(sm, {"session_id": "s1"})
         assert sm.get("user_id") == "env-user-42"
@@ -201,7 +201,7 @@ class TestEnsureSessionInitialized:
             "session_id": "d4870649-2f69-472d-96a2-599e55ab13f0",
             "timestamp": "2026-05-04T23:25:33.735Z",
             "initial_prompt": "fix the bug",
-            "source": "new",
+            "source": "new"
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("session_id") == "d4870649-2f69-472d-96a2-599e55ab13f0"
@@ -274,7 +274,7 @@ class TestGcStaleStateFiles:
 class TestCheckRequirements:
     def test_enabled_returns_true(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=True -> returns True and STATE_DIR exists."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         state_dir = tmp_harness_dir / "state" / "copilot-check"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is True
@@ -282,7 +282,7 @@ class TestCheckRequirements:
 
     def test_disabled_returns_false(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=False -> returns False, STATE_DIR not created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         state_dir = tmp_harness_dir / "state" / "copilot-nope"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is False

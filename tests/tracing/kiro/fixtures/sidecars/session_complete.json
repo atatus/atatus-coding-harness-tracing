@@ -6,7 +6,7 @@
   "updated_at": 1778266582,
   "session_state": {
     "version": 1,
-    "agent_name": "arize-traced",
+    "agent_name": "atatus-traced",
     "rts_model_state": {
       "conversation_id": "00000000-0000-0000-0000-000000000001",
       "model_info": {

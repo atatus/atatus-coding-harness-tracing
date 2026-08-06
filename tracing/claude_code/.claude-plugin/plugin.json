@@ -1,20 +1,19 @@
 {
   "name": "claude-code-tracing",
-  "description": "Automatic tracing of Claude Code sessions to Arize AX or Phoenix with OpenInference spans.",
+  "description": "Automatic tracing of Claude Code sessions to Atatus with OpenInference spans.",
   "version": "1.0.3",
   "author": {
-    "name": "Arize AI",
-    "email": "support@arize.com",
-    "url": "https://arize.com"
+    "name": "Atatus",
+    "email": "hello@atatus.com",
+    "url": "https://www.atatus.com"
   },
-  "repository": "https://github.com/Arize-ai/coding-harness-tracing",
+  "repository": "https://github.com/atatus/coding-harness-tracing",
   "license": "MIT",
   "keywords": [
     "tracing",
     "agents",
     "openinference",
-    "arize",
-    "phoenix",
+    "atatus",
     "claude-code",
     "observability"
   ]

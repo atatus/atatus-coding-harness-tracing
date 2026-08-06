@@ -14,8 +14,8 @@ from core.common import (
     FileLock,
     StateManager,
     _attrs_to_otlp,
-    _otlp_to_phoenix_payload,
     _resolve_kind,
+    _stamp_atatus_identity,
     _to_otlp_attr_value,
     build_multi_span,
     build_span,
@@ -35,14 +35,14 @@ from core.common import (
 
 class TestLogging:
     def test_log_verbose_on(self, capsys, monkeypatch):
-        """log() writes to stderr when ARIZE_VERBOSE=true."""
-        monkeypatch.setenv("ARIZE_VERBOSE", "true")
+        """log() writes to stderr when ATATUS_VERBOSE=true."""
+        monkeypatch.setenv("ATATUS_VERBOSE", "true")
         log("test message")
         assert "test message" in capsys.readouterr().err
 
     def test_log_verbose_off(self, capsys, monkeypatch):
-        """log() is silent when ARIZE_VERBOSE is not set."""
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+        """log() is silent when ATATUS_VERBOSE is not set."""
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
         log("test message")
         assert capsys.readouterr().err == ""
 
@@ -52,14 +52,14 @@ class TestLogging:
         assert "something broke" in capsys.readouterr().err
 
     def test_debug_dump_off(self, tmp_path, monkeypatch):
-        """debug_dump() does nothing when ARIZE_TRACE_DEBUG is not true."""
-        monkeypatch.delenv("ARIZE_TRACE_DEBUG", raising=False)
+        """debug_dump() does nothing when ATATUS_TRACE_DEBUG is not true."""
+        monkeypatch.delenv("ATATUS_TRACE_DEBUG", raising=False)
         debug_dump("test_label", {"key": "val"})
         # no files should be created in debug dir
 
     def test_debug_dump_on(self, tmp_path, monkeypatch):
-        """debug_dump() writes JSON file when ARIZE_TRACE_DEBUG=true."""
-        monkeypatch.setenv("ARIZE_TRACE_DEBUG", "true")
+        """debug_dump() writes JSON file when ATATUS_TRACE_DEBUG=true."""
+        monkeypatch.setenv("ATATUS_TRACE_DEBUG", "true")
         debug_dir = tmp_path / "debug"
         monkeypatch.setattr("core.constants.STATE_BASE_DIR", tmp_path)
         debug_dump("test_label", {"key": "val"})
@@ -90,7 +90,7 @@ class TestStderrRedirect:
 
     def test_writes_stderr_to_log_file(self, tmp_path, monkeypatch):
         log_file = tmp_path / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
 
         redirect_stderr_to_log_file()
         error("boom")
@@ -99,14 +99,14 @@ class TestStderrRedirect:
         assert "boom" in log_file.read_text()
 
     def test_noop_when_log_file_unset(self, monkeypatch):
-        monkeypatch.delenv("ARIZE_LOG_FILE", raising=False)
+        monkeypatch.delenv("ATATUS_LOG_FILE", raising=False)
         original = __import__("sys").stderr
         redirect_stderr_to_log_file()
         assert __import__("sys").stderr is original
 
     def test_creates_parent_directory(self, tmp_path, monkeypatch):
         log_file = tmp_path / "nested" / "dir" / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
 
         redirect_stderr_to_log_file()
         error("hello")
@@ -119,7 +119,7 @@ class TestStderrRedirect:
         import sys as _sys
 
         log_file = tmp_path / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
         original = _sys.stderr
 
         redirect_stderr_to_log_file()
@@ -130,7 +130,7 @@ class TestStderrRedirect:
 
     def test_restore_is_idempotent(self, tmp_path, monkeypatch):
         log_file = tmp_path / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
 
         redirect_stderr_to_log_file()
         restore_stderr_from_log_file()
@@ -142,7 +142,7 @@ class TestStderrRedirect:
         import sys as _sys
 
         log_file = tmp_path / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
 
         redirect_stderr_to_log_file()
         fh_after_first = _sys.stderr
@@ -155,7 +155,7 @@ class TestStderrRedirect:
         import sys as _sys
 
         # /dev/null/foo is unwritable on POSIX (file under a file).
-        monkeypatch.setenv("ARIZE_LOG_FILE", "/dev/null/cannot-create.log")
+        monkeypatch.setenv("ATATUS_LOG_FILE", "/dev/null/cannot-create.log")
         original = _sys.stderr
         redirect_stderr_to_log_file()
         assert _sys.stderr is original  # untouched
@@ -477,7 +477,7 @@ class TestResolveKind:
             ("chain", 1),
             ("INTERNAL", 1),
             ("internal", 1),
-            ("", 1),
+            ("", 1)
         ],
     )
     def test_internal_kinds(self, kind, expected):
@@ -493,7 +493,7 @@ class TestResolveKind:
             ("PRODUCER", 4),
             ("producer", 4),
             ("CONSUMER", 5),
-            ("consumer", 5),
+            ("consumer", 5)
         ],
     )
     def test_other_kinds(self, kind, expected):
@@ -853,100 +853,6 @@ class TestBuildMultiSpan:
         assert scope["name"] == "override-scope"
 
 
-# ── Phoenix REST payload translation tests ────────────────────────────────
-
-
-class TestPhoenixPayloadTranslation:
-    def test_translates_otlp_payload_to_phoenix_create_spans_body(self):
-        payload = {
-            "resourceSpans": [
-                {
-                    "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "svc"}}]},
-                    "scopeSpans": [
-                        {
-                            "scope": {"name": "scope"},
-                            "spans": [
-                                {
-                                    "traceId": "t" * 32,
-                                    "spanId": "s" * 16,
-                                    "parentSpanId": "p" * 16,
-                                    "name": "tool-call",
-                                    "kind": 1,
-                                    "startTimeUnixNano": "1000000000",
-                                    "endTimeUnixNano": "1500000000",
-                                    "attributes": [
-                                        {"key": "openinference.span.kind", "value": {"stringValue": "TOOL"}},
-                                        {"key": "count", "value": {"intValue": "3"}},
-                                    ],
-                                    "events": [
-                                        {
-                                            "name": "exception",
-                                            "timeUnixNano": "1250000000",
-                                            "attributes": [{"key": "message", "value": {"stringValue": "boom"}}],
-                                        }
-                                    ],
-                                    "status": {"code": 2, "message": "failed"},
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ]
-        }
-
-        result = _otlp_to_phoenix_payload(payload)
-
-        assert result == {
-            "data": [
-                {
-                    "name": "tool-call",
-                    "context": {"trace_id": "t" * 32, "span_id": "s" * 16},
-                    "span_kind": "TOOL",
-                    "start_time": "1970-01-01T00:00:01.000000Z",
-                    "end_time": "1970-01-01T00:00:01.500000Z",
-                    "status_code": "ERROR",
-                    "status_message": "failed",
-                    "attributes": {
-                        "service.name": "svc",
-                        "openinference.span.kind": "TOOL",
-                        "count": 3,
-                    },
-                    "parent_id": "p" * 16,
-                    "events": [
-                        {
-                            "name": "exception",
-                            "timestamp": "1970-01-01T00:00:01.250000Z",
-                            "attributes": {"message": "boom"},
-                        }
-                    ],
-                }
-            ]
-        }
-
-    def test_rejects_missing_phoenix_span_timestamp(self):
-        payload = {
-            "resourceSpans": [
-                {
-                    "scopeSpans": [
-                        {
-                            "spans": [
-                                {
-                                    "traceId": "t" * 32,
-                                    "spanId": "s" * 16,
-                                    "name": "missing-time",
-                                    "endTimeUnixNano": "2000000000",
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-
-        with pytest.raises(ValueError, match="Invalid Unix nanosecond timestamp"):
-            _otlp_to_phoenix_payload(payload)
-
-
 # ── EnvConfig property tests ──────────────────────────────────────────────
 
 
@@ -954,19 +860,19 @@ class TestEnvConfigProperties:
     """Tests for _Env (accessed via the module-level `env` singleton)."""
 
     def test_verbose_true(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_VERBOSE", "true")
+        monkeypatch.setenv("ATATUS_VERBOSE", "true")
         assert env.verbose is True
 
     def test_verbose_false(self, monkeypatch):
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
         assert env.verbose is False
 
     def test_dry_run_true(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         assert env.dry_run is True
 
     def test_dry_run_false(self, monkeypatch):
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
         assert env.dry_run is False
 
 
@@ -976,7 +882,7 @@ class TestLoggingFlagPrecedence:
     @pytest.fixture(autouse=True)
     def _fresh_env(self, monkeypatch):
         # Clear any inherited env values so each test starts from a clean slate.
-        for key in ("ARIZE_LOG_PROMPTS", "ARIZE_LOG_TOOL_DETAILS", "ARIZE_LOG_TOOL_CONTENT"):
+        for key in ("ATATUS_LOG_PROMPTS", "ATATUS_LOG_TOOL_DETAILS", "ATATUS_LOG_TOOL_CONTENT"):
             monkeypatch.delenv(key, raising=False)
         # Reset the cached_property between cases.
         from core.common import env as _env
@@ -1009,12 +915,12 @@ class TestLoggingFlagPrecedence:
 
     def test_env_overrides_config(self, monkeypatch):
         self._patch_config(monkeypatch, {"prompts": False})
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
         assert env.log_prompts is True
 
     def test_env_overrides_default(self, monkeypatch):
         self._patch_config(monkeypatch, None)
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         assert env.log_tool_details is False
 
     def test_partial_config_falls_through_to_default(self, monkeypatch):
@@ -1048,13 +954,13 @@ class TestSendSpan:
                                 "endTimeUnixNano": "2000000000",
                                 "attributes": [
                                     {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}},
-                                    {"key": "input.value", "value": {"stringValue": "hello"}},
+                                    {"key": "input.value", "value": {"stringValue": "hello"}}
                                 ],
-                                "status": {"code": 1},
+                                "status": {"code": 1}
                             }
-                        ],
+                        ]
                     }
-                ],
+                ]
             }
         ]
     }
@@ -1065,7 +971,7 @@ class TestSendSpan:
             "resourceSpans": [
                 {
                     "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service_name}}]},
-                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}],
+                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
                 }
             ]
         }
@@ -1078,8 +984,8 @@ class TestSendSpan:
 
     def test_dry_run_returns_true(self, monkeypatch):
         """send_span in dry_run mode returns True without sending."""
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
         result = send_span(self._SAMPLE_SPAN)
         assert result is True
 
@@ -1087,14 +993,14 @@ class TestSendSpan:
     @mock.patch("core.common.urllib.request.urlopen")
     def test_uses_resolve_backend(self, mock_urlopen, mock_resolve, monkeypatch):
         """send_span calls resolve_backend() to get credentials."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://phoenix:6006",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
             "api_key": "",
-            "project_name": "test-proj",
+            "project_name": "test-proj"
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1105,67 +1011,19 @@ class TestSendSpan:
         assert send_span(self._SAMPLE_SPAN) is True
         mock_resolve.assert_called_once_with(self._SAMPLE_SPAN)
 
-    @mock.patch("core.common.resolve_backend")
-    @mock.patch("core.common.urllib.request.urlopen")
-    def test_phoenix_direct_send(self, mock_urlopen, mock_resolve, monkeypatch):
-        """send_span sends directly to Phoenix REST endpoint."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
-
-        mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://phoenix:6006",
-            "api_key": "test-key",
-            "project_name": "my-project",
-        }
-        mock_resp = mock.MagicMock()
-        mock_resp.status = 200
-        mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
-        mock_resp.__exit__ = mock.Mock(return_value=False)
-        mock_urlopen.return_value = mock_resp
-
-        assert send_span(self._SAMPLE_SPAN) is True
-
-        req = mock_urlopen.call_args[0][0]
-        assert req.full_url == "http://phoenix:6006/v1/projects/my-project/spans"
-        assert req.get_header("Content-type") == "application/json"
-        assert req.get_header("Authorization") == "Bearer test-key"
-        assert req.method == "POST"
-        body = json.loads(req.data)
-        assert body == {
-            "data": [
-                {
-                    "name": "test-span",
-                    "context": {
-                        "trace_id": "0123456789abcdef0123456789abcdef",
-                        "span_id": "abcdef1234567890",
-                    },
-                    "span_kind": "LLM",
-                    "start_time": "1970-01-01T00:00:01.000000Z",
-                    "end_time": "1970-01-01T00:00:02.000000Z",
-                    "status_code": "OK",
-                    "status_message": "",
-                    "attributes": {
-                        "service.name": "test-service",
-                        "openinference.span.kind": "LLM",
-                        "input.value": "hello",
-                    },
-                }
-            ]
-        }
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
-    def test_phoenix_no_api_key_no_auth_header(self, mock_urlopen, mock_resolve, monkeypatch):
-        """Phoenix send omits Authorization header when api_key is empty."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+    def test_atatus_no_api_key_no_auth_header(self, mock_urlopen, mock_resolve, monkeypatch):
+        """Atatus send omits Authorization header when api_key is empty."""
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://localhost:6006",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
             "api_key": "",
-            "project_name": "default",
+            "project_name": "default"
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1179,16 +1037,16 @@ class TestSendSpan:
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
-    def test_phoenix_send_failure(self, mock_urlopen, mock_resolve, monkeypatch):
-        """Phoenix send returns False on network error."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+    def test_atatus_send_failure(self, mock_urlopen, mock_resolve, monkeypatch):
+        """Atatus send returns False on network error."""
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://phoenix:6006",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
             "api_key": "",
-            "project_name": "default",
+            "project_name": "default"
         }
         mock_urlopen.side_effect = Exception("connection refused")
 
@@ -1196,19 +1054,19 @@ class TestSendSpan:
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
-    def test_phoenix_http_error_logs_response_body(self, mock_urlopen, mock_resolve, capsys, monkeypatch):
-        """Phoenix HTTP errors include the response body in logs."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+    def test_atatus_http_error_logs_response_body(self, mock_urlopen, mock_resolve, capsys, monkeypatch):
+        """Atatus HTTP errors include the response body in logs."""
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://phoenix:6006",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
             "api_key": "",
-            "project_name": "default",
+            "project_name": "default"
         }
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "http://phoenix:6006/v1/projects/default/spans",
+            "https://otel-rx.atatus.com/v1/traces",
             400,
             "Bad Request",
             {},
@@ -1220,17 +1078,16 @@ class TestSendSpan:
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
-    def test_arize_direct_send(self, mock_urlopen, mock_resolve, monkeypatch):
-        """send_span sends directly to Arize HTTP/JSON endpoint."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+    def test_atatus_direct_send(self, mock_urlopen, mock_resolve, monkeypatch):
+        """send_span sends directly to Atatus HTTP/JSON endpoint."""
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "arize",
+            "target": "atatus",
             "api_key": "my-key",
-            "space_id": "my-space",
-            "endpoint": "otlp.arize.com:443",
-            "project_name": "proj",
+            "endpoint": "https://otel-rx.atatus.com",
+            "project_name": "proj"
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1241,112 +1098,30 @@ class TestSendSpan:
         assert send_span(self._SAMPLE_SPAN) is True
 
         req = mock_urlopen.call_args[0][0]
-        assert req.full_url == "https://otlp.arize.com:443/v1/traces"
+        assert req.full_url == "https://otel-rx.atatus.com/v1/traces"
         assert req.get_header("Content-type") == "application/json"
-        assert req.get_header("Authorization") == "Bearer my-key"
-        assert req.get_header("Space_id") == "my-space"
+        assert req.get_header("Api-key") == "my-key"
         body = json.loads(req.data)
-        # Verify arize.project.name injected into span attributes
-        span_attrs = body["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
-        project_names = [a["value"]["stringValue"] for a in span_attrs if a["key"] == "arize.project.name"]
-        assert "proj" in project_names
-
-    @mock.patch("core.common.resolve_backend")
-    @mock.patch("core.common.urllib.request.urlopen")
-    def test_arize_send_failure(self, mock_urlopen, mock_resolve, monkeypatch):
-        """Arize send returns False on network error."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
-
-        mock_resolve.return_value = {
-            "target": "arize",
-            "api_key": "key",
-            "space_id": "space",
-            "endpoint": "otlp.arize.com:443",
-            "project_name": "proj",
-        }
-        mock_urlopen.side_effect = urllib.error.URLError("connection refused")
-
-        assert send_span(self._SAMPLE_SPAN) is False
-
-    @mock.patch("core.common.resolve_backend")
-    @mock.patch("core.common.urllib.request.urlopen")
-    def test_arize_http_error_logs_response_body(self, mock_urlopen, mock_resolve, capsys, monkeypatch):
-        """Arize HTTP errors include the response body in logs."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
-
-        mock_resolve.return_value = {
-            "target": "arize",
-            "api_key": "key",
-            "space_id": "space",
-            "endpoint": "otlp.arize.com:443",
-            "project_name": "proj",
-        }
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://otlp.arize.com:443/v1/traces",
-            500,
-            "Internal Server Error",
-            {},
-            io.BytesIO(b'{"code":13,"message":"unable to validate authorization from span"}'),
-        )
-
-        assert send_span(self._SAMPLE_SPAN) is False
-        assert "unable to validate authorization from span" in capsys.readouterr().err
-
-    @mock.patch("core.common.resolve_backend")
-    def test_no_backend_returns_false(self, mock_resolve, monkeypatch):
-        """send_span returns False when no backend is configured."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
-
-        mock_resolve.return_value = {"target": "none", "project_name": "default"}
-
-        assert send_span(self._SAMPLE_SPAN) is False
-
-    @mock.patch("core.common.resolve_backend")
-    @mock.patch("core.common.urllib.request.urlopen")
-    def test_verbose_logs_payload(self, mock_urlopen, mock_resolve, capsys, monkeypatch):
-        """Verbose mode logs span payload to stderr."""
-        monkeypatch.setenv("ARIZE_VERBOSE", "true")
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-
-        mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://localhost:6006",
-            "api_key": "",
-            "project_name": "default",
-        }
-        mock_resp = mock.MagicMock()
-        mock_resp.status = 200
-        mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
-        mock_resp.__exit__ = mock.Mock(return_value=False)
-        mock_urlopen.return_value = mock_resp
-
-        send_span(self._SAMPLE_SPAN)
-        captured = capsys.readouterr().err
-        assert "span payload" in captured
-
-
-# ── get_target tests ──────────────────────────────────────────────────────
+        # Payload is forwarded as plain OTLP/JSON — no vendor attribute injection
+        assert "resourceSpans" in body
 
 
 class TestGetTarget:
 
-    def test_phoenix_when_endpoint_set(self, monkeypatch):
-        monkeypatch.setenv("PHOENIX_ENDPOINT", "http://phoenix:6006")
-        assert get_target() == "phoenix"
+    def test_none_when_only_endpoint_set(self, monkeypatch):
+        """An endpoint alone is not enough — the licence key selects the backend."""
+        monkeypatch.delenv("ATATUS_API_KEY", raising=False)
+        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", "https://otel-rx.atatus.com")
+        assert get_target() == "none"
 
-    def test_arize_when_key_and_space(self, monkeypatch):
-        monkeypatch.delenv("PHOENIX_ENDPOINT", raising=False)
-        monkeypatch.setenv("ARIZE_API_KEY", "key123")
-        monkeypatch.setenv("ARIZE_SPACE_ID", "space456")
-        assert get_target() == "arize"
+    def test_atatus_when_key_and_space(self, monkeypatch):
+        monkeypatch.delenv("ATATUS_OTLP_ENDPOINT", raising=False)
+        monkeypatch.setenv("ATATUS_API_KEY", "key123")
+        assert get_target() == "atatus"
 
     def test_none_when_nothing_set(self, monkeypatch):
-        monkeypatch.delenv("PHOENIX_ENDPOINT", raising=False)
-        monkeypatch.delenv("ARIZE_API_KEY", raising=False)
-        monkeypatch.delenv("ARIZE_SPACE_ID", raising=False)
+        monkeypatch.delenv("ATATUS_OTLP_ENDPOINT", raising=False)
+        monkeypatch.delenv("ATATUS_API_KEY", raising=False)
         assert get_target() == "none"
 
 
@@ -1357,7 +1132,7 @@ class TestDebugDump:
 
     def test_writes_json_to_debug_dir(self, tmp_path, monkeypatch):
         """debug_dump writes JSON file to STATE_BASE_DIR/debug/."""
-        monkeypatch.setenv("ARIZE_TRACE_DEBUG", "true")
+        monkeypatch.setenv("ATATUS_TRACE_DEBUG", "true")
         monkeypatch.setattr("core.constants.STATE_BASE_DIR", tmp_path)
         debug_dump("my_label", {"foo": "bar", "count": 42})
         debug_dir = tmp_path / "debug"
@@ -1377,7 +1152,7 @@ class TestResolveBackend:
     @pytest.fixture(autouse=True)
     def _fresh_env(self, monkeypatch):
         # Clear any inherited backend env vars so each test starts clean.
-        for key in ("ARIZE_API_KEY", "ARIZE_SPACE_ID", "PHOENIX_ENDPOINT", "PHOENIX_API_KEY", "ARIZE_PROJECT_NAME"):
+        for key in ("ATATUS_API_KEY", "ATATUS_OTLP_ENDPOINT", "ATATUS_PROJECT_NAME"):
             monkeypatch.delenv(key, raising=False)
 
     def _make_span(self, service_name=""):
@@ -1389,130 +1164,107 @@ class TestResolveBackend:
             "resourceSpans": [
                 {
                     "resource": {"attributes": attrs},
-                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "s"}]}],
+                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "s"}]}]
                 }
             ]
         }
 
     # ── Config-only paths ──────────────────────────────────────────────────
 
-    def test_phoenix_from_config(self, monkeypatch):
-        """Config harness entry with phoenix target; resolver returns those fields."""
+
+    def test_atatus_from_config(self, monkeypatch):
+        """A config harness entry with an atatus target resolves fully."""
         cfg = {
             "harnesses": {
                 "claude-code": {
                     "project_name": "claude-code",
-                    "target": "phoenix",
-                    "endpoint": "http://localhost:6006",
-                    "api_key": "ph-key",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-xxx"
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "phoenix"
-        assert result["endpoint"] == "http://localhost:6006"
-        assert result["api_key"] == "ph-key"
-        assert result["project_name"] == "claude-code"
-
-    def test_arize_from_config(self, monkeypatch):
-        """Config harness entry with arize target including space_id."""
-        cfg = {
-            "harnesses": {
-                "claude-code": {
-                    "project_name": "claude-code",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-xxx",
-                    "space_id": "U3Bh",
-                },
-            },
-        }
-        monkeypatch.setattr("core.config.load_config", lambda: cfg)
-
-        result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "arize"
-        assert result["endpoint"] == "otlp.arize.com:443"
+        assert result["target"] == "atatus"
+        assert result["endpoint"] == "https://otel-rx.atatus.com"
         assert result["api_key"] == "ak-xxx"
-        assert result["space_id"] == "U3Bh"
         assert result["project_name"] == "claude-code"
 
     # ── env-only paths (marketplace-install scenario) ──────────────────────
 
-    def test_arize_from_env_only(self, monkeypatch):
-        """ARIZE_API_KEY + ARIZE_SPACE_ID with no config entry resolves to arize."""
-        monkeypatch.setenv("ARIZE_API_KEY", "ak-env")
-        monkeypatch.setenv("ARIZE_SPACE_ID", "space-env")
+    def test_atatus_from_env_only(self, monkeypatch):
+        """ATATUS_API_KEY alone, with no config entry, resolves to atatus."""
+        monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
+        monkeypatch.delenv("ATATUS_OTLP_ENDPOINT", raising=False)
         monkeypatch.setattr("core.config.load_config", lambda: {})
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "arize"
+        assert result["target"] == "atatus"
         assert result["api_key"] == "ak-env"
-        assert result["space_id"] == "space-env"
-        assert result["endpoint"] == "otlp.arize.com:443"  # default
+        assert result["endpoint"] == "https://otel-rx.atatus.com"  # default
         assert result["project_name"] == "claude-code"  # falls back to service_name
 
-    def test_phoenix_from_env_only(self, monkeypatch):
-        """PHOENIX_ENDPOINT alone resolves to phoenix."""
-        monkeypatch.setenv("PHOENIX_ENDPOINT", "http://env:6006")
+    def test_endpoint_without_key_is_unresolved(self, monkeypatch):
+        """ATATUS_OTLP_ENDPOINT alone is not a usable backend."""
+        monkeypatch.delenv("ATATUS_API_KEY", raising=False)
+        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", "https://env.example.com")
         monkeypatch.setattr("core.config.load_config", lambda: {})
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "phoenix"
-        assert result["endpoint"] == "http://env:6006"
+        assert result["target"] == "none"
         assert result["project_name"] == "claude-code"
 
-    def test_phoenix_api_key_from_phoenix_env(self, monkeypatch):
-        """PHOENIX_API_KEY supplies the Phoenix bearer token (env-only install)."""
-        monkeypatch.setenv("PHOENIX_ENDPOINT", "http://env:6006")
-        monkeypatch.setenv("PHOENIX_API_KEY", "ph-env-key")
+    def test_atatus_api_key_from_atatus_env(self, monkeypatch):
+        """ATATUS_API_KEY supplies the Atatus bearer token (env-only install)."""
+        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", "https://env.example.com")
+        monkeypatch.setenv("ATATUS_API_KEY", "ph-env-key")
         monkeypatch.setattr("core.config.load_config", lambda: {})
 
         result = resolve_backend(self._make_span("opencode"))
-        assert result["target"] == "phoenix"
+        assert result["target"] == "atatus"
         assert result["api_key"] == "ph-env-key"
 
-    def test_phoenix_api_key_env_overrides_config(self, monkeypatch):
-        """PHOENIX_API_KEY env takes precedence over a config-set api_key."""
-        monkeypatch.setenv("PHOENIX_API_KEY", "ph-env-key")
+    def test_atatus_api_key_env_overrides_config(self, monkeypatch):
+        """ATATUS_API_KEY env takes precedence over a config-set api_key."""
+        monkeypatch.setenv("ATATUS_API_KEY", "ph-env-key")
         cfg = {
             "harnesses": {
                 "opencode": {
-                    "target": "phoenix",
-                    "endpoint": "http://localhost:6006",
-                    "api_key": "ph-config-key",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ph-config-key"
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("opencode"))
-        assert result["target"] == "phoenix"
+        assert result["target"] == "atatus"
         assert result["api_key"] == "ph-env-key"
 
-    def test_phoenix_api_key_falls_back_to_arize_api_key(self, monkeypatch):
-        """ARIZE_API_KEY still works as the Phoenix token when PHOENIX_API_KEY is unset."""
-        monkeypatch.setenv("PHOENIX_ENDPOINT", "http://env:6006")
-        monkeypatch.setenv("ARIZE_API_KEY", "ak-env")
+    def test_atatus_api_key_falls_back_to_atatus_api_key(self, monkeypatch):
+        """ATATUS_API_KEY still works as the Atatus token when ATATUS_API_KEY is unset."""
+        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", "https://env.example.com")
+        monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
         monkeypatch.setattr("core.config.load_config", lambda: {})
 
         result = resolve_backend(self._make_span("opencode"))
-        assert result["target"] == "phoenix"
+        assert result["target"] == "atatus"
         assert result["api_key"] == "ak-env"
 
     def test_project_name_env_override(self, monkeypatch):
-        """ARIZE_PROJECT_NAME overrides config project_name."""
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "from-env")
+        """ATATUS_PROJECT_NAME overrides config project_name."""
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "from-env")
         cfg = {
             "harnesses": {
                 "claude-code": {
                     "project_name": "from-config",
-                    "target": "arize",
-                    "api_key": "ak",
-                    "space_id": "sp",
-                },
-            },
+                    "target": "atatus",
+                    "api_key": "ak"
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
@@ -1521,42 +1273,39 @@ class TestResolveBackend:
 
     # ── env-overrides-config precedence ────────────────────────────────────
 
-    def test_env_arize_overrides_config_phoenix(self, monkeypatch):
-        """Env-set arize creds win even when config configures phoenix."""
-        monkeypatch.setenv("ARIZE_API_KEY", "ak-env")
-        monkeypatch.setenv("ARIZE_SPACE_ID", "space-env")
+    def test_env_atatus_overrides_config_atatus(self, monkeypatch):
+        """Env-set atatus creds win even when config configures atatus."""
+        monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
         cfg = {
             "harnesses": {
                 "claude-code": {
-                    "target": "phoenix",
-                    "endpoint": "http://localhost:6006",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com"
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "arize"
+        assert result["target"] == "atatus"
         assert result["api_key"] == "ak-env"
 
     def test_env_api_key_overrides_config(self, monkeypatch):
-        """ARIZE_API_KEY env overrides config api_key while keeping config target/endpoint/space_id."""
-        monkeypatch.setenv("ARIZE_API_KEY", "ak-env")
+        """ATATUS_API_KEY env overrides the config api_key, keeping config target/endpoint."""
+        monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
         cfg = {
             "harnesses": {
                 "claude-code": {
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-config",
-                    "space_id": "sp-config",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-config"
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
         assert result["api_key"] == "ak-env"
-        assert result["space_id"] == "sp-config"
 
     # ── error paths ────────────────────────────────────────────────────────
 
@@ -1567,62 +1316,63 @@ class TestResolveBackend:
         result = resolve_backend(self._make_span("claude-code"))
         assert result == {"target": "none", "project_name": "claude-code"}
         stderr = capsys.readouterr().err
-        assert "No backend configured" in stderr
-        assert "ARIZE_API_KEY" in stderr
+        assert "No Atatus license key" in stderr
+        assert "ATATUS_API_KEY" in stderr
 
-    def test_arize_env_missing_space_id(self, capsys, monkeypatch):
-        """ARIZE_API_KEY set but not ARIZE_SPACE_ID and no config → none."""
-        monkeypatch.setenv("ARIZE_API_KEY", "ak-env")
+    def test_no_key_anywhere_is_unresolved(self, capsys, monkeypatch):
+        """No ATATUS_API_KEY in env and none in config → none, with a clear error."""
+        monkeypatch.delenv("ATATUS_API_KEY", raising=False)
         monkeypatch.setattr("core.config.load_config", lambda: {})
 
         result = resolve_backend(self._make_span("claude-code"))
         assert result["target"] == "none"
-        stderr = capsys.readouterr().err
-        # Partial env doesn't switch target to arize; falls through to no-backend.
-        assert "No backend configured" in stderr
+        assert "No Atatus license key" in capsys.readouterr().err
 
-    def test_arize_config_missing_space_id(self, capsys, monkeypatch):
-        """Config arize entry without space_id and no env fallback → none."""
+    def test_atatus_from_config_only(self, monkeypatch):
+        """A config entry carrying endpoint + api_key resolves without any env."""
+        monkeypatch.delenv("ATATUS_API_KEY", raising=False)
+        monkeypatch.delenv("ATATUS_OTLP_ENDPOINT", raising=False)
         cfg = {
             "harnesses": {
                 "claude-code": {
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
                     "api_key": "ak-config",
-                },
-            },
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "none"
-        stderr = capsys.readouterr().err
-        assert "missing space_id" in stderr
+        assert result["target"] == "atatus"
+        assert result["api_key"] == "ak-config"
+        assert result["endpoint"] == "https://otel-rx.atatus.com"
 
-    def test_phoenix_config_missing_endpoint(self, capsys, monkeypatch):
-        """Config phoenix entry without endpoint and no PHOENIX_ENDPOINT env → none."""
+    def test_config_missing_endpoint_uses_default(self, monkeypatch):
+        """Endpoint is optional — it falls back to the default collector."""
+        monkeypatch.delenv("ATATUS_OTLP_ENDPOINT", raising=False)
         cfg = {
             "harnesses": {
                 "claude-code": {
-                    "target": "phoenix",
-                },
-            },
+                    "target": "atatus",
+                    "api_key": "ak-config",
+                }
+            }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
-        assert result["target"] == "none"
-        stderr = capsys.readouterr().err
-        assert "missing endpoint" in stderr
+        assert result["target"] == "atatus"
+        assert result["endpoint"] == "https://otel-rx.atatus.com"
 
     def test_ignores_top_level_backend_key(self, monkeypatch):
         """Old top-level backend: block is not consulted."""
         cfg = {
             "backend": {
-                "target": "phoenix",
-                "phoenix": {"endpoint": "http://global:6006", "api_key": "global-key"},
+                "target": "atatus",
+                "atatus": {"endpoint": "https://global.example.com", "api_key": "global-key"}
             },
-            "harnesses": {},
+            "harnesses": {}
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
@@ -1659,7 +1409,7 @@ class TestSendSpanEdgeCases:
         "resourceSpans": [
             {
                 "resource": {"attributes": []},
-                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}],
+                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
             }
         ]
     }
@@ -1670,16 +1420,16 @@ class TestSendSpanEdgeCases:
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
-    def test_phoenix_non_200_returns_false(self, mock_urlopen, mock_resolve, monkeypatch):
-        """Phoenix send returns False for non-2xx status."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+    def test_atatus_non_200_returns_false(self, mock_urlopen, mock_resolve, monkeypatch):
+        """Atatus send returns False for non-2xx status."""
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.return_value = {
-            "target": "phoenix",
-            "endpoint": "http://phoenix:6006",
+            "target": "atatus",
+            "endpoint": "https://otel-rx.atatus.com",
             "api_key": "",
-            "project_name": "default",
+            "project_name": "default"
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 500
@@ -1692,8 +1442,8 @@ class TestSendSpanEdgeCases:
     @mock.patch("core.common.resolve_backend")
     def test_resolve_backend_exception_returns_false(self, mock_resolve, monkeypatch):
         """send_span returns False when resolve_backend raises."""
-        monkeypatch.delenv("ARIZE_DRY_RUN", raising=False)
-        monkeypatch.delenv("ARIZE_VERBOSE", raising=False)
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
 
         mock_resolve.side_effect = RuntimeError("config corruption")
 
@@ -1701,14 +1451,14 @@ class TestSendSpanEdgeCases:
 
     def test_dry_run_logs_span_name(self, capsys, monkeypatch):
         """dry_run mode logs the span name."""
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
-        monkeypatch.setenv("ARIZE_VERBOSE", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_VERBOSE", "true")
 
         span = {
             "resourceSpans": [
                 {
                     "resource": {"attributes": []},
-                    "scopeSpans": [{"scope": {"name": "t"}, "spans": [{"name": "my-operation"}]}],
+                    "scopeSpans": [{"scope": {"name": "t"}, "spans": [{"name": "my-operation"}]}]
                 }
             ]
         }
@@ -1814,7 +1564,7 @@ class TestCustomAttributes:
             monkeypatch,
             {
                 "attributes": {"team": "payments", "environment": "prod"},
-                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}},
+                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}}
             },
         )
         # Shared key (environment) overridden; non-shared keys from both layers survive.
@@ -1831,7 +1581,7 @@ class TestCustomAttributes:
             monkeypatch,
             {
                 "attributes": {"environment": "prod-global"},
-                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}},
+                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}}
             },
         )
         monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "environment=staging")
@@ -1983,7 +1733,7 @@ class TestGetUserId:
 
     @pytest.fixture(autouse=True)
     def _fresh(self, monkeypatch):
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         from core.common import env as _env
 
         _env.__dict__.pop("_top_level_config", None)
@@ -2019,7 +1769,7 @@ class TestGetUserId:
             monkeypatch,
             {"user_id": "alice", "harnesses": {"claude-code": {"user_id": "bob"}}},
         )
-        monkeypatch.setenv("ARIZE_USER_ID", "carol")
+        monkeypatch.setenv("ATATUS_USER_ID", "carol")
         assert env.get_user_id("claude-code") == "carol"
         assert env.get_user_id("codex") == "carol"
 
@@ -2028,7 +1778,7 @@ class TestGetUserId:
             monkeypatch,
             {"user_id": "alice", "harnesses": {"claude-code": {"user_id": "bob"}}},
         )
-        monkeypatch.setenv("ARIZE_USER_ID", "")
+        monkeypatch.setenv("ATATUS_USER_ID", "")
         assert env.get_user_id("claude-code") == ""
 
     def test_user_id_property_regression(self, monkeypatch):
@@ -2039,5 +1789,82 @@ class TestGetUserId:
         )
         # Property doesn't take a service_name → only global + env apply.
         assert env.user_id == "alice"
-        monkeypatch.setenv("ARIZE_USER_ID", "carol")
+        monkeypatch.setenv("ATATUS_USER_ID", "carol")
         assert env.user_id == "carol"
+
+
+class TestStampAtatusIdentity:
+    """Project identity must travel in the payload, not only in config.
+
+    Atatus resolves (and auto-creates) a project from the OTLP resource's
+    service.name, so service.name has to carry the user's project name while the
+    harness slug moves to atatus.agent.harness. This mirrors what the upstream
+    Arize path shipped as arize.project.name.
+    """
+
+    @staticmethod
+    def _payload(service_name="claude-code"):
+        return {
+            "resourceSpans": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "service.name", "value": {"stringValue": service_name}}
+                        ]
+                    },
+                    "scopeSpans": [
+                        {"scope": {"name": "atatus-claude-plugin"}, "spans": [{"name": "Turn 1"}]}
+                    ],
+                }
+            ]
+        }
+
+    @staticmethod
+    def _attrs(payload):
+        return {
+            a["key"]: a["value"]["stringValue"]
+            for a in payload["resourceSpans"][0]["resource"]["attributes"]
+        }
+
+    def test_service_name_becomes_project_name(self):
+        out = _stamp_atatus_identity(self._payload(), "ashif-claude-code")
+        assert self._attrs(out)["service.name"] == "ashif-claude-code"
+
+    def test_harness_slug_preserved_under_agent_harness(self):
+        out = _stamp_atatus_identity(self._payload("codex"), "team-codex")
+        attrs = self._attrs(out)
+        assert attrs["atatus.agent.harness"] == "codex"
+        assert attrs["service.name"] == "team-codex"
+
+    def test_project_type_and_sdk_name_stamped(self):
+        attrs = self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
+        assert attrs["atatus.project.type"] == "llm"
+        assert attrs["telemetry.sdk.name"] == "atatus-coding-harness"
+
+    def test_does_not_mutate_input(self):
+        payload = self._payload()
+        _stamp_atatus_identity(payload, "proj")
+        assert self._attrs(payload)["service.name"] == "claude-code"
+
+    def test_empty_project_name_leaves_service_name_alone(self):
+        """resolve_backend falls back to service_name, so this is belt-and-braces."""
+        attrs = self._attrs(_stamp_atatus_identity(self._payload(), ""))
+        assert attrs["service.name"] == "claude-code"
+        assert attrs["atatus.project.type"] == "llm"
+
+    def test_upsert_not_duplicate(self):
+        """Stamping twice must not append duplicate keys."""
+        once = _stamp_atatus_identity(self._payload(), "proj")
+        twice = _stamp_atatus_identity(once, "proj")
+        keys = [a["key"] for a in twice["resourceSpans"][0]["resource"]["attributes"]]
+        assert len(keys) == len(set(keys))
+
+    def test_multi_span_payload_all_resources_stamped(self):
+        """build_multi_span emits one resourceSpans entry; guard the loop anyway."""
+        payload = self._payload()
+        payload["resourceSpans"].append(self._payload("cursor")["resourceSpans"][0])
+        out = _stamp_atatus_identity(payload, "proj")
+        for rs in out["resourceSpans"]:
+            attrs = {a["key"]: a["value"]["stringValue"] for a in rs["resource"]["attributes"]}
+            assert attrs["service.name"] == "proj"
+            assert attrs["atatus.project.type"] == "llm"

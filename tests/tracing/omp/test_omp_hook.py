@@ -36,7 +36,7 @@ import pytest
 from core.common import StateManager
 
 # Force synchronous send_span path in any handler that spawns a fork.
-os.environ["ARIZE_DISABLE_FORK"] = "true"
+os.environ["ATATUS_DISABLE_FORK"] = "true"
 
 # Import handlers (this import is what fails first in pure-TDD: the module does
 # not exist yet). The remaining tests then exercise its surface.
@@ -151,7 +151,7 @@ class TestHelpers:
                 {"type": "text", "text": "Hello "},
                 {"type": "thinking", "text": "SECRET"},
                 {"type": "toolCall", "id": "c1", "name": "bash", "arguments": {}},
-                {"type": "text", "text": "world"},
+                {"type": "text", "text": "world"}
             ]
         }
         assert _assistant_text(message) == "Hello world"
@@ -178,7 +178,7 @@ class TestHelpers:
             "content": [
                 {"type": "text", "text": "ok"},
                 {"type": "toolCall", "id": "c1", "name": "bash", "arguments": {"command": "ls"}},
-                {"type": "toolCall", "id": "c2", "name": "edit", "arguments": {"filePath": "/a"}},
+                {"type": "toolCall", "id": "c2", "name": "edit", "arguments": {"filePath": "/a"}}
             ]
         }
         calls = _tool_calls(message)
@@ -195,7 +195,7 @@ class TestHelpers:
         content = [
             {"type": "text", "text": "a"},
             {"type": "image"},
-            {"type": "text", "text": "b"},
+            {"type": "text", "text": "b"}
         ]
         assert _text_of_content(content) == "ab"
 
@@ -230,8 +230,8 @@ class TestReadStdin:
 
 class TestSendSpanAsync:
     def test_uses_sync_send_when_fork_disabled(self, monkeypatch):
-        """ARIZE_DISABLE_FORK=true -> bypass fork, call send_span synchronously."""
-        monkeypatch.setenv("ARIZE_DISABLE_FORK", "true")
+        """ATATUS_DISABLE_FORK=true -> bypass fork, call send_span synchronously."""
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
         with mock.patch("tracing.omp.hooks.handlers.send_span") as ss:
             _send_span_async({"resourceSpans": []})
         ss.assert_called_once_with({"resourceSpans": []})
@@ -469,7 +469,7 @@ class TestTurnEndToolSpans:
                 "model": "claude-sonnet-4",
                 "provider": "anthropic",
                 "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0},
-                "timestamp": 100,
+                "timestamp": 100
             },
             "toolResults": [
                 {
@@ -478,9 +478,9 @@ class TestTurnEndToolSpans:
                     "toolName": "bash",
                     "content": [{"type": "text", "text": "out"}],
                     "isError": False,
-                    "timestamp": 120,
+                    "timestamp": 120
                 }
-            ],
+            ]
         }
         _handle_before_agent_start(_load_fixture("before_agent_start.json"))
         _handle_turn_end(payload)
@@ -633,8 +633,8 @@ class TestAgentEnd:
                 "type": "agent_end",
                 "sessionId": "omp_sess_1",
                 "messages": [
-                    {"role": "toolResult", "content": [{"type": "text", "text": "tool output"}]},
-                ],
+                    {"role": "toolResult", "content": [{"type": "text", "text": "tool output"}]}
+                ]
             }
         )
         attrs = _get_attrs(_by_kind(captured_spans, "CHAIN")[0])
@@ -712,7 +712,7 @@ class TestRedaction:
     def test_redacts_prompt_and_response_when_log_prompts_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         _run_basic_turn(state)
         _handle_agent_end(_load_fixture("agent_end.json"))
         llm = _by_kind(captured_spans, "LLM")[0]
@@ -728,7 +728,7 @@ class TestRedaction:
     def test_redacts_tool_content_when_log_tool_content_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         _run_basic_turn(state)
         for t in _by_kind(captured_spans, "TOOL"):
             attrs = _get_attrs(t)
@@ -738,14 +738,14 @@ class TestRedaction:
     def test_redacts_tool_details_when_log_tool_details_false(
         self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
     ):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         _run_basic_turn(state)
         bash = next(s for s in _by_kind(captured_spans, "TOOL") if _name(s) == "bash")
         assert "redacted" in _get_attrs(bash)["tool.command"]["stringValue"]
 
     def test_tool_name_not_redacted(self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         _run_basic_turn(state)
         bash = next(s for s in _by_kind(captured_spans, "TOOL") if _name(s) == "bash")
         assert _get_attrs(bash)["tool.name"]["stringValue"] == "bash"
@@ -765,12 +765,12 @@ def _make_turn_end_with_tool(tool_name, arguments):
             "role": "assistant",
             "content": [
                 {"type": "text", "text": "ok"},
-                {"type": "toolCall", "id": "call_x", "name": tool_name, "arguments": arguments},
+                {"type": "toolCall", "id": "call_x", "name": tool_name, "arguments": arguments}
             ],
             "model": "claude-sonnet-4",
             "provider": "anthropic",
             "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "cost": {"total": 0}},
-            "timestamp": 200,
+            "timestamp": 200
         },
         "toolResults": [
             {
@@ -779,9 +779,9 @@ def _make_turn_end_with_tool(tool_name, arguments):
                 "toolName": tool_name,
                 "content": [{"type": "text", "text": "tool-out"}],
                 "isError": False,
-                "timestamp": 220,
+                "timestamp": 220
             }
-        ],
+        ]
     }
 
 
@@ -875,7 +875,7 @@ class TestMainEntryPoint:
         return bas, te, ae, ss
 
     def test_dispatches_before_agent_start(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "before_agent_start", "sessionId": "x", "prompt": "hi"}
         bas, te, ae, ss = self._run_main(payload)
         bas.assert_called_once_with(payload)
@@ -884,33 +884,33 @@ class TestMainEntryPoint:
         ss.assert_not_called()
 
     def test_dispatches_turn_end(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "turn_end", "sessionId": "x", "message": {}, "toolResults": []}
         bas, te, ae, ss = self._run_main(payload)
         te.assert_called_once_with(payload)
         bas.assert_not_called()
 
     def test_dispatches_agent_end(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "agent_end", "sessionId": "x", "messages": []}
         bas, te, ae, ss = self._run_main(payload)
         ae.assert_called_once_with(payload)
 
     def test_dispatches_session_shutdown(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "session_shutdown", "sessionId": "x"}
         bas, te, ae, ss = self._run_main(payload)
         ss.assert_called_once_with(payload)
 
     def test_unknown_type_does_not_dispatch(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "something-else", "sessionId": "x"}
         bas, te, ae, ss = self._run_main(payload)
         for m in (bas, te, ae, ss):
             m.assert_not_called()
 
     def test_requirements_not_met_short_circuits(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         payload = {"type": "turn_end", "sessionId": "x"}
         with (
             mock.patch("tracing.omp.hooks.handlers.check_requirements", return_value=False),
@@ -921,7 +921,7 @@ class TestMainEntryPoint:
         te.assert_not_called()
 
     def test_malformed_stdin_no_crash(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.omp.hooks.handlers.check_requirements", return_value=True),
             mock.patch.object(sys, "stdin", new=io.StringIO("not-json")),
@@ -932,7 +932,7 @@ class TestMainEntryPoint:
 
     def test_handler_exception_is_caught(self, monkeypatch):
         """A raised exception in a handler must be caught — never escape main()."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "turn_end", "sessionId": "x"}
         with (
             mock.patch("tracing.omp.hooks.handlers.check_requirements", return_value=True),
@@ -945,7 +945,7 @@ class TestMainEntryPoint:
             main()  # must not raise
 
     def test_no_system_exit_on_unknown(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         payload = {"type": "???"}
         with (
             mock.patch("tracing.omp.hooks.handlers.check_requirements", return_value=True),
@@ -957,7 +957,7 @@ class TestMainEntryPoint:
                 pytest.fail("main() raised SystemExit on unknown type")
 
     def test_empty_stdin_no_crash(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.omp.hooks.handlers.check_requirements", return_value=True),
             mock.patch.object(sys, "stdin", new=io.StringIO("")),
@@ -981,9 +981,9 @@ class TestSpanServiceMetadata:
         assert svc["key"] == "service.name"
         assert svc["value"]["stringValue"] == "omp"
 
-    def test_scope_name_arize_omp_plugin(self, mock_resolve, mock_ensure, state, captured_spans):
+    def test_scope_name_atatus_omp_plugin(self, mock_resolve, mock_ensure, state, captured_spans):
         _run_basic_turn(state)
         _handle_agent_end(_load_fixture("agent_end.json"))
         s = captured_spans[0]
         scope = s["resourceSpans"][0]["scopeSpans"][0]["scope"]
-        assert scope["name"] == "arize-omp-plugin"
+        assert scope["name"] == "atatus-omp-plugin"

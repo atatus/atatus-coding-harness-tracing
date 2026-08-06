@@ -565,13 +565,13 @@ def _handle_notify(input_json: dict) -> None:
 
 
 def notify() -> None:
-    """Entry point for ``arize-hook-codex-notify``.
+    """Entry point for ``atatus-hook-codex-notify``.
 
     Codex passes the notify-event JSON on ``sys.argv[1]`` (not stdin) and
     expects no stdout response.
     """
     try:
-        load_env_file(Path.home() / ".codex" / "arize-env.sh")
+        load_env_file(Path.home() / ".codex" / "atatus-env.sh")
         if not check_requirements():
             return
         raw = sys.argv[1] if len(sys.argv) > 1 else "{}"

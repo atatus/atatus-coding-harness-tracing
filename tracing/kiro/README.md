@@ -1,10 +1,10 @@
 # Kiro CLI Tracing
 
-Automatic [OpenInference](https://github.com/Arize-ai/openinference) tracing for the Kiro CLI. Spans are exported to [Arize AX](https://arize.com) or [Phoenix](https://github.com/Arize-ai/phoenix). Each traced session emits LLM turns, tool calls, cost in credits, model information, and turn duration. Token counts (`llm.token_count.prompt`, `llm.token_count.completion`) are included only when Kiro CLI reports them — currently Kiro bills via credits, not tokens.
+Automatic OpenInference tracing for the Kiro CLI. Spans are exported to [Atatus](https://atatus.com). Each traced session emits LLM turns, tool calls, cost in credits, model information, and turn duration. Token counts (`llm.token_count.prompt`, `llm.token_count.completion`) are included only when Kiro CLI reports them — currently Kiro bills via credits, not tokens.
 
 ## Setup
 
-The installer prompts for your backend (Phoenix or Arize AX) and project name, writes credentials to `~/.arize/harness/config.json`, and registers hooks in a Kiro agent config under `~/.kiro/agents/<agent>.json` (default agent: `arize-traced`). You can optionally have the installer run `kiro-cli agent set-default <agent>` so the traced agent is used by default.
+The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers hooks in a Kiro agent config under `~/.kiro/agents/<agent>.json` (default agent: `atatus-traced`). You can optionally have the installer run `kiro-cli agent set-default <agent>` so the traced agent is used by default.
 
 Pass `--with-skills` to also symlink the `manage-kiro-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage Kiro tracing configuration.
 
@@ -15,13 +15,13 @@ Pass `--with-skills` to also symlink the `manage-kiro-tracing` skill into the cu
 Install:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.sh | bash -s -- kiro
+curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- kiro
 ```
 
 Uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.sh | bash -s -- uninstall kiro
+curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- uninstall kiro
 ```
 
 #### Windows (PowerShell)
@@ -29,21 +29,21 @@ curl -sSL https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main
 Install:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat kiro
 ```
 
 Uninstall:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Arize-ai/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat uninstall kiro
 ```
 
 ### Local setup
 
 ```bash
-git clone https://github.com/Arize-ai/coding-harness-tracing.git
+git clone https://github.com/atatus/coding-harness-tracing.git
 cd coding-harness-tracing
 ```
 
@@ -81,33 +81,32 @@ install.bat uninstall kiro
 |---------|---------|
 | Harness key | `kiro` |
 | Project name | `kiro` |
-| Phoenix endpoint | `http://localhost:6006` |
-| Arize AX endpoint | `otlp.arize.com:443` |
-| Default agent name | `arize-traced` |
+| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Default agent name | `atatus-traced` |
 | Hook config file | `~/.kiro/agents/<agent>.json` |
 | Hook events registered | `agentSpawn`, `userPromptSubmit`, `preToolUse`, `postToolUse`, `stop` |
 | Session sidecar dir | `~/.kiro/sessions/cli/` |
-| State directory | `~/.arize/harness/state/kiro/` |
-| Log file | `~/.arize/harness/logs/kiro.log` |
+| State directory | `~/.atatus/harness/state/kiro/` |
+| Log file | `~/.atatus/harness/logs/kiro.log` |
 
 ## Usage
 
 ```bash
-# If you set arize-traced as Kiro's default during install:
+# If you set atatus-traced as Kiro's default during install:
 kiro-cli chat
 # Otherwise:
-kiro-cli chat --agent arize-traced
+kiro-cli chat --agent atatus-traced
 ```
 
 ## Verifying tracing
 
 Run a Kiro session with the traced agent (see [Usage](#usage) above). The installed hooks fire on `agentSpawn`, `userPromptSubmit`, `preToolUse`/`postToolUse`, and `stop`.
 
-- Errors land in `~/.arize/harness/logs/kiro.log` always; set `export ARIZE_VERBOSE=true` before launching Kiro to also see routine hook activity.
-- Confirm spans appear in your configured project in Arize AX or Phoenix.
+- Errors land in `~/.atatus/harness/logs/kiro.log` always; set `export ATATUS_VERBOSE=true` before launching Kiro to also see routine hook activity.
+- Confirm spans appear in your configured project in Atatus.
 - Kiro meters in credits, not tokens — cost lands in `kiro.cost.credits` and token-count attributes are omitted when 0 (see [Limitations](#limitations)).
 
-See the [main README's Environment variables section](../../README.md#environment-variables) for the full list of runtime overrides (`ARIZE_TRACE_ENABLED`, `ARIZE_DRY_RUN`, `ARIZE_USER_ID`, etc.).
+See the [main README's Environment variables section](../../README.md#environment-variables) for the full list of runtime overrides (`ATATUS_TRACE_ENABLED`, `ATATUS_DRY_RUN`, `ATATUS_USER_ID`, etc.).
 
 ## Span shape
 
@@ -151,4 +150,4 @@ TOOL spans are parented to the LLM turn they belong to.
 
 ## Uninstall
 
-Uninstall removes hook entries from the agent config. If the `arize-traced` agent was created by the installer, the agent file is deleted. If hooks were added to a pre-existing agent, the hooks are removed but the agent file is preserved.
+Uninstall removes hook entries from the agent config. If the `atatus-traced` agent was created by the installer, the agent file is deleted. If hooks were added to a pre-existing agent, the hooks are removed but the agent file is preserved.

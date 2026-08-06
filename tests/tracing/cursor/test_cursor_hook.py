@@ -155,7 +155,7 @@ class TestDispatch:
 
     def test_routes_to_correct_handler(self, monkeypatch):
         """Known event routes to correct handler function."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_before_submit_prompt") as h,
@@ -164,13 +164,13 @@ class TestDispatch:
                 "beforeSubmitPrompt",
                 {
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             h.assert_called_once()
 
     def test_routes_after_agent_response(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_after_agent_response") as h,
@@ -179,7 +179,7 @@ class TestDispatch:
             h.assert_called_once()
 
     def test_routes_stop(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_stop") as h,
@@ -189,7 +189,7 @@ class TestDispatch:
 
     def test_unknown_event_logs_warning(self, monkeypatch):
         """Unknown event logs warning, no crash."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.log") as log_mock,
@@ -200,14 +200,14 @@ class TestDispatch:
 
     def test_tracing_disabled_returns_early(self, monkeypatch):
         """Tracing disabled -> returns without dispatching."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         with mock.patch("tracing.cursor.hooks.handlers._handle_before_submit_prompt") as h:
             _dispatch("beforeSubmitPrompt", {"conversation_id": "c1", "generation_id": "g1"})
             h.assert_not_called()
 
     def test_no_backend_send_fails_gracefully(self, monkeypatch):
         """send_span failure doesn't crash — IDE defers root to afterAgentResponse and LLM to stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.send_span", return_value=False) as send_mock,
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
@@ -217,7 +217,7 @@ class TestDispatch:
                 {
                     "hook_event_name": "beforeSubmitPrompt",
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             assert send_mock.call_count == 0
@@ -227,7 +227,7 @@ class TestDispatch:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "response": "done",
+                    "response": "done"
                 },
             )
             # afterAgentResponse sends the deferred root User Prompt only; LLM is deferred to stop.
@@ -237,7 +237,7 @@ class TestDispatch:
                 {
                     "hook_event_name": "stop",
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             # stop flushes the deferred LLM span (Agent Response) and emits Agent Stop.
@@ -253,7 +253,7 @@ class TestHandleBeforeSubmitPrompt:
 
     def test_cli_payload_sends_root_before_submit(self, captured_spans, monkeypatch):
         """CLI-style payload (hookEventName only): root CHAIN at submit; LLM is deferred to stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="aabb" * 4),
@@ -266,7 +266,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -286,7 +286,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I fixed the bug",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -300,7 +300,7 @@ class TestHandleBeforeSubmitPrompt:
                 {
                     "hookEventName": "stop",
                     "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
+                    "generation_id": "gen-1"
                 },
             )
 
@@ -315,7 +315,7 @@ class TestHandleBeforeSubmitPrompt:
 
     def test_ide_payload_defers_root_chain_to_after_response(self, captured_spans, monkeypatch):
         """IDE payload (hook_event_name): root CHAIN at afterAgentResponse; LLM deferred to stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="aabb" * 4),
@@ -327,7 +327,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -341,7 +341,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I fixed the bug",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -362,7 +362,7 @@ class TestHandleBeforeSubmitPrompt:
                 {
                     "hook_event_name": "stop",
                     "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
+                    "generation_id": "gen-1"
                 },
             )
 
@@ -384,7 +384,7 @@ class TestHandleAfterAgentResponse:
 
     def test_defers_llm_span_until_stop(self, captured_spans, monkeypatch):
         """afterAgentResponse defers the LLM span; it is emitted only at stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ccdd" * 4),
@@ -396,7 +396,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I found the issue",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -424,7 +424,7 @@ class TestHandleAfterAgentResponse:
 
     def test_defers_llm_span_with_full_attributes(self, captured_spans, monkeypatch):
         """Deferred LLM span carries input, output, session.id, model_name when flushed at stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=4000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parentX"),
@@ -436,7 +436,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-9",
                     "generation_id": "gen-9",
                     "prompt": "do the thing",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
             _dispatch(
@@ -446,7 +446,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-9",
                     "generation_id": "gen-9",
                     "response": "did the thing",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -471,7 +471,7 @@ class TestHandleAfterAgentResponse:
 
     def test_defers_llm_span_preserves_after_agent_response_timing(self, captured_spans, monkeypatch):
         """Deferred LLM span uses the start_ms recorded at afterAgentResponse, not stop's now_ms."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2500),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -481,7 +481,7 @@ class TestHandleAfterAgentResponse:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "yo",
+                    "response": "yo"
                 },
             )
 
@@ -502,7 +502,7 @@ class TestHandleAfterAgentResponse:
 
     def test_no_gen_id_sends_llm_span_immediately(self, captured_spans, monkeypatch):
         """Without gen_id state can't be keyed, so the LLM span is sent immediately (fallback)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ccdd" * 4),
@@ -512,7 +512,7 @@ class TestHandleAfterAgentResponse:
                 "afterAgentResponse",
                 {
                     "conversation_id": "conv-1",
-                    "response": "I found the issue",
+                    "response": "I found the issue"
                 },
             )
 
@@ -533,7 +533,7 @@ class TestHandleAfterShellExecution:
 
     def test_creates_tool_span_with_popped_state(self, captured_spans, monkeypatch):
         """Creates TOOL span, merges with before state from state_pop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         popped = {"command": "ls -la", "cwd": "/tmp", "start_ms": "1000", "trace_id": "t1", "conversation_id": "c1"}
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
@@ -547,7 +547,7 @@ class TestHandleAfterShellExecution:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "output": "total 0",
-                    "exit_code": "0",
+                    "exit_code": "0"
                 },
             )
 
@@ -562,7 +562,7 @@ class TestHandleAfterShellExecution:
 
     def test_uses_after_command_when_present(self, captured_spans, monkeypatch):
         """After-event command overrides before-event command."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         popped = {"command": "old_cmd", "start_ms": "1000"}
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
@@ -575,7 +575,7 @@ class TestHandleAfterShellExecution:
                     "conversation_id": "c1",
                     "generation_id": "g1",
                     "command": "new_cmd",
-                    "output": "ok",
+                    "output": "ok"
                 },
             )
 
@@ -587,7 +587,7 @@ class TestHandleAfterShellExecution:
 
     def test_no_popped_state_uses_now(self, captured_spans, monkeypatch):
         """Without popped state, start_ms defaults to now_ms."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -598,7 +598,7 @@ class TestHandleAfterShellExecution:
                 {
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "output": "ok",
+                    "output": "ok"
                 },
             )
 
@@ -608,7 +608,7 @@ class TestHandleAfterShellExecution:
 
     def test_uses_fixture(self, captured_spans, monkeypatch, cursor_after_shell_input):
         """Works with cursor_after_shell fixture."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         fixture = cursor_after_shell_input
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
@@ -635,7 +635,7 @@ class TestHandleStop:
 
     def test_creates_chain_span_and_cleans_up(self, captured_spans, monkeypatch):
         """Creates CHAIN span and calls state_cleanup_generation."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root1"),
@@ -647,7 +647,7 @@ class TestHandleStop:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "status": "completed",
-                    "loop_count": "3",
+                    "loop_count": "3"
                 },
             )
 
@@ -662,7 +662,7 @@ class TestHandleStop:
 
     def test_no_gen_id_skips_cleanup(self, captured_spans, monkeypatch):
         """Without gen_id, state_cleanup_generation is not called."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -675,7 +675,7 @@ class TestHandleStop:
 
     def test_optional_attrs_omitted(self, captured_spans, monkeypatch):
         """Status and loop_count omitted when empty."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -697,7 +697,7 @@ class TestHandleBeforeShellExecution:
 
     def test_pushes_state(self, monkeypatch):
         """Pushes command, cwd, start_ms, trace_id, conversation_id to state."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock,
@@ -708,7 +708,7 @@ class TestHandleBeforeShellExecution:
                     "conversation_id": "c1",
                     "generation_id": "gen-1",
                     "command": "ls -la",
-                    "cwd": "/home",
+                    "cwd": "/home"
                 },
             )
 
@@ -721,7 +721,7 @@ class TestHandleBeforeShellExecution:
 
     def test_no_gen_id_returns_early(self, monkeypatch):
         """Without gen_id, returns without pushing state."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock,
@@ -730,7 +730,7 @@ class TestHandleBeforeShellExecution:
                 "beforeShellExecution",
                 {
                     "conversation_id": "c1",
-                    "command": "ls",
+                    "command": "ls"
                 },
             )
 
@@ -746,7 +746,7 @@ class TestHandleAfterAgentThought:
 
     def test_creates_chain_span_with_thought(self, captured_spans, monkeypatch):
         """Creates CHAIN span with thought as output.value."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="abcd" * 4),
@@ -757,7 +757,7 @@ class TestHandleAfterAgentThought:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "thought": "thinking about the problem",
+                    "thought": "thinking about the problem"
                 },
             )
 
@@ -781,7 +781,7 @@ class TestHandleBeforeMcpExecution:
 
     def test_pushes_state(self, monkeypatch):
         """Pushes tool_name, tool_input, url, command, start_ms to state."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1500),
             mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock,
@@ -793,7 +793,7 @@ class TestHandleBeforeMcpExecution:
                     "generation_id": "gen-1",
                     "tool_name": "search",
                     "tool_input": '{"query": "test"}',
-                    "url": "http://localhost:3000",
+                    "url": "http://localhost:3000"
                 },
             )
 
@@ -806,7 +806,7 @@ class TestHandleBeforeMcpExecution:
 
     def test_no_gen_id_returns_early(self, monkeypatch):
         """Without gen_id, returns without pushing state."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock,
@@ -815,7 +815,7 @@ class TestHandleBeforeMcpExecution:
                 "beforeMCPExecution",
                 {
                     "conversation_id": "c1",
-                    "tool_name": "search",
+                    "tool_name": "search"
                 },
             )
 
@@ -831,7 +831,7 @@ class TestHandleAfterMcpExecution:
 
     def test_creates_tool_span_with_popped_state(self, captured_spans, monkeypatch):
         """Creates TOOL span, merges with before state from state_pop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         popped = {
             "tool_name": "search",
             "tool_input": '{"query": "test"}',
@@ -839,7 +839,7 @@ class TestHandleAfterMcpExecution:
             "command": "",
             "start_ms": "1000",
             "trace_id": "t1",
-            "conversation_id": "c1",
+            "conversation_id": "c1"
         }
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
@@ -852,7 +852,7 @@ class TestHandleAfterMcpExecution:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "result": "found 3 items",
+                    "result": "found 3 items"
                 },
             )
 
@@ -868,7 +868,7 @@ class TestHandleAfterMcpExecution:
 
     def test_no_popped_state_uses_input(self, captured_spans, monkeypatch):
         """Without popped state, span still created from input_json fields."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="bbcc" * 4),
@@ -881,7 +881,7 @@ class TestHandleAfterMcpExecution:
                     "conversation_id": "c1",
                     "generation_id": "g1",
                     "tool_name": "list_repos",
-                    "result": "ok",
+                    "result": "ok"
                 },
             )
 
@@ -901,7 +901,7 @@ class TestHandleBeforeReadFile:
 
     def test_creates_tool_span(self, captured_spans, monkeypatch):
         """Creates TOOL span with file path as input."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="1122" * 4),
@@ -912,7 +912,7 @@ class TestHandleBeforeReadFile:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "file_path": "/foo/bar.py",
+                    "file_path": "/foo/bar.py"
                 },
             )
 
@@ -935,7 +935,7 @@ class TestHandleAfterFileEdit:
 
     def test_creates_tool_span(self, captured_spans, monkeypatch):
         """Creates TOOL span with file path and diff."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="3344" * 4),
@@ -947,7 +947,7 @@ class TestHandleAfterFileEdit:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "file_path": "/foo/bar.py",
-                    "diff": "+added line",
+                    "diff": "+added line"
                 },
             )
 
@@ -962,7 +962,7 @@ class TestHandleAfterFileEdit:
 
     def test_no_diff_uses_path_only(self, captured_spans, monkeypatch):
         """Without diff, input.value is just the file path."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="3344" * 4),
@@ -973,7 +973,7 @@ class TestHandleAfterFileEdit:
                 {
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "file_path": "/foo/bar.py",
+                    "file_path": "/foo/bar.py"
                 },
             )
 
@@ -993,7 +993,7 @@ class TestHandleBeforeTabFileRead:
 
     def test_creates_tool_span(self, captured_spans, monkeypatch):
         """Creates TOOL span with file path as input for tab read."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="5566" * 4),
@@ -1004,7 +1004,7 @@ class TestHandleBeforeTabFileRead:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "file_path": "/src/main.ts",
+                    "file_path": "/src/main.ts"
                 },
             )
 
@@ -1027,7 +1027,7 @@ class TestHandleAfterTabFileEdit:
 
     def test_creates_tool_span(self, captured_spans, monkeypatch):
         """Creates TOOL span with file path and edits for tab edit."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="7788" * 4),
@@ -1039,7 +1039,7 @@ class TestHandleAfterTabFileEdit:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "file_path": "/src/main.ts",
-                    "edits": "replaced function",
+                    "edits": "replaced function"
                 },
             )
 
@@ -1054,7 +1054,7 @@ class TestHandleAfterTabFileEdit:
 
     def test_no_edits_uses_path_only(self, captured_spans, monkeypatch):
         """Without edits, input.value is just the file path."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="7788" * 4),
@@ -1065,7 +1065,7 @@ class TestHandleAfterTabFileEdit:
                 {
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "file_path": "/src/main.ts",
+                    "file_path": "/src/main.ts"
                 },
             )
 
@@ -1085,14 +1085,14 @@ class TestMain:
 
     def test_reads_stdin_dispatches_prints_permissive(self, monkeypatch, tmp_path):
         """main() reads JSON from stdin, dispatches, prints permissive response."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         input_data = {
             "hook_event_name": "beforeSubmitPrompt",
             "conversation_id": "c1",
             "generation_id": "g1",
-            "prompt": "hello",
+            "prompt": "hello"
         }
         stdout_buf = io.StringIO()
 
@@ -1110,8 +1110,8 @@ class TestMain:
 
     def test_invalid_json_still_prints_permissive(self, monkeypatch, tmp_path):
         """Invalid JSON on stdin still prints permissive response."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         stdout_buf = io.StringIO()
 
@@ -1128,13 +1128,13 @@ class TestMain:
 
     def test_exception_in_dispatch_still_prints_permissive(self, monkeypatch, tmp_path):
         """Exception in _dispatch still prints permissive response."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         input_data = {
             "hook_event_name": "afterAgentResponse",
             "conversation_id": "c1",
-            "generation_id": "g1",
+            "generation_id": "g1"
         }
         stdout_buf = io.StringIO()
 
@@ -1151,8 +1151,8 @@ class TestMain:
 
     def test_check_requirements_false_still_prints_permissive(self, monkeypatch, tmp_path):
         """When check_requirements returns False, still prints permissive."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         stdout_buf = io.StringIO()
 
@@ -1169,8 +1169,8 @@ class TestMain:
 
     def test_empty_stdin(self, monkeypatch, tmp_path):
         """Empty stdin produces empty dict, still prints permissive."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         stdout_buf = io.StringIO()
 
@@ -1188,9 +1188,9 @@ class TestMain:
 
     def test_stderr_redirected_to_log_file(self, monkeypatch, tmp_path):
         """main() redirects stderr to env.log_file."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         log_file = tmp_path / "hook.log"
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(log_file))
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(log_file))
 
         stdout_buf = io.StringIO()
         original_stderr = sys.stderr
@@ -1269,7 +1269,7 @@ class TestTraceIdFromEvent:
 class TestDispatchNewEvents:
 
     def test_dispatch_routes_session_start(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_session_start") as h,
@@ -1278,13 +1278,13 @@ class TestDispatchNewEvents:
                 "sessionStart",
                 {
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             h.assert_called_once()
 
     def test_dispatch_routes_session_end(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_session_end") as h,
@@ -1293,13 +1293,13 @@ class TestDispatchNewEvents:
                 "sessionEnd",
                 {
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             h.assert_called_once()
 
     def test_dispatch_routes_post_tool_use(self, monkeypatch):
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers._handle_post_tool_use") as h,
@@ -1308,7 +1308,7 @@ class TestDispatchNewEvents:
                 "postToolUse",
                 {
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
             h.assert_called_once()
@@ -1323,14 +1323,14 @@ class TestMainCamelCase:
 
     def test_main_dispatches_camel_case_event_key(self, monkeypatch, tmp_path):
         """main() resolves hookEventName from CLI payloads and dispatches correctly."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_LOG_FILE", str(tmp_path / "hook.log"))
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
         input_data = {
             "hookEventName": "sessionStart",
             "conversation_id": "c1",
             "generation_id": "g1",
-            "cwd": "/tmp",
+            "cwd": "/tmp"
         }
         stdout_buf = io.StringIO()
 
@@ -1354,7 +1354,7 @@ class TestHandleSessionStart:
 
     def test_session_start_sends_chain_span(self, captured_spans, monkeypatch):
         """sessionStart produces a CHAIN span with session.id and cwd."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ss11" * 4),
@@ -1366,7 +1366,7 @@ class TestHandleSessionStart:
                     "conversation_id": "conv-sess",
                     "generation_id": "gen-sess",
                     "cwd": "/Users/alice/code/myrepo",
-                    "user_email": "alice@example.com",
+                    "user_email": "alice@example.com"
                 },
             )
 
@@ -1381,7 +1381,7 @@ class TestHandleSessionStart:
 
     def test_session_start_no_gen_id_skips_save(self, captured_spans, monkeypatch):
         """Without gen_id, gen_root_span_save is not called."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_save") as save_mock,
@@ -1390,7 +1390,7 @@ class TestHandleSessionStart:
                 "sessionStart",
                 {
                     "conversation_id": "conv-sess",
-                    "cwd": "/tmp",
+                    "cwd": "/tmp"
                 },
             )
 
@@ -1399,12 +1399,12 @@ class TestHandleSessionStart:
 
     def test_session_start_optional_fields_omitted(self, captured_spans, monkeypatch):
         """Optional fields like cwd and user_email are omitted when absent."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),):
             _dispatch(
                 "sessionStart",
                 {
-                    "conversation_id": "conv-sess",
+                    "conversation_id": "conv-sess"
                 },
             )
 
@@ -1421,7 +1421,7 @@ class TestHandlePostToolUse:
 
     def test_post_tool_use_sends_tool_span(self, captured_spans, monkeypatch):
         """postToolUse produces a TOOL span with tool.name, input.value, output.value."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="pt11" * 4),
@@ -1434,7 +1434,7 @@ class TestHandlePostToolUse:
                     "generation_id": "gen-pt",
                     "toolName": "code_search",
                     "toolInput": '{"query": "main function"}',
-                    "result": "<search results>",
+                    "result": "<search results>"
                 },
             )
 
@@ -1451,7 +1451,7 @@ class TestHandlePostToolUse:
 
     def test_post_tool_use_unknown_tool_uses_command_field_when_present(self, captured_spans, monkeypatch):
         """Non-deduped shell-like tool uses 'command' field as input.value fallback."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1463,7 +1463,7 @@ class TestHandlePostToolUse:
                     "generation_id": "g1",
                     "toolName": "custom_runner",
                     "command": "ls -la",
-                    "stdout": "total 40\ndrwxr-xr-x ...",
+                    "stdout": "total 40\ndrwxr-xr-x ..."
                 },
             )
 
@@ -1477,7 +1477,7 @@ class TestHandlePostToolUse:
 
     def test_post_tool_use_missing_fields_omitted(self, captured_spans, monkeypatch):
         """Missing optional fields are omitted from attributes."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1486,7 +1486,7 @@ class TestHandlePostToolUse:
                 "postToolUse",
                 {
                     "conversation_id": "c1",
-                    "generation_id": "g1",
+                    "generation_id": "g1"
                 },
             )
 
@@ -1497,7 +1497,7 @@ class TestHandlePostToolUse:
 
     def test_post_tool_use_skips_shell_tool(self, captured_spans, monkeypatch):
         """postToolUse with tool_name='shell' is skipped (covered by dedicated handler)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1508,7 +1508,7 @@ class TestHandlePostToolUse:
                     "conversation_id": "c1",
                     "generation_id": "g1",
                     "toolName": "shell",
-                    "command": "ls -la",
+                    "command": "ls -la"
                 },
             )
 
@@ -1520,7 +1520,7 @@ class TestHandlePostToolUse:
     )
     def test_post_tool_use_skips_each_dedicated_tool_name(self, captured_spans, monkeypatch, tool_name):
         """postToolUse short-circuits for each known dedicated tool name (case-insensitive)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1530,7 +1530,7 @@ class TestHandlePostToolUse:
                 {
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "toolName": tool_name,
+                    "toolName": tool_name
                 },
             )
 
@@ -1538,7 +1538,7 @@ class TestHandlePostToolUse:
 
     def test_post_tool_use_emits_for_unknown_tool_name(self, captured_spans, monkeypatch):
         """postToolUse emits a span for tools not in the dedup set."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1549,7 +1549,7 @@ class TestHandlePostToolUse:
                     "conversation_id": "c1",
                     "generation_id": "g1",
                     "toolName": "glob",
-                    "toolInput": '{"pattern": "*.py"}',
+                    "toolInput": '{"pattern": "*.py"}'
                 },
             )
 
@@ -1570,7 +1570,7 @@ class TestHandleStopTokenCounts:
 
     def test_stop_captures_token_counts(self, captured_spans, monkeypatch):
         """Stop payload with token fields produces llm.token_count.* attributes."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root1"),
@@ -1586,7 +1586,7 @@ class TestHandleStopTokenCounts:
                     "output_tokens": 1523,
                     "cache_read_tokens": 68000,
                     "cache_write_tokens": 0,
-                    "model": "claude-sonnet-4.5",
+                    "model": "claude-sonnet-4.5"
                 },
             )
 
@@ -1604,7 +1604,7 @@ class TestHandleStopTokenCounts:
 
     def test_stop_omits_token_attrs_when_payload_has_none(self, captured_spans, monkeypatch):
         """Stop payload without token fields produces no llm.token_count.* attributes."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1615,7 +1615,7 @@ class TestHandleStopTokenCounts:
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "status": "completed",
+                    "status": "completed"
                 },
             )
 
@@ -1629,7 +1629,7 @@ class TestHandleStopTokenCounts:
 
     def test_stop_token_count_handles_string_and_dash_values(self, captured_spans, monkeypatch):
         """String token values are coerced; '--' and None are omitted."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1642,7 +1642,7 @@ class TestHandleStopTokenCounts:
                     "generation_id": "gen-1",
                     "input_tokens": "100",
                     "output_tokens": "--",
-                    "cache_read_tokens": None,
+                    "cache_read_tokens": None
                 },
             )
 
@@ -1665,7 +1665,7 @@ class TestHandleSessionEnd:
 
     def test_session_end_emits_chain_span_with_duration_and_status(self, captured_spans, monkeypatch):
         """sessionEnd produces a CHAIN span with duration, status, and reason."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root-se"),
@@ -1678,7 +1678,7 @@ class TestHandleSessionEnd:
                     "generation_id": "gen-end",
                     "duration_ms": 7447445,
                     "final_status": "completed",
-                    "reason": "window_close",
+                    "reason": "window_close"
                 },
             )
 
@@ -1695,7 +1695,7 @@ class TestHandleSessionEnd:
 
     def test_session_end_cleans_up_generation(self, captured_spans, monkeypatch):
         """sessionEnd calls state_cleanup_generation with the gen_id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1705,7 +1705,7 @@ class TestHandleSessionEnd:
                 "sessionEnd",
                 {
                     "conversation_id": "conv-end",
-                    "generation_id": "g-123",
+                    "generation_id": "g-123"
                 },
             )
 
@@ -1713,7 +1713,7 @@ class TestHandleSessionEnd:
 
     def test_session_end_handles_empty_payload(self, captured_spans, monkeypatch):
         """sessionEnd with only conversation_id emits a span without optional attrs."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1722,7 +1722,7 @@ class TestHandleSessionEnd:
             _dispatch(
                 "sessionEnd",
                 {
-                    "conversation_id": "conv-end",
+                    "conversation_id": "conv-end"
                 },
             )
 
@@ -1749,7 +1749,7 @@ class TestConversationIdAttribute:
             "hookEventName": "beforeSubmitPrompt",  # CLI path — sends span immediately
             "conversation_id": "conv-abc",
             "generation_id": "gen-abc",
-            "prompt": "test",
+            "prompt": "test"
         },
         # afterAgentResponse is excluded: under the deferred-LLM design it no longer
         # emits a span on its own — the Agent Response LLM span is flushed at stop.
@@ -1758,60 +1758,60 @@ class TestConversationIdAttribute:
         "afterAgentThought": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-aat",
-            "thought": "thinking",
+            "thought": "thinking"
         },
         "afterShellExecution": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ase",
             "command": "ls",
-            "output": "ok",
+            "output": "ok"
         },
         "afterMCPExecution": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ame",
             "tool_name": "my_tool",
-            "result": "ok",
+            "result": "ok"
         },
         "beforeReadFile": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-brf",
-            "file_path": "/tmp/a.py",
+            "file_path": "/tmp/a.py"
         },
         "afterFileEdit": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-afe",
-            "file_path": "/tmp/a.py",
+            "file_path": "/tmp/a.py"
         },
         "beforeTabFileRead": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-btfr",
-            "file_path": "/tmp/a.py",
+            "file_path": "/tmp/a.py"
         },
         "afterTabFileEdit": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-atfe",
-            "file_path": "/tmp/a.py",
+            "file_path": "/tmp/a.py"
         },
         "stop": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-stop",
-            "status": "completed",
+            "status": "completed"
         },
         "sessionStart": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ss",
-            "cwd": "/tmp",
+            "cwd": "/tmp"
         },
         "sessionEnd": {
             "conversation_id": "conv-abc",
-            "generation_id": "gen-se",
+            "generation_id": "gen-se"
         },
         "postToolUse": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ptu",
             "toolName": "glob",
-            "toolInput": "*.py",
-        },
+            "toolInput": "*.py"
+        }
     }
 
     # Events that push state but don't emit a span
@@ -1823,7 +1823,7 @@ class TestConversationIdAttribute:
     )
     def test_conversation_id_attribute_on_every_handler(self, captured_spans, monkeypatch, event):
         """Every span-producing handler includes cursor.conversation.id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1843,7 +1843,7 @@ class TestConversationIdAttribute:
 
     def test_conversation_id_attribute_omitted_when_missing(self, captured_spans, monkeypatch):
         """When conversation_id is empty, cursor.conversation.id is not set."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -1853,7 +1853,7 @@ class TestConversationIdAttribute:
                 "stop",
                 {
                     "generation_id": "gen-1",
-                    "status": "completed",
+                    "status": "completed"
                 },
             )
 
@@ -1870,7 +1870,7 @@ class TestIdeSafety:
 
     def test_ide_payload_with_no_post_tool_use_unaffected(self, captured_spans, monkeypatch):
         """IDE dispatches before/afterShellExecution without postToolUse — exactly 1 span from after."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root-ide"),
@@ -1882,7 +1882,7 @@ class TestIdeSafety:
                     "conversation_id": "conv-ide",
                     "generation_id": "gen-ide",
                     "command": "echo hello",
-                    "cwd": "/tmp",
+                    "cwd": "/tmp"
                 },
             )
 
@@ -1901,7 +1901,7 @@ class TestIdeSafety:
                     "generation_id": "gen-ide",
                     "command": "echo hello",
                     "output": "hello",
-                    "exit_code": "0",
+                    "exit_code": "0"
                 },
             )
 
@@ -1941,7 +1941,7 @@ class TestDeferredLlmSpan:
 
     def test_ide_happy_path_tokens_land_on_llm_span(self, captured_spans, monkeypatch):
         """IDE turn (beforeSubmit → after → stop with tokens): tokens on LLM span, none on Agent Stop."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000):
             _dispatch(
                 "beforeSubmitPrompt",
@@ -1950,7 +1950,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-sonnet-4.5",
+                    "model_name": "claude-sonnet-4.5"
                 },
             )
 
@@ -1962,7 +1962,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "fixed",
-                    "model_name": "claude-sonnet-4.5",
+                    "model_name": "claude-sonnet-4.5"
                 },
             )
 
@@ -1978,7 +1978,7 @@ class TestDeferredLlmSpan:
                     "output_tokens": 1523,
                     "cache_read_tokens": 68000,
                     "cache_write_tokens": 0,
-                    "model": "claude-sonnet-4.5",
+                    "model": "claude-sonnet-4.5"
                 },
             )
 
@@ -2010,14 +2010,14 @@ class TestDeferredLlmSpan:
 
     def test_stop_emits_llm_span_before_agent_stop(self, captured_spans, monkeypatch):
         """Order: Agent Response (LLM) is sent first, then Agent Stop (CHAIN)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
             _dispatch(
                 "afterAgentResponse",
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "done",
+                    "response": "done"
                 },
             )
 
@@ -2030,7 +2030,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "input_tokens": 10,
-                    "output_tokens": 5,
+                    "output_tokens": 5
                 },
             )
 
@@ -2040,7 +2040,7 @@ class TestDeferredLlmSpan:
 
     def test_stop_fallback_keeps_tokens_on_chain_when_no_deferred_llm(self, captured_spans, monkeypatch):
         """No prior afterAgentResponse → CLI/sessionEnd-style behavior: Agent Stop carries tokens."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -2056,7 +2056,7 @@ class TestDeferredLlmSpan:
                     "cache_read_tokens": 25,
                     "cache_write_tokens": 5,
                     "model": "claude-sonnet-4.5",
-                    "status": "completed",
+                    "status": "completed"
                 },
             )
 
@@ -2075,7 +2075,7 @@ class TestDeferredLlmSpan:
 
     def test_deferred_llm_dropped_when_stop_never_fires(self, captured_spans, monkeypatch):
         """beforeSubmit + afterAgentResponse without stop: deferred LLM span is never sent."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
                 "beforeSubmitPrompt",
@@ -2083,7 +2083,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "beforeSubmitPrompt",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "prompt": "p",
+                    "prompt": "p"
                 },
             )
             _dispatch(
@@ -2092,7 +2092,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "r",
+                    "response": "r"
                 },
             )
 
@@ -2102,14 +2102,14 @@ class TestDeferredLlmSpan:
 
     def test_stop_without_tokens_still_flushes_deferred_llm_without_token_attrs(self, captured_spans, monkeypatch):
         """If the stop payload has no tokens, the flushed LLM span has no llm.token_count.*."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
             _dispatch(
                 "afterAgentResponse",
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "done",
+                    "response": "done"
                 },
             )
 
@@ -2118,7 +2118,7 @@ class TestDeferredLlmSpan:
                 "stop",
                 {
                     "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
+                    "generation_id": "gen-1"
                 },
             )
 
@@ -2136,14 +2136,14 @@ class TestDeferredLlmSpan:
 
     def test_zero_token_count_not_treated_as_absent(self, captured_spans, monkeypatch):
         """0 is a valid token count and must appear on the LLM span (no truthiness bugs)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
                 "afterAgentResponse",
                 {
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "done",
+                    "response": "done"
                 },
             )
             _dispatch(
@@ -2154,7 +2154,7 @@ class TestDeferredLlmSpan:
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cache_read_tokens": 0,
-                    "cache_write_tokens": 0,
+                    "cache_write_tokens": 0
                 },
             )
 
@@ -2168,7 +2168,7 @@ class TestDeferredLlmSpan:
 
     def test_session_end_token_routing_unchanged(self, captured_spans, monkeypatch):
         """sessionEnd is NOT affected — tokens still attach to the Session End CHAIN span."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
@@ -2180,7 +2180,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-end",
                     "generation_id": "gen-end",
                     "input_tokens": 200,
-                    "output_tokens": 75,
+                    "output_tokens": 75
                 },
             )
 
@@ -2193,7 +2193,7 @@ class TestDeferredLlmSpan:
 
     def test_deferred_llm_uses_recorded_parent_and_start_time_at_stop(self, captured_spans, monkeypatch):
         """The flushed LLM span uses the parent and start_ms recorded at afterAgentResponse."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         # beforeSubmitPrompt records the root via gen_root_span_save (real disk).
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
@@ -2202,7 +2202,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "beforeSubmitPrompt",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "prompt": "p",
+                    "prompt": "p"
                 },
             )
 
@@ -2219,7 +2219,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "r",
+                    "response": "r"
                 },
             )
 
@@ -2230,7 +2230,7 @@ class TestDeferredLlmSpan:
                 {
                     "hook_event_name": "stop",
                     "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
+                    "generation_id": "gen-1"
                 },
             )
 
@@ -2243,7 +2243,7 @@ class TestDeferredLlmSpan:
     def test_multiple_deferred_llms_only_most_recent_gets_token_counts(self, captured_spans, monkeypatch):
         """Two afterAgentResponse events in one generation: each becomes an LLM span;
         tokens only attach to the most recent (last pushed = first popped)."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
                 "afterAgentResponse",
@@ -2251,7 +2251,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "first response",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
@@ -2261,7 +2261,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "second response",
-                    "model_name": "claude-4",
+                    "model_name": "claude-4"
                 },
             )
 
@@ -2272,7 +2272,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "input_tokens": 100,
-                    "output_tokens": 20,
+                    "output_tokens": 20
                 },
             )
 
@@ -2303,10 +2303,10 @@ class TestDeferredLlmSpan:
 
     def test_deferred_llm_carries_conversation_id_and_user_id(self, captured_spans, monkeypatch):
         """The flushed LLM span includes cursor.conversation.id and user.id when present."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         # _resolve_user_id prefers env.user_id over payload user_email; clear env so
         # the test exercises the payload-only branch deterministically across machines.
-        monkeypatch.setenv("ARIZE_USER_ID", "")
+        monkeypatch.setenv("ATATUS_USER_ID", "")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
                 "afterAgentResponse",
@@ -2314,14 +2314,14 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-abc",
                     "generation_id": "gen-1",
                     "response": "r",
-                    "user_email": "alice@example.com",
+                    "user_email": "alice@example.com"
                 },
             )
             _dispatch(
                 "stop",
                 {
                     "conversation_id": "conv-abc",
-                    "generation_id": "gen-1",
+                    "generation_id": "gen-1"
                 },
             )
 

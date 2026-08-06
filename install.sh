@@ -1,5 +1,5 @@
 #!/bin/bash
-# Arize Coding Harness Tracing — Thin shell router
+# Atatus Coding Harness Tracing — Thin shell router
 #
 # Handles Python discovery, repo clone/tarball, venv creation, and pip install.
 # All harness-specific logic lives in tracing/<harness>/install.py.
@@ -11,10 +11,10 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/Arize-ai/coding-harness-tracing.git"
-INSTALL_BRANCH="${ARIZE_INSTALL_BRANCH:-main}"
-TARBALL_URL="https://github.com/Arize-ai/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
-INSTALL_DIR="${HOME}/.arize/harness"
+REPO_URL="https://github.com/atatus/coding-harness-tracing.git"
+INSTALL_BRANCH="${ATATUS_INSTALL_BRANCH:-main}"
+TARBALL_URL="https://github.com/atatus/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+INSTALL_DIR="${HOME}/.atatus/harness"
 VENV_DIR="${INSTALL_DIR}/venv"
 
 # -- Terminal helpers --------------------------------------------------------
@@ -22,9 +22,9 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]] && { RED=""; GREEN=""; YELLOW=""; BLUE=""; BOLD=""; NC=""; }
 
-info()   { echo -e "${GREEN}[arize]${NC} $*"; }
-warn()   { echo -e "${YELLOW}[arize]${NC} $*"; }
-err()    { echo -e "${RED}[arize]${NC} $*" >&2; }
+info()   { echo -e "${GREEN}[atatus]${NC} $*"; }
+warn()   { echo -e "${YELLOW}[atatus]${NC} $*"; }
+err()    { echo -e "${RED}[atatus]${NC} $*" >&2; }
 header() { echo -e "\n${BOLD}${BLUE}$*${NC}\n"; }
 command_exists() { command -v "$1" &>/dev/null; }
 
@@ -138,8 +138,8 @@ install_repo() {
 # Fix SSL certificate verification on macOS.
 #
 # Python.org installers ship their own OpenSSL that doesn't trust the macOS
-# system keychain, so urllib (used by every arize-hook-*) fails with
-# "CERTIFICATE_VERIFY_FAILED" against https://otlp.arize.com.
+# system keychain, so urllib (used by every atatus-hook-*) fails with
+# "CERTIFICATE_VERIFY_FAILED" against https://otel-rx.atatus.com.
 #
 # Fix: install certifi into the venv and write a sitecustomize.py that sets
 # SSL_CERT_FILE before any hook code runs. Idempotent — safe to call repeatedly.
@@ -161,7 +161,7 @@ _fix_macos_ssl_certs() {
     sc="${site_dir}/sitecustomize.py"
 
     cat > "$sc" <<'PYEOF'
-# Arize Coding Harness Tracing: point Python's SSL stack at certifi's CA bundle on macOS.
+# Atatus Coding Harness Tracing: point Python's SSL stack at certifi's CA bundle on macOS.
 # This runs automatically at interpreter startup, before any hook code.
 import os as _os
 try:
@@ -231,7 +231,7 @@ install_harness() {
 usage() {
     cat <<'EOF'
 
-Arize Coding Harness Tracing Installer
+Atatus Coding Harness Tracing Installer
 
 Usage: install.sh <command> [flags]
 
@@ -266,7 +266,7 @@ main() {
             --branch)
                 i=$((i + 1))
                 INSTALL_BRANCH="${args[$i]:-main}"
-                TARBALL_URL="https://github.com/Arize-ai/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+                TARBALL_URL="https://github.com/atatus/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
                 ;;
             *) [[ -z "$subcmd" ]] && subcmd="${args[$i]}" ;;
         esac

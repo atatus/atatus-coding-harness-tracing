@@ -10,13 +10,14 @@ from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
+from core.common import DEFAULT_OTLP_ENDPOINT
 from core.config import delete_value, load_config, save_config, set_value
 
 # ---------------------------------------------------------------------------
 # Shared path constants
 # ---------------------------------------------------------------------------
 
-INSTALL_DIR = Path.home() / ".arize" / "harness"
+INSTALL_DIR = Path.home() / ".atatus" / "harness"
 VENV_DIR = INSTALL_DIR / "venv"
 CONFIG_FILE = INSTALL_DIR / "config.json"
 BIN_DIR = INSTALL_DIR / "bin"
@@ -25,7 +26,7 @@ LOG_DIR = INSTALL_DIR / "logs"
 STATE_DIR = INSTALL_DIR / "state"
 
 # Legacy collector artefacts to clean up
-_LEGACY_ARTEFACTS = ("bin/arize-collector", "run/collector.pid", "logs/collector.log")
+_LEGACY_ARTEFACTS = ("bin/atatus-collector", "run/collector.pid", "logs/collector.log")
 
 
 # ---------------------------------------------------------------------------
@@ -51,19 +52,19 @@ def print_color(msg: str, color: str = "") -> None:
 
 
 def info(msg: str) -> None:
-    """Print an info message with [arize] prefix."""
+    """Print an info message with [atatus] prefix."""
     if sys.stdout.isatty() and os.name != "nt":
-        print(f"\033[0;32m[arize]\033[0m {msg}")
+        print(f"\033[0;32m[atatus]\033[0m {msg}")
     else:
-        print(f"[arize] {msg}")
+        print(f"[atatus] {msg}")
 
 
 def err(msg: str) -> None:
-    """Print an error message with [arize] prefix to stderr."""
+    """Print an error message with [atatus] prefix to stderr."""
     if sys.stderr.isatty() and os.name != "nt":
-        sys.stderr.write(f"\033[0;31m[arize]\033[0m {msg}\n")
+        sys.stderr.write(f"\033[0;31m[atatus]\033[0m {msg}\n")
     else:
-        sys.stderr.write(f"[arize] {msg}\n")
+        sys.stderr.write(f"[atatus] {msg}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -128,31 +129,16 @@ def ensure_harness_installed(
 def prompt_backend(
     existing_harnesses: dict | None = None,
 ) -> tuple[str, dict]:
-    """Interactive backend selection with optional copy-from.
+    """Interactive credential setup with optional copy-from.
 
-    existing_harnesses is the value of cfg['harnesses'] (or None).  After the
-    user picks a target ("phoenix" or "arize"), find entries in
-    existing_harnesses whose ``target`` matches.  If any exist, offer a menu
-    to copy credentials from one.
+    existing_harnesses is the value of cfg['harnesses'] (or None).  If any
+    entry already holds usable Atatus credentials, offer a menu to copy from
+    one instead of retyping the license key.
 
     Returns (target, credentials).  credentials keys:
-      phoenix: {"endpoint", "api_key"}
-      arize:   {"endpoint", "api_key", "space_id"}
+      {"endpoint", "api_key"}
     """
-    print("Which backend do you want to use?")
-    print("")
-    print("  1) Phoenix (self-hosted)")
-    print("  2) Arize AX (cloud)")
-    print("")
-    choice = input("Enter choice [1/2]: ").strip()
-
-    if choice in ("1", "phoenix", "Phoenix", ""):
-        target = "phoenix"
-    elif choice in ("2", "arize", "ax", "AX"):
-        target = "arize"
-    else:
-        err("Invalid choice. Run setup again.")
-        sys.exit(1)
+    target = "atatus"
 
     # --- copy-from logic ---
     copied = _try_copy_from(target, existing_harnesses)
@@ -160,38 +146,27 @@ def prompt_backend(
         return (target, copied)
 
     # --- fresh credential prompts ---
-    if target == "phoenix":
-        print("")
-        phoenix_endpoint = input("Phoenix endpoint [http://localhost:6006]: ").strip()
-        if not phoenix_endpoint:
-            phoenix_endpoint = "http://localhost:6006"
-        api_key = getpass("Phoenix API Key (blank for no auth): ").strip()
-        return ("phoenix", {"endpoint": phoenix_endpoint, "api_key": api_key})
-
-    # arize
     print("")
-    api_key = getpass("Arize API Key: ").strip()
-    space_id = input("Arize Space ID: ").strip()
+    api_key = getpass("Atatus License Key: ").strip()
 
-    if not api_key or not space_id:
-        err("API key and Space ID are required for Arize AX")
+    if not api_key:
+        err("A license key is required.")
         sys.exit(1)
 
     print("")
     if sys.stdout.isatty() and os.name != "nt":
-        print("\033[1;33mOTLP Endpoint\033[0m (for hosted Arize instances, leave blank for default):")
+        print("\033[1;33mOTLP Endpoint\033[0m (leave blank for the default collector):")
     else:
-        print("OTLP Endpoint (for hosted Arize instances, leave blank for default):")
-    otlp_endpoint = input("OTLP Endpoint [otlp.arize.com:443]: ").strip()
+        print("OTLP Endpoint (leave blank for the default collector):")
+    otlp_endpoint = input(f"OTLP Endpoint [{DEFAULT_OTLP_ENDPOINT}]: ").strip()
     if not otlp_endpoint:
-        otlp_endpoint = "otlp.arize.com:443"
+        otlp_endpoint = DEFAULT_OTLP_ENDPOINT
 
     return (
-        "arize",
+        target,
         {
             "endpoint": otlp_endpoint,
             "api_key": api_key,
-            "space_id": space_id,
         },
     )
 
@@ -201,17 +176,10 @@ def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
     if not existing_harnesses:
         return None
 
-    # Required fields per target
-    if target == "phoenix":
-        # api_key must be present but may be empty string
-        def _valid(entry: dict) -> bool:
-            return "endpoint" in entry and "api_key" in entry
+    _required = {"endpoint", "api_key"}
 
-    else:
-        _required_arize = {"endpoint", "api_key", "space_id"}
-
-        def _valid(entry: dict) -> bool:
-            return all(k in entry and entry[k] for k in _required_arize)
+    def _valid(entry: dict) -> bool:
+        return all(k in entry and entry[k] for k in _required)
 
     matches: list[tuple[str, dict]] = []
     for name, entry in existing_harnesses.items():
@@ -227,13 +195,10 @@ def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
         return None
 
     # Display menu
-    target_label = "Phoenix" if target == "phoenix" else "Arize AX"
     print("")
-    print(f"Found existing harnesses using {target_label}:")
+    print("Found existing harnesses already configured for Atatus:")
     for i, (name, entry) in enumerate(matches, 1):
         detail = f"endpoint: {entry.get('endpoint', '')}"
-        if target == "arize":
-            detail += f", space_id: {entry.get('space_id', '')}"
         print(f"  {i}) {name}  ({detail})")
     last = len(matches) + 1
     print(f"  {last}) Enter new credentials")
@@ -249,10 +214,7 @@ def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
             if 1 <= idx <= len(matches):
                 name, entry = matches[idx - 1]
                 info(f"Reusing {target} credentials from '{name}'.")
-                creds: dict = {"endpoint": entry["endpoint"], "api_key": entry["api_key"]}
-                if target == "arize":
-                    creds["space_id"] = entry["space_id"]
-                return creds
+                return {"endpoint": entry["endpoint"], "api_key": entry["api_key"]}
         except (ValueError, TypeError):
             pass
         attempts += 1
@@ -330,7 +292,7 @@ def write_config(
     """Write or merge config.json with a fully-flattened harnesses.<name> entry.
 
     Writes harnesses.<harness_name>.{project_name, target, endpoint, api_key,
-    [space_id], [collector]}.  If user_id is non-empty, sets top-level user_id.
+    [collector]}.  If user_id is non-empty, sets top-level user_id.
     Read-merge-write: preserves other harnesses and top-level keys.
     """
     config = load_config(config_path)
@@ -349,8 +311,6 @@ def write_config(
         "endpoint": credentials.get("endpoint", ""),
         "api_key": credentials.get("api_key", ""),
     }
-    if target == "arize" and "space_id" in credentials:
-        entry["space_id"] = credentials["space_id"]
 
     if collector is not None:
         entry["collector"] = collector
@@ -369,14 +329,14 @@ def write_config(
 
 
 def dry_run() -> bool:
-    """True when ARIZE_DRY_RUN env var is set to a truthy value ('1','true','yes')."""
-    return os.environ.get("ARIZE_DRY_RUN", "").lower() in ("1", "true", "yes")
+    """True when ATATUS_DRY_RUN env var is set to a truthy value ('1','true','yes')."""
+    return os.environ.get("ATATUS_DRY_RUN", "").lower() in ("1", "true", "yes")
 
 
 def ensure_shared_runtime() -> None:
-    """Create ~/.arize/harness/{bin,run,logs,state} if missing. Idempotent.
+    """Create ~/.atatus/harness/{bin,run,logs,state} if missing. Idempotent.
 
-    Also removes any legacy collector artefacts (bin/arize-collector,
+    Also removes any legacy collector artefacts (bin/atatus-collector,
     run/collector.pid, logs/collector.log) left over from pre-buffer-service
     installs.
     """
@@ -438,8 +398,6 @@ def merge_harness_entry(
             "endpoint": credentials.get("endpoint", ""),
             "api_key": credentials.get("api_key", ""),
         }
-        if target == "arize" and "space_id" in credentials:
-            entry["space_id"] = credentials["space_id"]
         if collector is not None:
             entry["collector"] = collector
         set_value(config, f"harnesses.{name}", entry)
@@ -500,7 +458,7 @@ def harness_dir(harness: str) -> Path:
     """Return the absolute path of <install-dir>/tracing/<harness>/.
 
     Maps a harness alias (e.g. ``claude-code``) to its directory name
-    (``claude_code``) under ``~/.arize/harness/tracing/``.
+    (``claude_code``) under ``~/.atatus/harness/tracing/``.
     """
     sub_name = harness.replace("-", "_")
     return INSTALL_DIR / "tracing" / sub_name

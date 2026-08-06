@@ -19,12 +19,12 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants from HARNESSES["cursor"] ---
 _HARNESS = HARNESSES["cursor"]
 SERVICE_NAME = _HARNESS["service_name"]  # "cursor"
-SCOPE_NAME = _HARNESS["scope_name"]  # "arize-cursor-plugin"
-STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.arize/harness/state/cursor
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-cursor-plugin"
+STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/cursor
 MAX_ATTR_CHARS = int(os.environ.get("CURSOR_TRACE_MAX_ATTR_CHARS", "100000"))
 
 # Route hook stderr to a per-harness log file unless the user already set one.
-os.environ.setdefault("ARIZE_LOG_FILE", str(_HARNESS["default_log_file"]))
+os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 

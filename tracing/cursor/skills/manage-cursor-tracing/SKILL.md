@@ -1,11 +1,11 @@
 ---
 name: manage-cursor-tracing
-description: Set up and configure Arize tracing for Cursor IDE sessions. Use when users want to set up tracing, configure Arize AX or Phoenix for Cursor, enable/disable tracing, or troubleshoot tracing issues. Triggers on "set up cursor tracing", "configure Arize for Cursor", "configure Phoenix for Cursor", "enable cursor tracing", "setup-cursor-tracing", or any request about connecting Cursor to Arize or Phoenix for observability.
+description: Set up and configure Atatus tracing for Cursor IDE sessions. Use when users want to set up tracing, configure Atatus for Cursor, enable/disable tracing, or troubleshoot tracing issues. Triggers on "set up cursor tracing", "configure Atatus for Cursor", "enable cursor tracing", "setup-cursor-tracing", or any request about connecting Cursor to Atatus for observability.
 ---
 
 # Setup Cursor Tracing
 
-Configure OpenInference tracing for Cursor IDE sessions to Arize AX (cloud) or Phoenix (self-hosted). Spans are sent directly to the backend from hooks -- no background process or backend-specific dependencies are needed in the user's environment.
+Configure OpenInference tracing for Cursor IDE sessions to Atatus. Spans are sent directly to the backend from hooks -- no background process or backend-specific dependencies are needed in the user's environment.
 
 ## How to Use This Skill
 
@@ -15,96 +15,66 @@ Configure OpenInference tracing for Cursor IDE sessions to Arize AX (cloud) or P
    - Yes -> Jump to [Configure Settings](#configure-settings)
    - No -> Continue to step 2
 
-2. **Which backend do they want to use?**
-   - Phoenix (self-hosted) -> Go to [Set Up Phoenix](#set-up-phoenix)
-   - Arize AX (cloud) -> Go to [Set Up Arize AX](#set-up-arize-ax)
+2. **Do they need to configure credentials?**
+   - Yes -> Go to [Set Up Atatus](#set-up-atatus)
 
 3. **Are they troubleshooting?**
    - Yes -> Jump to [Troubleshoot](#troubleshoot)
 
 **Important:** Only follow the relevant path for the user's needs. Don't go through all sections.
 
-## Set Up Phoenix
+## Set Up Atatus
 
-Phoenix is self-hosted. No Python dependencies are needed for tracing -- spans are sent directly via `send_span()` using stdlib `urllib`.
-
-### Install Phoenix
-
-Ask if they already have Phoenix running. If not, walk through:
-
-```bash
-# Option A: pip
-pip install arize-phoenix && phoenix serve
-
-# Option B: Docker
-docker run -p 6006:6006 arizephoenix/phoenix:latest
-```
-
-Phoenix UI will be available at `http://localhost:6006`. Confirm it's running:
-
-```bash
-curl -sf http://localhost:6006/v1/traces >/dev/null && echo "Phoenix is running" || echo "Phoenix not reachable"
-```
-
-Then proceed to [Configure Settings](#configure-settings) with the Phoenix endpoint.
-
-## Set Up Arize AX
-
-Arize AX is available as a SaaS platform or as an on-prem deployment. Users need an account, a space, and an API key.
-
-**First, ask the user: "Are you using the Arize SaaS platform or an on-prem instance?"**
-
-- **SaaS** -> Uses the default endpoint (`otlp.arize.com:443`). Continue below.
-- **On-prem** -> The user will need to provide their custom OTLP endpoint (e.g., `otlp.mycompany.arize.com:443`). Ask for it and note it for the [Configure Settings](#configure-settings) step.
+The user needs an Atatus account and a license key.
 
 ### 1. Create an account
 
-If the user doesn't have an Arize account:
-- **SaaS**: Sign up at https://app.arize.com/auth/join
-- **On-prem**: Contact their administrator for access to the on-prem instance
+If the user doesn't have an Atatus account, sign up at https://app.atatus.com/auth/join
 
-### 2. Get Space ID and API key
+### 2. Get your license key
 
-Walk the user through finding their credentials:
-1. Log in to their Arize instance (https://app.arize.com for SaaS, or their on-prem URL)
-2. Click **Settings** (gear icon) in the left sidebar
-3. The **Space ID** is shown on the Space Settings page
-4. Go to the **API Keys** tab
-5. Click **Create API Key** or copy an existing one
+Walk the user through creating one:
 
-Both `api_key` and `space_id` are required for the shared config.
+1. Log in to Atatus
+2. Click **Settings** in the top bar
+3. Go to **Account Settings**
+4. Click **API Keys**
+5. Click **New API Key**
+6. Give it a name and choose the type **Ingest License Key**
+7. Click **Create**
+8. Copy the key
 
-**No Python dependencies are needed.** Both Phoenix and Arize AX use HTTP/JSON — no additional Python dependencies are needed.
+That value is `api_key` in the shared config, and it is required.
 
-Then proceed to [Configure Settings](#configure-settings). If the user is on an on-prem instance, remind them to provide their custom endpoint.
+**No Python dependencies are needed** — spans are sent as OTLP/JSON over HTTP.
+
+Then proceed to [Configure Settings](#configure-settings).
 
 ## Configure Settings
 
-**Important:** Users must run this setup before tracing will work. The `send_span()` function requires `~/.arize/harness/config.json` to exist for backend credential resolution.
+**Important:** Users must run this setup before tracing will work. The `send_span()` function requires `~/.atatus/harness/config.json` to exist for backend credential resolution.
 
 ### Ask the user for:
 
-1. **Backend choice**: Phoenix or Arize AX
-2. **Credentials** (only if no existing config):
-   - Phoenix: endpoint URL (default: `http://localhost:6006`), optional API key
-   - Arize AX: API key and Space ID
-3. **OTLP Endpoint** (Arize AX only, optional): For hosted Arize instances using a custom endpoint. Defaults to `otlp.arize.com:443`.
-4. **Project name** (optional): defaults to `"cursor"`, stored under `harnesses.cursor.project_name`
-5. **User ID** (optional): Set `ARIZE_USER_ID` env var to identify spans by user (useful for teams)
+1. **Credentials** (only if no existing config):
+   - Atatus license key, and optionally a custom OTLP endpoint
+     (default: `https://otel-rx.atatus.com`)
+2. **Project name** (optional): defaults to `"cursor"`, stored under `harnesses.cursor.project_name`
+3. **User ID** (optional): Set `ATATUS_USER_ID` env var to identify spans by user (useful for teams)
 
 ### Write the config
 
-The config file at `~/.arize/harness/config.json` is the single source of truth for backend credentials and per-harness settings. Create the directory structure if needed: `mkdir -p ~/.arize/harness/{bin,run,logs,state/cursor}`
+The config file at `~/.atatus/harness/config.json` is the single source of truth for backend credentials and per-harness settings. Create the directory structure if needed: `mkdir -p ~/.atatus/harness/{bin,run,logs,state/cursor}`
 
-**Important: read-merge-write.** If `~/.arize/harness/config.json` already exists, read it first, then merge in the new or updated fields (e.g., add/update the `harnesses.cursor` entry) while preserving existing backend credentials. Only prompt for backend credentials if no existing config is found.
+**Important: read-merge-write.** If `~/.atatus/harness/config.json` already exists, read it first, then merge in the new or updated fields (e.g., add/update the `harnesses.cursor` entry) while preserving existing backend credentials. Only prompt for backend credentials if no existing config is found.
 
-**Phoenix:**
+**Atatus:**
 ```json
 {
   "harnesses": {
     "cursor": {
       "project_name": "cursor",
-      "target": "phoenix",
+      "target": "atatus",
       "endpoint": "<endpoint>",
       "api_key": ""
     }
@@ -112,16 +82,15 @@ The config file at `~/.arize/harness/config.json` is the single source of truth 
 }
 ```
 
-**Arize AX:**
+**Atatus:**
 ```json
 {
   "harnesses": {
     "cursor": {
       "project_name": "cursor",
-      "target": "arize",
-      "endpoint": "otlp.arize.com:443",
-      "api_key": "<key>",
-      "space_id": "<id>"
+      "target": "atatus",
+      "endpoint": "https://otel-rx.atatus.com",
+      "api_key": "<key>"
     }
   }
 }
@@ -131,7 +100,7 @@ If the user has a custom OTLP endpoint, set it in `harnesses.cursor.endpoint`.
 
 ### Activate Cursor hooks
 
-Cursor uses a `.cursor/hooks.json` file in the project root to route hook events to the handler. All events route to a single `arize-hook-cursor` CLI entry point, which dispatches based on `hook_event_name` in the JSON payload.
+Cursor uses a `.cursor/hooks.json` file in the project root to route hook events to the handler. All events route to a single `atatus-hook-cursor` CLI entry point, which dispatches based on `hook_event_name` in the JSON payload.
 
 Create `.cursor/hooks.json` in the user's project (or merge into it if it already exists):
 
@@ -139,43 +108,43 @@ Create `.cursor/hooks.json` in the user's project (or merge into it if it alread
 {
   "version": 1,
   "hooks": {
-    "sessionStart": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "sessionEnd": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeSubmitPrompt": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterAgentResponse": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterAgentThought": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeShellExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterShellExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeMCPExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterMCPExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeReadFile": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterFileEdit": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "stop": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeTabFileRead": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterTabFileEdit": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "postToolUse": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }]
+    "sessionStart": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "sessionEnd": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeSubmitPrompt": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterAgentResponse": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterAgentThought": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeShellExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterShellExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeMCPExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterMCPExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeReadFile": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterFileEdit": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "stop": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeTabFileRead": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterTabFileEdit": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "postToolUse": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }]
   }
 }
 ```
 
-If the user already has a `.cursor/hooks.json` with other hooks, merge the Arize entries into the existing arrays for each event.
+If the user already has a `.cursor/hooks.json` with other hooks, merge the Atatus entries into the existing arrays for each event.
 
 ### Validate
 
-1. **Config exists**: Run `cat ~/.arize/harness/config.json` to verify the config file exists and has correct backend credentials.
-2. **Phoenix** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
-3. **Hooks active**: Verify `.cursor/hooks.json` exists in the project root and contains the Arize hook entries.
+1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials.
+2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+3. **Hooks active**: Verify `.cursor/hooks.json` exists in the project root and contains the Atatus hook entries.
 
 ### Confirm
 
 Tell the user:
-- Config saved to `~/.arize/harness/config.json`
+- Config saved to `~/.atatus/harness/config.json`
 - Cursor hooks activated via `.cursor/hooks.json`
 - Spans are sent directly to the backend from hooks — no background process needed
-- After saving, open a new Cursor session and traces will appear in their Phoenix UI or Arize AX dashboard under the project name
-- Mention `ARIZE_DRY_RUN=true` to test without sending data (set as env var before launching Cursor)
-- Mention `ARIZE_VERBOSE=true` for debug output
-- Errors are always written to `~/.arize/harness/logs/cursor.log`; set `ARIZE_VERBOSE=true` in the shell before launching Cursor to also capture routine hook activity
+- After saving, open a new Cursor session and traces will appear in the Atatus dashboard under the project name
+- Mention `ATATUS_DRY_RUN=true` to test without sending data (set as env var before launching Cursor)
+- Mention `ATATUS_VERBOSE=true` for debug output
+- Errors are always written to `~/.atatus/harness/logs/cursor.log`; set `ATATUS_VERBOSE=true` in the shell before launching Cursor to also capture routine hook activity
 
 ## Hook Events
 
@@ -227,7 +196,7 @@ Full Cursor CLI assistant and thinking coverage requires parsing --output-format
 - **`stop`** produces an `Agent Stop` CHAIN span carrying per-turn status / loop_count / duration metadata. On the Cursor IDE, per-turn token usage is attached to the `Agent Response` (LLM) span instead: that span is deferred from `afterAgentResponse` and sent at end-of-turn when `stop` fires, populated from the `stop` payload with `llm.token_count.prompt` (the total prompt — Cursor's `input_tokens` is the uncached remainder, so cache reads/writes are added back in), `llm.token_count.completion`, the OpenInference cache subsets `llm.token_count.prompt_details.cache_read` / `llm.token_count.prompt_details.cache_write`, `llm.token_count.total`, and `llm.model_name`. Cursor CLI does not emit `afterAgentResponse`, so there is no LLM span to attach to; for the CLI path, token counts remain on the `Agent Stop` / `Session End` CHAIN span as before.
 - **`postToolUse`** produces a generic `Tool: <name>` span ONLY for tools without a dedicated handler. Shell, file read/edit, tab file ops, and MCP execution are handled by their dedicated `before*`/`after*` events; the generic postToolUse is suppressed for these to avoid duplicate spans.
 
-Every span includes `cursor.conversation.id` as a span attribute. Since `sessionStart` and per-turn activity use different `trace_id` values, `cursor.conversation.id` is the recommended cross-trace join key in Arize. To gather all activity for a Cursor session regardless of trace, filter spans by `attributes.cursor.conversation.id = "<id>"`.
+Every span includes `cursor.conversation.id` as a span attribute. Since `sessionStart` and per-turn activity use different `trace_id` values, `cursor.conversation.id` is the recommended cross-trace join key in Atatus. To gather all activity for a Cursor session regardless of trace, filter spans by `attributes.cursor.conversation.id = "<id>"`.
 
 ### Hooks JSON Example (IDE + CLI)
 
@@ -237,21 +206,21 @@ When configuring `.cursor/hooks.json`, include both IDE and CLI events:
 {
   "version": 1,
   "hooks": {
-    "sessionStart": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "sessionEnd": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeSubmitPrompt": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterAgentResponse": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterAgentThought": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeShellExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterShellExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeMCPExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterMCPExecution": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeReadFile": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterFileEdit": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "stop": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "beforeTabFileRead": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "afterTabFileEdit": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }],
-    "postToolUse": [{ "command": "~/.arize/harness/venv/bin/arize-hook-cursor" }]
+    "sessionStart": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "sessionEnd": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeSubmitPrompt": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterAgentResponse": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterAgentThought": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeShellExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterShellExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeMCPExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterMCPExecution": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeReadFile": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterFileEdit": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "stop": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "beforeTabFileRead": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "afterTabFileEdit": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }],
+    "postToolUse": [{ "command": "~/.atatus/harness/venv/bin/atatus-hook-cursor" }]
   }
 }
 ```
@@ -262,12 +231,12 @@ Common issues and fixes:
 
 | Problem | Fix |
 |---------|-----|
-| Traces not appearing | Verify config exists: `cat ~/.arize/harness/config.json`. Check hook log: `tail -20 ~/.arize/harness/logs/cursor.log` |
-| Config missing | Run the installer or create `~/.arize/harness/config.json` manually (include `harnesses.cursor` section) |
-| Phoenix unreachable | Verify Phoenix is running: `curl -sf <endpoint>/v1/traces` |
+| Traces not appearing | Verify config exists: `cat ~/.atatus/harness/config.json`. Check hook log: `tail -20 ~/.atatus/harness/logs/cursor.log` |
+| Config missing | Run the installer or create `~/.atatus/harness/config.json` manually (include `harnesses.cursor` section) |
+| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
 | Hooks not firing | Verify `.cursor/hooks.json` exists in the project root and paths are correct (use absolute paths) |
-| Shell/MCP spans missing input | State push failed -- check that `~/.arize/harness/state/cursor/` is writable |
-| Want to test without sending | Set `ARIZE_DRY_RUN=true` env var before launching Cursor |
-| Want verbose logging | Set `ARIZE_VERBOSE=true` env var before launching Cursor |
-| Wrong project name | Set `harnesses.cursor.project_name` in `~/.arize/harness/config.json` (default: `"cursor"`) |
-| Spans missing user attribution | Set `ARIZE_USER_ID` env var before launching Cursor |
+| Shell/MCP spans missing input | State push failed -- check that `~/.atatus/harness/state/cursor/` is writable |
+| Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Cursor |
+| Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching Cursor |
+| Wrong project name | Set `harnesses.cursor.project_name` in `~/.atatus/harness/config.json` (default: `"cursor"`) |
+| Spans missing user attribution | Set `ATATUS_USER_ID` env var before launching Cursor |

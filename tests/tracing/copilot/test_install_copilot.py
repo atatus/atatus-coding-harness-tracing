@@ -16,10 +16,10 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "test-key", "space_id": "test-space"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
 
 
@@ -36,7 +36,7 @@ def _fake_stdout():
         {
             "isatty": lambda self: False,
             "write": lambda self, s: None,
-            "flush": lambda self: None,
+            "flush": lambda self: None
         },
     )()
 
@@ -44,7 +44,7 @@ def _fake_stdout():
 def _mock_prompts(monkeypatch, backend=None):
     """Patch prompt functions on the install module (where they're bound after import)."""
     if backend is None:
-        backend = PHOENIX_BACKEND
+        backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
         _install,
@@ -69,22 +69,22 @@ def cwd_tmp(tmp_path, monkeypatch):
 
     import core.setup as setup_mod
 
-    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".arize" / "harness" / "venv")
-    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
-    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".arize" / "harness" / "bin")
-    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".arize" / "harness" / "run")
-    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".arize" / "harness" / "logs")
-    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".arize" / "harness" / "state")
+    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".atatus" / "harness" / "venv")
+    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
+    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".atatus" / "harness" / "bin")
+    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".atatus" / "harness" / "run")
+    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".atatus" / "harness" / "logs")
+    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".atatus" / "harness" / "state")
 
     import core.constants as c
 
-    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
+    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
 
     import core.config as config_mod
 
-    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".arize" / "harness" / "config.json"))
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".atatus" / "harness" / "config.json"))
 
     return tmp_path
 
@@ -106,16 +106,16 @@ class TestInstallFreshWritesFlatHarnessEntry:
     @pytest.mark.parametrize(
         "backend,expected_target",
         [
-            (PHOENIX_BACKEND, "phoenix"),
-            (ARIZE_BACKEND, "arize"),
+            (ATATUS_BACKEND, "atatus"),
+            (ATATUS_BACKEND, "atatus")
         ],
-        ids=["phoenix", "arize"],
+        ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config_and_hooks(self, cwd_tmp, monkeypatch, backend, expected_target):
         _mock_prompts(monkeypatch, backend=backend)
         install()
 
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert config_path.is_file()
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["copilot"]
@@ -124,8 +124,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
 
-        if expected_target == "arize":
-            assert entry["space_id"] == backend[1]["space_id"]
 
         # No collector for copilot
         assert "collector" not in entry
@@ -148,12 +146,12 @@ class TestInstallFreshWritesFlatHarnessEntry:
             "PreToolUse",
             "PostToolUse",
             "Stop",
-            "SubagentStop",
+            "SubagentStop"
         }
         for event, entries in data["hooks"].items():
             assert len(entries) == 1
             assert entries[0]["type"] == "command"
-            assert "arize-hook-copilot-" in entries[0]["command"]
+            assert "atatus-hook-copilot-" in entries[0]["command"]
 
     def test_only_hooks_json_written(self, hooks_dir, monkeypatch):
         _mock_prompts(monkeypatch)
@@ -168,21 +166,20 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
     def test_copy_from_populates_credentials(self, cwd_tmp, monkeypatch):
         """Pre-seed a claude-code entry; copilot install should receive it in prompt_backend."""
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
-        # Pre-seed with claude-code arize entry
+        # Pre-seed with claude-code atatus entry
         seed_config = {
             "harnesses": {
                 "claude-code": {
                     "project_name": "claude-code",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -190,7 +187,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
         def fake_prompt_backend(existing_harnesses=None):
             captured["existing_harnesses"] = existing_harnesses
-            return ARIZE_BACKEND
+            return ATATUS_BACKEND
 
         monkeypatch.setattr(_install, "prompt_backend", fake_prompt_backend)
         monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
@@ -208,15 +205,14 @@ class TestInstallSecondHarnessOffersCopyFrom:
         # prompt_backend should have received the existing harnesses dict
         assert captured["existing_harnesses"] is not None
         assert "claude-code" in captured["existing_harnesses"]
-        assert captured["existing_harnesses"]["claude-code"]["target"] == "arize"
+        assert captured["existing_harnesses"]["claude-code"]["target"] == "atatus"
 
         # Verify the copilot entry was actually written with correct credentials
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["copilot"]
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == ARIZE_BACKEND[1]["endpoint"]
-        assert entry["api_key"] == ARIZE_BACKEND[1]["api_key"]
-        assert entry["space_id"] == ARIZE_BACKEND[1]["space_id"]
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == ATATUS_BACKEND[1]["endpoint"]
+        assert entry["api_key"] == ATATUS_BACKEND[1]["api_key"]
         assert entry["project_name"] == "copilot"
 
 
@@ -224,7 +220,7 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
     """Re-install with existing copilot config only updates project_name."""
 
     def test_existing_entry_preserves_target(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -232,12 +228,11 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
             "harnesses": {
                 "copilot": {
                     "project_name": "copilot",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -257,10 +252,9 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
         entry = config["harnesses"]["copilot"]
         assert entry["project_name"] == "my-copilot"
         # Other fields preserved
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "ak-existing"
-        assert entry["space_id"] == "space-existing"
 
 
 class TestIdempotent:
@@ -287,7 +281,7 @@ class TestUninstallRemovesHarnessEntry:
         _mock_prompts(monkeypatch)
         install()
         uninstall()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text())
             harnesses = config.get("harnesses", {})
@@ -307,7 +301,7 @@ class TestUninstallRemovesHarnessEntry:
         uninstall()
         # Second uninstall should be a no-op, no exception
         uninstall()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text())
             harnesses = config.get("harnesses", {})
@@ -346,15 +340,15 @@ class TestInstallDryRunWritesNothing:
     """Dry-run mode writes nothing."""
 
     def test_dry_run_no_files(self, hooks_dir, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
         json_files = list(hooks_dir.glob("*.json")) if hooks_dir.exists() else []
         assert len(json_files) == 0
 
     def test_dry_run_no_config(self, cwd_tmp, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert not config_path.is_file()

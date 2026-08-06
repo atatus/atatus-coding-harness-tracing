@@ -42,9 +42,9 @@ from tracing.claude_code.hooks.handlers import (
 @pytest.fixture(autouse=True)
 def _enable_logging(monkeypatch):
     """Existing assertions expect raw content in spans; opt in to all logging."""
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ class TestPostToolUse:
                 "tool_name": "Read",
                 "tool_use_id": "t1",
                 "tool_input": {"file_path": "/foo/bar.py"},
-                "tool_response": "file content",
+                "tool_response": "file content"
             }
         )
         assert len(captured_spans) == 1
@@ -180,7 +180,7 @@ class TestPostToolUse:
                 "tool_name": "Bash",
                 "tool_use_id": "t2",
                 "tool_input": {"command": "ls -la /tmp"},
-                "tool_response": "output",
+                "tool_response": "output"
             }
         )
         assert len(captured_spans) == 1
@@ -198,7 +198,7 @@ class TestPostToolUse:
                 "tool_name": "Grep",
                 "tool_use_id": "t3",
                 "tool_input": {"pattern": "TODO", "path": "/src"},
-                "tool_response": "matches",
+                "tool_response": "matches"
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -216,7 +216,7 @@ class TestPostToolUse:
                 "tool_name": "WebFetch",
                 "tool_use_id": "t4",
                 "tool_input": {"url": "https://example.com"},
-                "tool_response": "page",
+                "tool_response": "page"
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -232,7 +232,7 @@ class TestPostToolUse:
                 "tool_name": "CustomTool",
                 "tool_use_id": "t5",
                 "tool_input": {"data": "hello"},
-                "tool_response": "result",
+                "tool_response": "result"
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -252,7 +252,7 @@ class TestPostToolUse:
                 "tool_name": "Read",
                 "tool_use_id": "t7",
                 "tool_input": {"file_path": "/a.py"},
-                "tool_response": "content",
+                "tool_response": "content"
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -298,7 +298,7 @@ class TestUserPromptSubmit:
             _handle_user_prompt_submit(
                 {
                     "prompt": "test",
-                    "transcript_path": transcript_file,
+                    "transcript_path": transcript_file
                 }
             )
         # sample_transcript.jsonl has 3 lines
@@ -359,7 +359,7 @@ class TestStop:
                 "role": "assistant",
                 "content": "Hello from string format",
                 "model": "claude-test",
-                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "usage": {"input_tokens": 10, "output_tokens": 5}
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -406,7 +406,7 @@ class TestStop:
                 "role": "assistant",
                 "content": "no caching here",
                 "model": "claude-test",
-                "usage": {"input_tokens": 42, "output_tokens": 7},
+                "usage": {"input_tokens": 42, "output_tokens": 7}
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -624,7 +624,7 @@ class TestScanTranscriptForUsage:
                 "role": "assistant",
                 "content": "plain text",
                 "model": "m1",
-                "usage": {"input_tokens": 1, "output_tokens": 2},
+                "usage": {"input_tokens": 1, "output_tokens": 2}
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -643,7 +643,7 @@ class TestScanTranscriptForUsage:
                 {"message": {"role": "assistant", "content": "good", "model": "m", "usage": {"output_tokens": 5}}}
             ),
             "",
-            "{invalid json",
+            "{invalid json"
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -661,11 +661,11 @@ class TestScanTranscriptForUsage:
                         "role": "assistant",
                         "content": "assistant msg",
                         "model": "m",
-                        "usage": {"output_tokens": 3},
+                        "usage": {"output_tokens": 3}
                     }
                 }
             ),
-            json.dumps({"message": {"role": "system", "content": "system msg"}}),
+            json.dumps({"message": {"role": "system", "content": "system msg"}})
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -681,7 +681,7 @@ class TestScanTranscriptForUsage:
             ),
             json.dumps(
                 {"message": {"role": "assistant", "content": "second", "model": "m2", "usage": {"output_tokens": 2}}}
-            ),
+            )
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -700,10 +700,10 @@ class TestScanTranscriptForUsage:
                         "role": "assistant",
                         "content": [{"type": "text", "text": ""}],
                         "model": "m",
-                        "usage": {"output_tokens": 1},
+                        "usage": {"output_tokens": 1}
                     }
                 }
-            ),
+            )
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -722,8 +722,8 @@ class TestScanTranscriptForUsage:
                     "input_tokens": 10,
                     "cache_read_input_tokens": 20,
                     "cache_creation_input_tokens": 30,
-                    "output_tokens": 40,
-                },
+                    "output_tokens": 40
+                }
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -764,7 +764,7 @@ class TestSubagentStop:
                 {
                     "agent_type": "code-review",
                     "agent_id": "agent-1",
-                    "agent_transcript_path": transcript_file,
+                    "agent_transcript_path": transcript_file
                 }
             )
         assert len(captured_spans) == 1
@@ -792,7 +792,7 @@ class TestSubagentStop:
                     {
                         "agent_type": "explorer",
                         "agent_id": "a2",
-                        "agent_transcript_path": transcript_file,
+                        "agent_transcript_path": transcript_file
                     }
                 )
 
@@ -821,7 +821,7 @@ class TestSubagentStop:
                     {
                         "agent_type": "explorer",
                         "agent_id": "a3",
-                        "agent_transcript_path": transcript_file,
+                        "agent_transcript_path": transcript_file
                     }
                 )
 
@@ -842,7 +842,7 @@ class TestSubagentStop:
                 {
                     "agent_type": "explorer",
                     "agent_id": "a4",
-                    "last_assistant_message": "",
+                    "last_assistant_message": ""
                 }
             )
         assert len(captured_spans) == 1
@@ -860,7 +860,7 @@ class TestSubagentStop:
                 "role": "assistant",
                 "content": "main output",
                 "model": "claude-main",
-                "usage": {"input_tokens": 999, "output_tokens": 999},
+                "usage": {"input_tokens": 999, "output_tokens": 999}
             }
         }
         main_tf.write_text(json.dumps(main_entry) + "\n")
@@ -871,7 +871,7 @@ class TestSubagentStop:
                 "role": "assistant",
                 "content": "agent output",
                 "model": "claude-test",
-                "usage": {"input_tokens": 77, "output_tokens": 33},
+                "usage": {"input_tokens": 77, "output_tokens": 33}
             }
         }
         agent_tf.write_text(json.dumps(agent_entry) + "\n")
@@ -884,7 +884,7 @@ class TestSubagentStop:
                 "agent_type": "explorer",
                 "agent_id": "a5",
                 "agent_transcript_path": str(agent_tf),
-                "transcript_path": str(main_tf),
+                "transcript_path": str(main_tf)
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -902,7 +902,7 @@ class TestSubagentStop:
                 {
                     "agent_type": "explorer",
                     "agent_id": "a6",
-                    "last_assistant_message": "Found the file at line 42",
+                    "last_assistant_message": "Found the file at line 42"
                 }
             )
         assert len(captured_spans) == 1
@@ -923,7 +923,7 @@ class TestSubagentStop:
                 {
                     "agent_type": "explorer",
                     "agent_id": "a7",
-                    "last_assistant_message": "overridden subagent text",
+                    "last_assistant_message": "overridden subagent text"
                 }
             )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -950,7 +950,7 @@ class TestStopFailure:
             {
                 "error": "rate_limit",
                 "error_details": "429",
-                "last_assistant_message": "API Error: Rate limit reached",
+                "last_assistant_message": "API Error: Rate limit reached"
             }
         )
         assert len(captured_spans) == 1
@@ -967,7 +967,7 @@ class TestStopFailure:
             {
                 "error": "rate_limit",
                 "error_details": "429",
-                "last_assistant_message": "API Error",
+                "last_assistant_message": "API Error"
             }
         )
         assert len(captured_spans) == 0
@@ -1013,7 +1013,7 @@ class TestNotification:
             {
                 "message": "Build succeeded",
                 "title": "CI",
-                "type": "success",
+                "type": "success"
             }
         )
         assert len(captured_spans) == 1
@@ -1053,7 +1053,7 @@ class TestPermissionRequest:
             {
                 "permission": "allow",
                 "tool_name": "Bash",
-                "tool_input": {"command": "rm -rf /"},
+                "tool_input": {"command": "rm -rf /"}
             }
         )
         assert len(captured_spans) == 1
@@ -1139,7 +1139,7 @@ class TestErrorHandling:
 
     def test_exception_caught_by_entry_point(self, monkeypatch, capsys):
         """Exception in _handle_session_start → entry point catches, calls error()."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.claude_code.hooks.handlers._read_stdin", return_value={}),
             mock.patch("tracing.claude_code.hooks.handlers.check_requirements", return_value=True),
@@ -1151,7 +1151,7 @@ class TestErrorHandling:
 
     def test_malformed_stdin_no_crash(self, monkeypatch, capsys):
         """Malformed stdin JSON in entry point doesn't crash."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.claude_code.hooks.handlers.check_requirements", return_value=True),
             mock.patch.object(sys, "stdin", new=__import__("io").StringIO("not valid json")),
@@ -1177,7 +1177,7 @@ ENTRY_POINTS = [
     ("stop_failure", stop_failure, "_handle_stop_failure"),
     ("notification", notification, "_handle_notification"),
     ("permission_request", permission_request, "_handle_permission_request"),
-    ("session_end", session_end, "_handle_session_end"),
+    ("session_end", session_end, "_handle_session_end")
 ]
 
 
@@ -1229,15 +1229,15 @@ def _attrs(span):
 
 
 class TestContentRedaction:
-    """Verify ARIZE_LOG_PROMPTS / TOOL_DETAILS / TOOL_CONTENT control span content."""
+    """Verify ATATUS_LOG_PROMPTS / TOOL_DETAILS / TOOL_CONTENT control span content."""
 
     @pytest.fixture(autouse=True)
     def _redaction_defaults(self, monkeypatch):
         # Override the module-level _enable_logging fixture: turn everything off
         # except prompts (which defaults on per the design).
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
-        monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
 
     def test_post_tool_use_redacts_content_and_details_by_default(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
@@ -1247,7 +1247,7 @@ class TestContentRedaction:
                 "tool_name": "Read",
                 "tool_use_id": "t1",
                 "tool_input": {"file_path": "/secret/path.py"},
-                "tool_response": "secret content",
+                "tool_response": "secret content"
             }
         )
         attrs = _attrs(captured_spans[0])
@@ -1265,7 +1265,7 @@ class TestContentRedaction:
                 "tool_name": "Read",
                 "tool_use_id": "t1",
                 "tool_input": {"file_path": "/foo.py"},
-                "tool_response": "x",
+                "tool_response": "x"
             }
         )
         attrs = _attrs(captured_spans[0])
@@ -1275,7 +1275,7 @@ class TestContentRedaction:
 
     def test_user_prompt_redacted_at_span_emit_when_flag_off(self, mock_resolve, state, captured_spans, monkeypatch):
         """Prompts are stored RAW in state and redacted only when the span is built."""
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         _handle_user_prompt_submit({"prompt": "secret prompt", "session_id": "s1"})
         # State holds the raw value
         assert state.get("current_trace_prompt") == "secret prompt"
@@ -1296,7 +1296,7 @@ class TestContentRedaction:
         assert attrs["input.value"]["stringValue"].startswith("<redacted (")
 
     def test_notification_redacts_message_when_prompts_off(self, mock_resolve, state, captured_spans, monkeypatch):
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "span-parent")
         _handle_notification({"message": "hi", "title": "alert", "type": "info"})

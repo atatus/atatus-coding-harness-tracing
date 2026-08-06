@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-REM Arize Coding Harness Tracing — Windows installer router
+REM Atatus Coding Harness Tracing — Windows installer router
 REM
 REM Usage:
 REM   install.bat <harness> [--with-skills] [--branch NAME]
@@ -8,11 +8,11 @@ REM   install.bat uninstall [harness]
 REM   install.bat update
 
 REM --- Constants ---
-set "REPO_URL=https://github.com/Arize-ai/coding-harness-tracing.git"
-if not defined ARIZE_INSTALL_BRANCH set "ARIZE_INSTALL_BRANCH=main"
-set "INSTALL_BRANCH=%ARIZE_INSTALL_BRANCH%"
-set "TARBALL_URL=https://github.com/Arize-ai/coding-harness-tracing/archive/refs/heads/%INSTALL_BRANCH%.tar.gz"
-set "INSTALL_DIR=%USERPROFILE%\.arize\harness"
+set "REPO_URL=https://github.com/atatus/coding-harness-tracing.git"
+if not defined ATATUS_INSTALL_BRANCH set "ATATUS_INSTALL_BRANCH=main"
+set "INSTALL_BRANCH=%ATATUS_INSTALL_BRANCH%"
+set "TARBALL_URL=https://github.com/atatus/coding-harness-tracing/archive/refs/heads/%INSTALL_BRANCH%.tar.gz"
+set "INSTALL_DIR=%USERPROFILE%\.atatus\harness"
 set "VENV_DIR=%INSTALL_DIR%\venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "VENV_PIP=%VENV_DIR%\Scripts\pip.exe"
@@ -27,7 +27,7 @@ if /i "%~1"=="-h"        goto :usage
 if /i "%~1"=="--help"    goto :usage
 if /i "%~1"=="help"      goto :usage
 if /i "%~1"=="--with-skills" ( set "WITH_SKILLS=--with-skills" & shift & goto :parse_args )
-if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/Arize-ai/coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
+if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/atatus/coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
 for %%C in (claude codex copilot cursor gemini kiro opencode omp) do if /i "%~1"=="%%C" ( set "COMMAND=%%C" & shift & goto :parse_args )
 if /i "%~1"=="update" ( set "COMMAND=update" & shift & goto :parse_args )
 if /i "%~1"=="uninstall" (
@@ -35,10 +35,10 @@ if /i "%~1"=="uninstall" (
     for %%C in (claude codex copilot cursor gemini kiro opencode omp) do if /i "%~1"=="%%C" ( set "UNINSTALL_HARNESS=%%C" & shift )
     goto :parse_args
 )
-echo [arize] Unknown argument: %~1 >&2
+echo [atatus] Unknown argument: %~1 >&2
 goto :usage
 :done_args
-if "%COMMAND%"=="" ( echo [arize] No command specified >&2 & goto :usage )
+if "%COMMAND%"=="" ( echo [atatus] No command specified >&2 & goto :usage )
 
 REM --- Harness name -> directory mapping ---
 REM claude->tracing\claude_code  codex->tracing\codex  copilot->tracing\copilot  cursor->tracing\cursor  gemini->tracing\gemini  kiro->tracing\kiro  opencode->tracing\opencode  omp->tracing\omp
@@ -49,30 +49,30 @@ if "%COMMAND%"=="uninstall" goto :cmd_uninstall
 
 REM --- Install a harness ---
 call :find_python
-if "%FOUND_PYTHON%"=="" ( echo [arize] Error: Python 3.9+ is required >&2 & exit /b 1 )
-echo [arize] Found Python: %FOUND_PYTHON%
+if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
+echo [atatus] Found Python: %FOUND_PYTHON%
 call :bootstrap_repo
 if %ERRORLEVEL% neq 0 exit /b 1
 call :setup_venv
 if %ERRORLEVEL% neq 0 exit /b 1
 call :resolve_dir "%COMMAND%"
 set "_PY=%INSTALL_DIR%\%HARNESS_DIR%\install.py"
-if not exist "%_PY%" ( echo [arize] install.py not found at %_PY% >&2 & exit /b 1 )
-echo [arize] Running %COMMAND% install...
+if not exist "%_PY%" ( echo [atatus] install.py not found at %_PY% >&2 & exit /b 1 )
+echo [atatus] Running %COMMAND% install...
 "%VENV_PYTHON%" "%_PY%" install %WITH_SKILLS%
 exit /b %ERRORLEVEL%
 
 REM --- cmd_update ---
 :cmd_update
-if not exist "%INSTALL_DIR%" ( echo [arize] Not installed at %INSTALL_DIR% >&2 & exit /b 1 )
+if not exist "%INSTALL_DIR%" ( echo [atatus] Not installed at %INSTALL_DIR% >&2 & exit /b 1 )
 call :find_python
-if "%FOUND_PYTHON%"=="" ( echo [arize] Error: Python 3.9+ is required >&2 & exit /b 1 )
+if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
 set "_UPDATE_NEED_VENV=0"
 if exist "%INSTALL_DIR%\.git" (
-    echo [arize] Pulling latest changes...
+    echo [atatus] Pulling latest changes...
     git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1
     if !ERRORLEVEL! neq 0 (
-        echo [arize] Pull failed — re-cloning
+        echo [atatus] Pull failed — re-cloning
         rmdir /s /q "%INSTALL_DIR%" 2>nul
         call :bootstrap_repo
         if !ERRORLEVEL! neq 0 exit /b 1
@@ -89,31 +89,31 @@ if "!_UPDATE_NEED_VENV!"=="1" (
     call :setup_venv
     if !ERRORLEVEL! neq 0 exit /b 1
 ) else if exist "%VENV_PIP%" (
-    echo [arize] Reinstalling package...
+    echo [atatus] Reinstalling package...
     "%VENV_PIP%" install --quiet "%INSTALL_DIR%" >nul 2>&1
 )
 if exist "%VENV_PYTHON%" (
     for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
         call :resolve_dir "%%H"
-        if exist "%INSTALL_DIR%\!HARNESS_DIR!\install.py" ( echo [arize] Reinstalling %%H... & "%VENV_PYTHON%" "%INSTALL_DIR%\!HARNESS_DIR!\install.py" install )
+        if exist "%INSTALL_DIR%\!HARNESS_DIR!\install.py" ( echo [atatus] Reinstalling %%H... & "%VENV_PYTHON%" "%INSTALL_DIR%\!HARNESS_DIR!\install.py" install )
     )
 )
-echo [arize] Update complete!
+echo [atatus] Update complete!
 exit /b 0
 
 REM --- cmd_uninstall ---
 :cmd_uninstall
 if not "%UNINSTALL_HARNESS%"=="" (
-    if not exist "%VENV_PYTHON%" ( echo [arize] Venv not found >&2 & exit /b 1 )
+    if not exist "%VENV_PYTHON%" ( echo [atatus] Venv not found >&2 & exit /b 1 )
     call :resolve_dir "%UNINSTALL_HARNESS%"
     set "_PY=%INSTALL_DIR%\!HARNESS_DIR!\install.py"
-    if not exist "!_PY!" ( echo [arize] install.py not found >&2 & exit /b 1 )
-    echo [arize] Uninstalling %UNINSTALL_HARNESS%...
+    if not exist "!_PY!" ( echo [atatus] install.py not found >&2 & exit /b 1 )
+    echo [atatus] Uninstalling %UNINSTALL_HARNESS%...
     "%VENV_PYTHON%" "!_PY!" uninstall
     exit /b !ERRORLEVEL!
 )
 REM Full wipe
-echo [arize] Uninstalling coding-harness-tracing
+echo [atatus] Uninstalling coding-harness-tracing
 if exist "%VENV_PYTHON%" (
     for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
         call :resolve_dir "%%H"
@@ -121,8 +121,8 @@ if exist "%VENV_PYTHON%" (
     )
     "%VENV_PYTHON%" -c "from core.setup.wipe import wipe_shared_runtime; wipe_shared_runtime()" 2>nul
 )
-if exist "%INSTALL_DIR%" ( rmdir /s /q "%INSTALL_DIR%" 2>nul & echo [arize] Removed %INSTALL_DIR% )
-echo [arize] Uninstall complete.
+if exist "%INSTALL_DIR%" ( rmdir /s /q "%INSTALL_DIR%" 2>nul & echo [atatus] Removed %INSTALL_DIR% )
+echo [atatus] Uninstall complete.
 exit /b 0
 
 REM ===================================================================
@@ -148,52 +148,52 @@ goto :eof
 REM --- bootstrap_repo: clone or tarball into INSTALL_DIR ---
 :bootstrap_repo
 if exist "%INSTALL_DIR%\.git" (
-    echo [arize] Repository at %INSTALL_DIR%, syncing...
+    echo [atatus] Repository at %INSTALL_DIR%, syncing...
     git -C "%INSTALL_DIR%" fetch --depth 1 origin "%INSTALL_BRANCH%" >nul 2>&1 && git -C "%INSTALL_DIR%" checkout -B "%INSTALL_BRANCH%" FETCH_HEAD >nul 2>&1 && goto :eof
     git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1 && goto :eof
-    echo [arize] git update failed — re-cloning
+    echo [atatus] git update failed — re-cloning
     rmdir /s /q "%INSTALL_DIR%" 2>nul
 )
 if exist "%INSTALL_DIR%" if not exist "%INSTALL_DIR%\.git" ( rmdir /s /q "%INSTALL_DIR%" 2>nul )
 where git >nul 2>&1 && (
-    echo [arize] Cloning coding-harness-tracing...
+    echo [atatus] Cloning coding-harness-tracing...
     git clone --depth 1 --branch "%INSTALL_BRANCH%" "%REPO_URL%" "%INSTALL_DIR%" >nul 2>&1 && goto :eof
-    echo [arize] git clone failed — falling back to tarball
+    echo [atatus] git clone failed — falling back to tarball
 )
 call :download_tarball
 goto :eof
 
 REM --- download_tarball ---
 :download_tarball
-echo [arize] Downloading tarball...
-set "TMPZIP=%TEMP%\arize-install-%RANDOM%.tar.gz"
+echo [atatus] Downloading tarball...
+set "TMPZIP=%TEMP%\atatus-install-%RANDOM%.tar.gz"
 powershell -NoProfile -Command "Invoke-WebRequest -Uri '%TARBALL_URL%' -OutFile '%TMPZIP%'" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( curl -sSfL "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [arize] Download failed >&2 & exit /b 1 ) )
+if !ERRORLEVEL! neq 0 ( curl -sSfL "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [atatus] Download failed >&2 & exit /b 1 ) )
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 tar xzf "%TMPZIP%" --strip-components=1 -C "%INSTALL_DIR%" >nul 2>&1
 if !ERRORLEVEL! neq 0 (
-    set "TMPDIR=%TEMP%\arize-extract-%RANDOM%"
+    set "TMPDIR=%TEMP%\atatus-extract-%RANDOM%"
     mkdir "!TMPDIR!" 2>nul
     powershell -NoProfile -Command "& { $gz=[IO.File]::OpenRead('%TMPZIP%'); $d=New-Object IO.Compression.GZipStream($gz,[IO.Compression.CompressionMode]::Decompress); $f=[IO.File]::Create('!TMPDIR!\a.tar'); $d.CopyTo($f); $f.Close(); $d.Close(); $gz.Close() }" >nul 2>&1
     tar xf "!TMPDIR!\a.tar" --strip-components=1 -C "%INSTALL_DIR%" >nul 2>&1
-    if !ERRORLEVEL! neq 0 ( rmdir /s /q "!TMPDIR!" 2>nul & del "%TMPZIP%" 2>nul & echo [arize] Extraction failed >&2 & exit /b 1 )
+    if !ERRORLEVEL! neq 0 ( rmdir /s /q "!TMPDIR!" 2>nul & del "%TMPZIP%" 2>nul & echo [atatus] Extraction failed >&2 & exit /b 1 )
     rmdir /s /q "!TMPDIR!" 2>nul
 )
 del "%TMPZIP%" 2>nul
-echo [arize] Extracted to %INSTALL_DIR%
+echo [atatus] Extracted to %INSTALL_DIR%
 goto :eof
 
 REM --- setup_venv ---
 :setup_venv
-if exist "%VENV_PYTHON%" ( "%VENV_PYTHON%" -c "import core" >nul 2>&1 && ( echo [arize] Venv ready & goto :eof ) )
-echo [arize] Creating venv...
+if exist "%VENV_PYTHON%" ( "%VENV_PYTHON%" -c "import core" >nul 2>&1 && ( echo [atatus] Venv ready & goto :eof ) )
+echo [atatus] Creating venv...
 %FOUND_PYTHON% -m venv "%VENV_DIR%" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( echo [arize] Failed to create venv >&2 & exit /b 1 )
-if not exist "%VENV_PIP%" ( echo [arize] pip not found in venv >&2 & exit /b 1 )
-echo [arize] Installing coding-harness-tracing...
+if !ERRORLEVEL! neq 0 ( echo [atatus] Failed to create venv >&2 & exit /b 1 )
+if not exist "%VENV_PIP%" ( echo [atatus] pip not found in venv >&2 & exit /b 1 )
+echo [atatus] Installing coding-harness-tracing...
 "%VENV_PIP%" install --quiet "%INSTALL_DIR%" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( echo [arize] pip install failed >&2 & exit /b 1 )
-echo [arize] Venv ready at %VENV_DIR%
+if !ERRORLEVEL! neq 0 ( echo [atatus] pip install failed >&2 & exit /b 1 )
+echo [atatus] Venv ready at %VENV_DIR%
 goto :eof
 
 REM --- resolve_dir: map command/harness name to directory ---
@@ -208,13 +208,13 @@ if /i "%~1"=="gemini"      set "HARNESS_DIR=tracing\gemini"
 if /i "%~1"=="kiro"        set "HARNESS_DIR=tracing\kiro"
 if /i "%~1"=="opencode"    set "HARNESS_DIR=tracing\opencode"
 if /i "%~1"=="omp"         set "HARNESS_DIR=tracing\omp"
-if "%HARNESS_DIR%"=="" ( echo [arize] Unknown harness: %~1 >&2 & exit /b 1 )
+if "%HARNESS_DIR%"=="" ( echo [atatus] Unknown harness: %~1 >&2 & exit /b 1 )
 goto :eof
 
 REM --- Usage ---
 :usage
 echo.
-echo   Arize Coding Harness Tracing Installer
+echo   Atatus Coding Harness Tracing Installer
 echo.
 echo   Usage: install.bat ^<command^> [flags]
 echo.

@@ -100,7 +100,7 @@ def uninstall() -> None:
 
 
 def _prompt_agent_name() -> str:
-    """Ask the user which agent to install hooks into. Default arize-traced."""
+    """Ask the user which agent to install hooks into. Default atatus-traced."""
     raw = input(f"Agent name to install tracing into [{DEFAULT_AGENT_NAME}]: ").strip()
     return raw or DEFAULT_AGENT_NAME
 
@@ -196,7 +196,7 @@ def _unregister_all_kiro_hooks() -> None:
         we_created = data.get("description") == skeleton_desc and not hooks
         if we_created and not dry_run():
             agent_file.unlink(missing_ok=True)
-            info(f"Removed agent file {agent_file} (created by Arize tracing install)")
+            info(f"Removed agent file {agent_file} (created by Atatus tracing install)")
         elif not dry_run():
             _save_agent(agent_file, data)
             info(f"Cleaned tracing hooks from {agent_file}")

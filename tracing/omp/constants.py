@@ -18,10 +18,10 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 # The shim itself is file-dropped into ~/.omp/extensions/.
 EXTENSIONS_DIR = OMP_CONFIG_DIR / "extensions"
-PLUGIN_FILE = EXTENSIONS_DIR / "arize-tracing.ts"
+PLUGIN_FILE = EXTENSIONS_DIR / "atatus-tracing.ts"
 
 # Repo-shipped source asset copied on install.
-PLUGIN_SOURCE = Path(__file__).parent / "plugin" / "arize-tracing.ts"
+PLUGIN_SOURCE = Path(__file__).parent / "plugin" / "atatus-tracing.ts"
 
 # Soft install detection (presence check + binary lookup fallback).
 HARNESS_HOME = ".omp"

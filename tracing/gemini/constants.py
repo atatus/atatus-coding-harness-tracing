@@ -13,20 +13,20 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 # The friendly hook name written into the inner hook block of settings.json.
 # Used by both install() (to write) and uninstall() (to identify entries to remove).
-HOOK_NAME = "arize-tracing"
+HOOK_NAME = "atatus-tracing"
 
 # Map of Gemini hook event name -> CLI entry-point script name.
 # These entry-point names are registered in pyproject.toml [project.scripts]
 # in the wire-entry-points task. Order is preserved when writing settings.json.
 EVENTS: dict[str, str] = {
-    "SessionStart": "arize-hook-gemini-session-start",
-    "SessionEnd": "arize-hook-gemini-session-end",
-    "BeforeAgent": "arize-hook-gemini-before-agent",
-    "AfterAgent": "arize-hook-gemini-after-agent",
-    "BeforeModel": "arize-hook-gemini-before-model",
-    "AfterModel": "arize-hook-gemini-after-model",
-    "BeforeTool": "arize-hook-gemini-before-tool",
-    "AfterTool": "arize-hook-gemini-after-tool",
+    "SessionStart": "atatus-hook-gemini-session-start",
+    "SessionEnd": "atatus-hook-gemini-session-end",
+    "BeforeAgent": "atatus-hook-gemini-before-agent",
+    "AfterAgent": "atatus-hook-gemini-after-agent",
+    "BeforeModel": "atatus-hook-gemini-before-model",
+    "AfterModel": "atatus-hook-gemini-after-model",
+    "BeforeTool": "atatus-hook-gemini-before-tool",
+    "AfterTool": "atatus-hook-gemini-after-tool",
 }
 
 # Default per-hook timeout in milliseconds (Gemini's own default is 60000).

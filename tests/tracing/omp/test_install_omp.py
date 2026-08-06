@@ -32,13 +32,13 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-PHOENIX_BACKEND = ("phoenix", {"endpoint": "http://localhost:6006", "api_key": ""})
-ARIZE_BACKEND = (
-    "arize",
-    {"endpoint": "otlp.arize.com:443", "api_key": "test-key", "space_id": "test-space"},
+ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = (
+    "atatus",
+    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
 
-_HEADER_MARKER = "// Arize omp tracing hook (shim)."
+_HEADER_MARKER = "// Atatus omp tracing hook (shim)."
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ def _fake_stdout():
         {
             "isatty": lambda self: False,
             "write": lambda self, s: None,
-            "flush": lambda self: None,
+            "flush": lambda self: None
         },
     )()
 
@@ -62,7 +62,7 @@ def _fake_stdout():
 def _mock_prompts(monkeypatch, backend=None):
     """Patch prompt functions on the install module (where they're bound after import)."""
     if backend is None:
-        backend = PHOENIX_BACKEND
+        backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
         _install,
@@ -87,22 +87,22 @@ def cwd_tmp(tmp_path, monkeypatch):
 
     import core.setup as setup_mod
 
-    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".arize" / "harness" / "venv")
-    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
-    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".arize" / "harness" / "bin")
-    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".arize" / "harness" / "run")
-    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".arize" / "harness" / "logs")
-    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".arize" / "harness" / "state")
+    monkeypatch.setattr(setup_mod, "INSTALL_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(setup_mod, "VENV_DIR", tmp_path / ".atatus" / "harness" / "venv")
+    monkeypatch.setattr(setup_mod, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
+    monkeypatch.setattr(setup_mod, "BIN_DIR", tmp_path / ".atatus" / "harness" / "bin")
+    monkeypatch.setattr(setup_mod, "RUN_DIR", tmp_path / ".atatus" / "harness" / "run")
+    monkeypatch.setattr(setup_mod, "LOG_DIR", tmp_path / ".atatus" / "harness" / "logs")
+    monkeypatch.setattr(setup_mod, "STATE_DIR", tmp_path / ".atatus" / "harness" / "state")
 
     import core.constants as c
 
-    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".arize" / "harness")
-    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".arize" / "harness" / "config.json")
+    monkeypatch.setattr(c, "BASE_DIR", tmp_path / ".atatus" / "harness")
+    monkeypatch.setattr(c, "CONFIG_FILE", tmp_path / ".atatus" / "harness" / "config.json")
 
     import core.config as config_mod
 
-    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".arize" / "harness" / "config.json"))
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(tmp_path / ".atatus" / "harness" / "config.json"))
 
     # Redirect omp settings + extension paths into the temp tree.
     settings_dir = tmp_path / ".omp" / "agent"
@@ -110,7 +110,7 @@ def cwd_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(_omp, "SETTINGS_DIR", settings_dir)
     monkeypatch.setattr(_omp, "SETTINGS_FILE", settings_dir / "settings.json")
     monkeypatch.setattr(_omp, "EXTENSIONS_DIR", extensions_dir)
-    monkeypatch.setattr(_omp, "PLUGIN_FILE", extensions_dir / "arize-tracing.ts")
+    monkeypatch.setattr(_omp, "PLUGIN_FILE", extensions_dir / "atatus-tracing.ts")
 
     return tmp_path
 
@@ -148,16 +148,16 @@ class TestInstallFreshWritesFlatHarnessEntry:
     @pytest.mark.parametrize(
         "backend,expected_target",
         [
-            (PHOENIX_BACKEND, "phoenix"),
-            (ARIZE_BACKEND, "arize"),
+            (ATATUS_BACKEND, "atatus"),
+            (ATATUS_BACKEND, "atatus")
         ],
-        ids=["phoenix", "arize"],
+        ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch, backend, expected_target):
         _mock_prompts(monkeypatch, backend=backend)
         install()
 
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert config_path.is_file()
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["omp"]
@@ -166,8 +166,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
 
-        if expected_target == "arize":
-            assert entry["space_id"] == backend[1]["space_id"]
 
         # No collector for omp
         assert "collector" not in entry
@@ -199,8 +197,8 @@ class TestInstallCopiesShim:
         install()
         assert plugin_file.read_text(encoding="utf-8") == plugin_source_text
 
-    def test_plugin_file_has_arize_header_marker(self, plugin_file, monkeypatch):
-        """The shim's first line must carry the Arize header marker (basis for uninstall guard)."""
+    def test_plugin_file_has_atatus_header_marker(self, plugin_file, monkeypatch):
+        """The shim's first line must carry the Atatus header marker (basis for uninstall guard)."""
         _mock_prompts(monkeypatch)
         install()
         text = plugin_file.read_text(encoding="utf-8")
@@ -248,7 +246,7 @@ class TestInstallRegistersExtension:
         data = _read_settings(settings_file)
         entry = [e for e in data["extensions"] if e == str(plugin_file)]
         assert entry, "shim path missing from extensions array"
-        assert entry[0].endswith("arize-tracing.ts")
+        assert entry[0].endswith("atatus-tracing.ts")
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +354,7 @@ class TestIdempotent:
         install()
         install()
         assert plugin_file.is_file()
-        siblings = list(plugin_file.parent.glob("arize-tracing*.ts"))
+        siblings = list(plugin_file.parent.glob("atatus-tracing*.ts"))
         assert siblings == [plugin_file]
 
     def test_reinstall_content_matches_source(self, plugin_file, plugin_source_text, monkeypatch):
@@ -375,7 +373,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
     """When another harness exists, its credentials are offered to prompt_backend."""
 
     def test_copy_from_populates_credentials(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -383,12 +381,11 @@ class TestInstallSecondHarnessOffersCopyFrom:
             "harnesses": {
                 "claude-code": {
                     "project_name": "claude-code",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -396,7 +393,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
         def fake_prompt_backend(existing_harnesses=None):
             captured["existing_harnesses"] = existing_harnesses
-            return ARIZE_BACKEND
+            return ATATUS_BACKEND
 
         monkeypatch.setattr(_install, "prompt_backend", fake_prompt_backend)
         monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
@@ -413,14 +410,13 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
         assert captured["existing_harnesses"] is not None
         assert "claude-code" in captured["existing_harnesses"]
-        assert captured["existing_harnesses"]["claude-code"]["target"] == "arize"
+        assert captured["existing_harnesses"]["claude-code"]["target"] == "atatus"
 
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["omp"]
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == ARIZE_BACKEND[1]["endpoint"]
-        assert entry["api_key"] == ARIZE_BACKEND[1]["api_key"]
-        assert entry["space_id"] == ARIZE_BACKEND[1]["space_id"]
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == ATATUS_BACKEND[1]["endpoint"]
+        assert entry["api_key"] == ATATUS_BACKEND[1]["api_key"]
         assert entry["project_name"] == "omp"
 
 
@@ -428,7 +424,7 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
     """Re-install with an existing omp config entry only updates project_name."""
 
     def test_existing_entry_preserves_target(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -436,12 +432,11 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
             "harnesses": {
                 "omp": {
                     "project_name": "omp",
-                    "target": "arize",
-                    "endpoint": "otlp.arize.com:443",
-                    "api_key": "ak-existing",
-                    "space_id": "space-existing",
-                },
-            },
+                    "target": "atatus",
+                    "endpoint": "https://otel-rx.atatus.com",
+                    "api_key": "ak-existing"
+                }
+            }
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -459,17 +454,16 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
         config = json.loads(config_path.read_text())
         entry = config["harnesses"]["omp"]
         assert entry["project_name"] == "my-omp"
-        assert entry["target"] == "arize"
-        assert entry["endpoint"] == "otlp.arize.com:443"
+        assert entry["target"] == "atatus"
+        assert entry["endpoint"] == "https://otel-rx.atatus.com"
         assert entry["api_key"] == "ak-existing"
-        assert entry["space_id"] == "space-existing"
 
 
 class TestInstallExistingLoggingBlockSkipsPrompt:
     """When config.json already has a logging block, skip the logging prompt."""
 
     def test_existing_logging_not_reprompted(self, cwd_tmp, monkeypatch):
-        config_dir = cwd_tmp / ".arize" / "harness"
+        config_dir = cwd_tmp / ".atatus" / "harness"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
@@ -500,7 +494,7 @@ class TestInstallPromptsForLogging:
         mock_prompt_logging = MagicMock(return_value=logging_result)
         mock_write_logging = MagicMock()
 
-        monkeypatch.setattr(_install, "prompt_backend", lambda existing_harnesses=None: PHOENIX_BACKEND)
+        monkeypatch.setattr(_install, "prompt_backend", lambda existing_harnesses=None: ATATUS_BACKEND)
         monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
         monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(_install, "prompt_content_logging", mock_prompt_logging)
@@ -525,7 +519,7 @@ class TestPluginSourceResolution:
         _mock_prompts(monkeypatch)
         # Simulate constants imported from a tree lacking the data asset
         # (the venv site-packages situation).
-        monkeypatch.setattr(_omp, "PLUGIN_SOURCE", cwd_tmp / "no-such-tree" / "arize-tracing.ts")
+        monkeypatch.setattr(_omp, "PLUGIN_SOURCE", cwd_tmp / "no-such-tree" / "atatus-tracing.ts")
 
         install()
 
@@ -536,7 +530,7 @@ class TestPluginSourceResolution:
         """_plugin_source() resolves to a file that actually exists on disk."""
         src = _install._plugin_source()
         assert src.is_file()
-        assert src.name == "arize-tracing.ts"
+        assert src.name == "atatus-tracing.ts"
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +545,7 @@ class TestUninstallRemovesEverything:
         _mock_prompts(monkeypatch)
         install()
         uninstall()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text()) or {}
             harnesses = config.get("harnesses", {})
@@ -599,7 +593,7 @@ class TestUninstallIdempotent:
         install()
         uninstall()
         uninstall()  # second call — no exception
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         if config_path.is_file():
             config = json.loads(config_path.read_text()) or {}
             assert "omp" not in config.get("harnesses", {})
@@ -623,7 +617,7 @@ class TestUninstallIdempotent:
 class TestUninstallGuardsForeignPluginFile:
     """Uninstall must NOT delete a plugin file lacking our header marker."""
 
-    def test_non_arize_file_not_deleted(self, plugin_file, monkeypatch):
+    def test_non_atatus_file_not_deleted(self, plugin_file, monkeypatch):
         plugin_file.parent.mkdir(parents=True, exist_ok=True)
         foreign_text = "// SomeoneElse's extension\nexport default function () {};\n"
         plugin_file.write_text(foreign_text, encoding="utf-8")
@@ -659,19 +653,19 @@ class TestInstallDryRunWritesNothing:
     """Dry-run install performs no filesystem writes."""
 
     def test_dry_run_no_plugin_file(self, plugin_file, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
         assert not plugin_file.is_file()
 
     def test_dry_run_no_extensions_dir(self, cwd_tmp, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
         assert not _omp.EXTENSIONS_DIR.exists()
 
     def test_dry_run_no_settings_file(self, settings_file, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
         assert not settings_file.is_file()
@@ -681,17 +675,17 @@ class TestInstallDryRunWritesNothing:
         original = {"theme": "dark", "extensions": ["/Users/me/.omp/extensions/my-own.ts"]}
         settings_file.write_text(json.dumps(original, indent=2) + "\n", encoding="utf-8")
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
 
         assert _read_settings(settings_file) == original
 
     def test_dry_run_no_config(self, cwd_tmp, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         _mock_prompts(monkeypatch)
         install()
-        config_path = cwd_tmp / ".arize" / "harness" / "config.json"
+        config_path = cwd_tmp / ".atatus" / "harness" / "config.json"
         assert not config_path.is_file()
 
 
@@ -703,7 +697,7 @@ class TestUninstallDryRunWritesNothing:
         install()
         original = plugin_file.read_text(encoding="utf-8")
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         uninstall()
 
         assert plugin_file.is_file()
@@ -714,14 +708,14 @@ class TestUninstallDryRunWritesNothing:
         install()
         original = settings_file.read_text(encoding="utf-8")
 
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         uninstall()
 
         assert settings_file.read_text(encoding="utf-8") == original
         assert str(plugin_file) in _read_settings(settings_file)["extensions"]
 
     def test_dry_run_uninstall_no_state_no_error(self, cwd_tmp, monkeypatch):
-        monkeypatch.setenv("ARIZE_DRY_RUN", "true")
+        monkeypatch.setenv("ATATUS_DRY_RUN", "true")
         monkeypatch.setattr("sys.stdout", _fake_stdout())
         uninstall()  # should not raise
 
@@ -818,7 +812,7 @@ class TestConstants:
         assert _omp.PLUGIN_FILE.parent == _omp.EXTENSIONS_DIR
 
     def test_plugin_file_name(self):
-        assert _omp.PLUGIN_FILE.name == "arize-tracing.ts"
+        assert _omp.PLUGIN_FILE.name == "atatus-tracing.ts"
 
     def test_settings_file_under_settings_dir(self):
         assert _omp.SETTINGS_FILE.parent == _omp.SETTINGS_DIR

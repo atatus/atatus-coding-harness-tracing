@@ -358,8 +358,8 @@ class _TokenUsage:
     """Token counts parsed from a transcript.
 
     ``prompt`` is the OpenInference prompt total: it includes *all* input
-    subtypes (uncached input + cache reads + cache writes), per the Arize/
-    Phoenix cost model where the base "input" portion is derived as
+    subtypes (uncached input + cache reads + cache writes), per the Atatus/
+    Atatus cost model where the base "input" portion is derived as
     ``prompt - cache_read - cache_write``. ``cache_read`` and ``cache_write``
     are therefore subsets of ``prompt``, surfaced separately so the cost
     engine can price them at their own (much cheaper) rates instead of the
@@ -843,7 +843,7 @@ def _handle_session_end(input_json: dict) -> None:
     tool_count = state.get("tool_count") or "0"
 
     error(f"Session complete: {trace_count} traces, {tool_count} tools")
-    error(f"View in Arize/Phoenix: session.id = {session_id}")
+    error(f"View in Atatus: session.id = {session_id}")
 
     # Clean up state file and lock
     if state.state_file is not None:
@@ -870,7 +870,7 @@ def _handle_post_compact(input_json: dict) -> None:
     """Handle PostCompact: emit a CHAIN span describing the compaction.
 
     Skip emission when compaction fires between turns (no `current_trace_id`).
-    An orphan compact span in its own trace is hard to correlate in Arize;
+    An orphan compact span in its own trace is hard to correlate in Atatus;
     matches the permission_denied/notification guard pattern.
     """
     state = resolve_session(input_json)
@@ -924,7 +924,7 @@ def _handle_post_compact(input_json: dict) -> None:
 
 
 def session_start():
-    """Entry point for arize-hook-session-start."""
+    """Entry point for atatus-hook-session-start."""
     try:
         if not check_requirements():
             return
@@ -935,7 +935,7 @@ def session_start():
 
 
 def pre_tool_use():
-    """Entry point for arize-hook-pre-tool-use."""
+    """Entry point for atatus-hook-pre-tool-use."""
     try:
         if not check_requirements():
             return
@@ -946,7 +946,7 @@ def pre_tool_use():
 
 
 def post_tool_use():
-    """Entry point for arize-hook-post-tool-use."""
+    """Entry point for atatus-hook-post-tool-use."""
     try:
         if not check_requirements():
             return
@@ -957,7 +957,7 @@ def post_tool_use():
 
 
 def user_prompt_submit():
-    """Entry point for arize-hook-user-prompt-submit."""
+    """Entry point for atatus-hook-user-prompt-submit."""
     try:
         if not check_requirements():
             return
@@ -968,7 +968,7 @@ def user_prompt_submit():
 
 
 def stop():
-    """Entry point for arize-hook-stop."""
+    """Entry point for atatus-hook-stop."""
     try:
         if not check_requirements():
             return
@@ -979,7 +979,7 @@ def stop():
 
 
 def subagent_stop():
-    """Entry point for arize-hook-subagent-stop."""
+    """Entry point for atatus-hook-subagent-stop."""
     try:
         if not check_requirements():
             return
@@ -990,7 +990,7 @@ def subagent_stop():
 
 
 def stop_failure():
-    """Entry point for arize-hook-stop-failure."""
+    """Entry point for atatus-hook-stop-failure."""
     try:
         if not check_requirements():
             return
@@ -1001,7 +1001,7 @@ def stop_failure():
 
 
 def notification():
-    """Entry point for arize-hook-notification."""
+    """Entry point for atatus-hook-notification."""
     try:
         if not check_requirements():
             return
@@ -1012,7 +1012,7 @@ def notification():
 
 
 def permission_request():
-    """Entry point for arize-hook-permission-request."""
+    """Entry point for atatus-hook-permission-request."""
     try:
         if not check_requirements():
             return
@@ -1023,7 +1023,7 @@ def permission_request():
 
 
 def session_end():
-    """Entry point for arize-hook-session-end."""
+    """Entry point for atatus-hook-session-end."""
     try:
         if not check_requirements():
             return
@@ -1034,7 +1034,7 @@ def session_end():
 
 
 def post_tool_use_failure():
-    """Entry point for arize-hook-post-tool-use-failure."""
+    """Entry point for atatus-hook-post-tool-use-failure."""
     try:
         if not check_requirements():
             return
@@ -1045,7 +1045,7 @@ def post_tool_use_failure():
 
 
 def subagent_start():
-    """Entry point for arize-hook-subagent-start."""
+    """Entry point for atatus-hook-subagent-start."""
     try:
         if not check_requirements():
             return
@@ -1056,7 +1056,7 @@ def subagent_start():
 
 
 def user_prompt_expansion():
-    """Entry point for arize-hook-user-prompt-expansion."""
+    """Entry point for atatus-hook-user-prompt-expansion."""
     try:
         if not check_requirements():
             return
@@ -1067,7 +1067,7 @@ def user_prompt_expansion():
 
 
 def pre_compact():
-    """Entry point for arize-hook-pre-compact."""
+    """Entry point for atatus-hook-pre-compact."""
     try:
         if not check_requirements():
             return
@@ -1078,7 +1078,7 @@ def pre_compact():
 
 
 def post_compact():
-    """Entry point for arize-hook-post-compact."""
+    """Entry point for atatus-hook-post-compact."""
     try:
         if not check_requirements():
             return
@@ -1089,7 +1089,7 @@ def post_compact():
 
 
 def permission_denied():
-    """Entry point for arize-hook-permission-denied."""
+    """Entry point for atatus-hook-permission-denied."""
     try:
         if not check_requirements():
             return

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arize setup wizard shim for Gemini CLI tracing.
+"""Atatus setup wizard shim for Gemini CLI tracing.
 
 Delegates to tracing.gemini.install for the actual install/uninstall logic.
 """
@@ -22,7 +22,7 @@ def uninstall() -> None:
 
 
 def main() -> None:
-    """Entry point for arize-setup-gemini."""
+    """Entry point for atatus-setup-gemini."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):

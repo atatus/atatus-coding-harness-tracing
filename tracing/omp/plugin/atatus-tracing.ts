@@ -1,4 +1,4 @@
-// Arize omp tracing hook (shim).
+// Atatus omp tracing hook (shim).
 //
 // This file ships in the repo and is copied into the user's omp extensions
 // dir (~/.omp/extensions/) by the installer, then registered by absolute path
@@ -6,7 +6,7 @@
 // auto-discover an extensions dir). omp loads it in-process inside its own Bun
 // runtime. The shim is a DUMB BRIDGE: it contains no tracing logic. On a small
 // whitelist of once-fired lifecycle events it spawns the Python entry point
-// `arize-hook-omp` (detached, fire-and-forget) with the event payload piped to
+// `atatus-hook-omp` (detached, fire-and-forget) with the event payload piped to
 // stdin. ALL parsing, span building, and token math happens in the Python
 // handler (tracing/omp/hooks/handlers.py).
 //
@@ -28,10 +28,10 @@ import { join } from "node:path";
 import type { HookAPI, HookContext } from "@oh-my-pi/pi-coding-agent";
 
 function binaryPath(): string {
-  const base = join(homedir(), ".arize", "harness", "venv");
+  const base = join(homedir(), ".atatus", "harness", "venv");
   return platform() === "win32"
-    ? join(base, "Scripts", "arize-hook-omp.exe")
-    : join(base, "bin", "arize-hook-omp");
+    ? join(base, "Scripts", "atatus-hook-omp.exe")
+    : join(base, "bin", "atatus-hook-omp");
 }
 
 function forward(payload: unknown): void {

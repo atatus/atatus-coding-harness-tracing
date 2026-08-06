@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Arize Codex Tracing Plugin - Interactive Setup.
+"""Atatus Codex Tracing Plugin - Interactive Setup.
 
-Writes config.json, ~/.codex/arize-env.sh, and ~/.codex/config.toml.
+Writes config.json, ~/.codex/atatus-env.sh, and ~/.codex/config.toml.
 
-The ``arize-setup-codex`` entry point calls ``main()`` here, which runs the
+The ``atatus-setup-codex`` entry point calls ``main()`` here, which runs the
 legacy interactive wizard.  The new ``tracing/codex/install.py`` module
 provides the decomposed ``install()`` / ``uninstall()`` API used by the
 shell router.  ``install()`` and ``uninstall()`` below delegate to it.
@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 
+from core.common import DEFAULT_OTLP_ENDPOINT
 from core.config import get_value, load_config, save_config, set_value
 from core.setup import err, info, print_color, prompt_backend, prompt_project_name, prompt_user_id, write_config
 from tracing.codex import install as _install_mod
@@ -29,23 +30,18 @@ def uninstall() -> None:
 
 
 def _write_env_file(env_path: Path, target: str, credentials: dict, project_name: str = "codex") -> None:
-    """Write ~/.codex/arize-env.sh with export statements."""
+    """Write ~/.codex/atatus-env.sh with export statements."""
     env_path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = ["# Arize Codex tracing environment (auto-generated)"]
-    lines.append("export ARIZE_TRACE_ENABLED=true")
+    lines = ["# Atatus Codex tracing environment (auto-generated)"]
+    lines.append("export ATATUS_TRACE_ENABLED=true")
 
-    if target == "phoenix":
-        lines.append(f'export PHOENIX_ENDPOINT="{credentials.get("endpoint", "http://localhost:6006")}"')
-        api_key = credentials.get("api_key", "")
-        if api_key:
-            lines.append(f'export PHOENIX_API_KEY="{api_key}"')
-    else:
-        lines.append(f'export ARIZE_API_KEY="{credentials.get("api_key", "")}"')
-        lines.append(f'export ARIZE_SPACE_ID="{credentials.get("space_id", "")}"')
-        lines.append(f'export ARIZE_OTLP_ENDPOINT="{credentials.get("endpoint", "otlp.arize.com:443")}"')
+    lines.append(f'export ATATUS_OTLP_ENDPOINT="{credentials.get("endpoint", DEFAULT_OTLP_ENDPOINT)}"')
+    api_key = credentials.get("api_key", "")
+    if api_key:
+        lines.append(f'export ATATUS_API_KEY="{api_key}"')
 
-    lines.append(f'export ARIZE_PROJECT_NAME="{project_name}"')
+    lines.append(f'export ATATUS_PROJECT_NAME="{project_name}"')
 
     env_path.write_text("\n".join(lines) + "\n")
 
@@ -56,42 +52,8 @@ def _write_env_file(env_path: Path, target: str, credentials: dict, project_name
         pass  # Windows doesn't support chmod the same way
 
 
-def _update_toml_otel_section(toml_path: Path, collector_port: int) -> None:
-    """Add/replace [otel] section in codex config.toml."""
-    if toml_path.exists():
-        lines = toml_path.read_text().splitlines()
-        # Remove existing [otel] section(s)
-        filtered = []
-        in_otel = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped == "[otel]" or stripped.startswith("[otel."):
-                in_otel = True
-                continue
-            if in_otel and stripped.startswith("[") and stripped != "[otel]" and not stripped.startswith("[otel."):
-                in_otel = False
-            if not in_otel:
-                filtered.append(line)
-        # Remove trailing blank lines
-        while filtered and not filtered[-1].strip():
-            filtered.pop()
-        lines = filtered
-    else:
-        toml_path.parent.mkdir(parents=True, exist_ok=True)
-        lines = []
-
-    # Append new section
-    lines.append("")
-    lines.append("# Arize shared collector — captures Codex events for rich span trees")
-    lines.append("[otel]")
-    lines.append("[otel.exporter.otlp-http]")
-    lines.append(f'endpoint = "http://127.0.0.1:{collector_port}/v1/logs"')
-    lines.append('protocol = "json"')
-    toml_path.write_text("\n".join(lines) + "\n")
-
-
 def main() -> None:
-    """Entry point for arize-setup-codex."""
+    """Entry point for atatus-setup-codex."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):
@@ -101,11 +63,10 @@ def main() -> None:
 
 def _run() -> None:
     codex_config_dir = Path.home() / ".codex"
-    codex_config = codex_config_dir / "config.toml"
-    env_file = codex_config_dir / "arize-env.sh"
+    env_file = codex_config_dir / "atatus-env.sh"
 
     print("")
-    print_color("▸ ARIZE Codex Tracing Setup", "green")
+    print_color("▸ ATATUS Codex Tracing Setup", "green")
     print("")
 
     # Check for existing config
@@ -115,12 +76,10 @@ def _run() -> None:
     # Project name
     project_name = prompt_project_name("codex")
 
-    collector = {"host": "127.0.0.1", "port": 4318}
-
     if existing_entry:
         target = existing_entry.get("target", "")
         print_color(
-            f"Existing config found: target={target} in ~/.arize/harness/config.json",
+            f"Existing config found: target={target} in ~/.atatus/harness/config.json",
             "yellow",
         )
         print("Skipping credential prompts — updating codex harness entry.")
@@ -128,21 +87,16 @@ def _run() -> None:
 
         # Update codex harness entry
         set_value(config, "harnesses.codex.project_name", project_name)
-        set_value(config, "harnesses.codex.collector", collector)
         save_config(config)
         info("Updated codex harness in existing config")
 
         # Write env file from existing config
         endpoint = get_value(config, "harnesses.codex.endpoint") or ""
         api_key = get_value(config, "harnesses.codex.api_key") or ""
-        if target == "phoenix":
-            creds = {"endpoint": endpoint or "http://localhost:6006", "api_key": api_key}
-        elif target == "arize":
-            space_id = get_value(config, "harnesses.codex.space_id") or ""
-            creds = {"endpoint": endpoint or "otlp.arize.com:443", "api_key": api_key, "space_id": space_id}
-        else:
+        if target != "atatus":
             err(f"Unknown target in config: {target}")
             sys.exit(1)
+        creds = {"endpoint": endpoint or DEFAULT_OTLP_ENDPOINT, "api_key": api_key}
 
         _write_env_file(env_file, target, creds, project_name)
         info(f"Wrote credentials to {env_file}")
@@ -150,23 +104,15 @@ def _run() -> None:
         # No existing config — prompt for backend
         existing_harnesses = config.get("harnesses", {}) if config else {}
         target, credentials = prompt_backend(existing_harnesses=existing_harnesses)
-        info(
-            f"Target: {'Phoenix at ' + credentials['endpoint'] if target == 'phoenix' else 'Arize AX (endpoint: ' + credentials['endpoint'] + ')'}"
-        )
+        info(f"Target: Atatus at {credentials['endpoint']}")
 
         # Write config.json
-        write_config(target, credentials, "codex", project_name, collector=collector)
-        info("Wrote config to ~/.arize/harness/config.json")
+        write_config(target, credentials, "codex", project_name)
+        info("Wrote config to ~/.atatus/harness/config.json")
 
         # Write env file
         _write_env_file(env_file, target, credentials, project_name)
         info(f"Wrote credentials to {env_file}")
-
-    # Configure OTLP exporter in ~/.codex/config.toml
-    config = load_config()
-    collector_port = get_value(config, "harnesses.codex.collector.port") or 4318
-    _update_toml_otel_section(codex_config, collector_port)
-    info(f"Added [otel] exporter pointing to shared collector (port {collector_port})")
 
     # Optional: User ID
     user_id = prompt_user_id()
@@ -181,16 +127,13 @@ def _run() -> None:
     info("Setup complete!")
     print("")
     print("  Configuration:")
-    print("    Config file:  ~/.arize/harness/config.json")
+    print("    Config file:  ~/.atatus/harness/config.json")
     print(f"    Env file:     {env_file}")
-    print(f"    Codex config: {codex_config}")
     print("")
     print("  Next steps:")
-    print("    1. Start the shared collector (if not already running):")
-    print("       arize-collector-ctl start")
-    print("    2. Run codex — traces will be sent to your configured backend")
+    print("    Run codex — traces are sent straight to Atatus from the hooks.")
     print("")
-    print("  To verify setup: ARIZE_DRY_RUN=true codex")
+    print("  To verify setup: ATATUS_DRY_RUN=true codex")
     print("")
 
 

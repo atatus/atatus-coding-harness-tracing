@@ -5,7 +5,7 @@ Replaces tracing/cursor/hooks/hook-handler.sh (475 lines).
 
 Input contract: JSON on stdin, all 15 events (IDE + CLI) routed here.
 stdout: MUST print permissive JSON response, even on error.
-stderr: redirected to ARIZE_LOG_FILE before dispatch.
+stderr: redirected to ATATUS_LOG_FILE before dispatch.
 """
 import json
 import sys
@@ -60,7 +60,7 @@ def _jq_str(input_json: dict, *keys, default: str = "") -> str:
 
 
 def _resolve_user_id(input_json: dict) -> str:
-    """env.get_user_id(SERVICE_NAME) (global config < harnesses.cursor.user_id < ARIZE_USER_ID env)
+    """env.get_user_id(SERVICE_NAME) (global config < harnesses.cursor.user_id < ATATUS_USER_ID env)
     > payload `user_email` > "".
 
     Cursor has no per-session state for user_id, so each handler resolves it
@@ -241,7 +241,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
     prompt = root_state.get("prompt", "") if root_state else ""
     deferred_root = root_state.get("deferred_root", True) if root_state else True
 
-    # Redact prompt and model response unless opted in via ARIZE_LOG_PROMPTS.
+    # Redact prompt and model response unless opted in via ATATUS_LOG_PROMPTS.
     prompt = redact_content(env.log_prompts, prompt)
     response = redact_content(env.log_prompts, response)
 
@@ -995,11 +995,11 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
 
 
 def main():
-    """Entry point for arize-hook-cursor. Cursor hook.
+    """Entry point for atatus-hook-cursor. Cursor hook.
 
     Input contract: JSON on stdin, all 15 events (IDE + CLI) routed here.
     stdout: MUST print permissive JSON response, even on error.
-    stderr: redirected to ARIZE_LOG_FILE at adapter import time via
+    stderr: redirected to ATATUS_LOG_FILE at adapter import time via
         core.common.redirect_stderr_to_log_file().
     """
     event = ""

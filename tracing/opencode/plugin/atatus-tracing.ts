@@ -1,11 +1,11 @@
-// Arize opencode tracing plugin (shim).
+// Atatus opencode tracing plugin (shim).
 //
 // This file ships in the repo and is copied into the user's opencode global
 // plugin dir (~/.config/opencode/plugin/) by the installer. opencode loads it
 // in-process inside its Bun runtime. The shim is a DUMB BRIDGE: it contains
 // no tracing logic. On a small whitelist of lifecycle events it pulls the
 // authoritative session snapshot via the injected opencode SDK client and
-// spawns the Python entry point `arize-hook-opencode` (detached,
+// spawns the Python entry point `atatus-hook-opencode` (detached,
 // fire-and-forget) with that snapshot piped to stdin. ALL parsing, span
 // building, and dedup happens in the Python reconciler.
 //
@@ -23,10 +23,10 @@ import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
 function binaryPath(): string {
-  const base = join(homedir(), ".arize", "harness", "venv")
+  const base = join(homedir(), ".atatus", "harness", "venv")
   return platform() === "win32"
-    ? join(base, "Scripts", "arize-hook-opencode.exe")
-    : join(base, "bin", "arize-hook-opencode")
+    ? join(base, "Scripts", "atatus-hook-opencode.exe")
+    : join(base, "bin", "atatus-hook-opencode")
 }
 
 function forward(payload: unknown): void {
@@ -44,7 +44,7 @@ function forward(payload: unknown): void {
   }
 }
 
-export const ArizeTracing = async (ctx: any) => {
+export const AtatusTracing = async (ctx: any) => {
   const { client } = ctx
 
   async function snapshot(sessionID: string, kind: "reconcile" | "close"): Promise<void> {

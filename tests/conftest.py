@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 @pytest.fixture(autouse=True)
 def isolate_config(tmp_path, monkeypatch):
-    """Isolate every test from the developer's real ~/.arize/harness/config.json.
+    """Isolate every test from the developer's real ~/.atatus/harness/config.json.
 
     Two independent leaks are closed here:
 
@@ -40,12 +40,12 @@ def isolate_config(tmp_path, monkeypatch):
 
 @pytest.fixture
 def tmp_harness_dir(tmp_path, monkeypatch):
-    """Create the full ~/.arize/harness directory tree in a temp location.
+    """Create the full ~/.atatus/harness directory tree in a temp location.
 
     Monkeypatches core.constants so all code sees the temp paths.
     Returns the base directory Path.
     """
-    base = tmp_path / ".arize" / "harness"
+    base = tmp_path / ".atatus" / "harness"
     for subdir in ["bin", "run", "logs", "state/claude-code", "state/codex", "state/cursor"]:
         (base / subdir).mkdir(parents=True)
 
@@ -71,24 +71,24 @@ def sample_config(tmp_harness_dir):
         "harnesses": {
             "claude-code": {
                 "project_name": "claude-code",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
-                "api_key": "",
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": ""
             },
             "codex": {
                 "project_name": "codex",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
                 "api_key": "",
-                "collector": {"host": "127.0.0.1", "port": 4318},
+                "collector": {"host": "127.0.0.1", "port": 4318}
             },
             "cursor": {
                 "project_name": "cursor",
-                "target": "phoenix",
-                "endpoint": "http://localhost:6006",
-                "api_key": "",
-            },
-        },
+                "target": "atatus",
+                "endpoint": "https://otel-rx.atatus.com",
+                "api_key": ""
+            }
+        }
     }
     config_path = tmp_harness_dir / "config.json"
     with open(config_path, "w") as f:
@@ -174,7 +174,7 @@ def cursor_before_submit_input():
         "hook_event_name": "beforeSubmitPrompt",
         "conversation_id": "conv-1",
         "generation_id": "gen-1",
-        "prompt": "fix the bug",
+        "prompt": "fix the bug"
     }
 
 
@@ -187,7 +187,7 @@ def cursor_after_shell_input():
         "generation_id": "gen-1",
         "command": "ls -la",
         "output": "total 0",
-        "exit_code": "0",
+        "exit_code": "0"
     }
 
 
@@ -211,22 +211,22 @@ def golden_span():
                                 "endTimeUnixNano": "1711987201000000000",
                                 "attributes": [
                                     {"key": "session.id", "value": {"stringValue": "sess-1"}},
-                                    {"key": "input.value", "value": {"stringValue": "hello"}},
+                                    {"key": "input.value", "value": {"stringValue": "hello"}}
                                 ],
-                                "status": {"code": 1},
+                                "status": {"code": 1}
                             }
-                        ],
+                        ]
                     }
-                ],
+                ]
             }
-        ],
+        ]
     }
 
 
 SAMPLE_TRANSCRIPT_LINES = [
     '{"type": "user", "message": {"role": "user", "content": "fix the bug"}}',
     '{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I found the issue."}], "model": "claude-sonnet-4-20250514", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 5}}}',
-    '{"type": "tool_use", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {"file": "main.py"}}]}}',
+    '{"type": "tool_use", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {"file": "main.py"}}]}}'
 ]
 
 

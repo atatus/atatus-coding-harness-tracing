@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Arize Kiro Tracing - Interactive Setup.
+"""Atatus Kiro Tracing - Interactive Setup.
 
-Entry point for ``arize-setup-kiro``. The heavy lifting lives in
+Entry point for ``atatus-setup-kiro``. The heavy lifting lives in
 ``tracing/kiro/install.py``; this module is a thin shim for the
-``arize-setup-kiro`` console script.
+``atatus-setup-kiro`` console script.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from tracing.kiro import install as _install_mod
 
 
 def main() -> None:
-    """Entry point for arize-setup-kiro."""
+    """Entry point for atatus-setup-kiro."""
     try:
         _run()
     except (KeyboardInterrupt, EOFError):

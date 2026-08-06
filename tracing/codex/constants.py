@@ -11,6 +11,6 @@ HARNESS_BIN = "codex"  # binary name for shutil.which() fallback
 
 CODEX_CONFIG_DIR = Path.home() / ".codex"
 CODEX_CONFIG_FILE = CODEX_CONFIG_DIR / "config.toml"
-CODEX_ENV_FILE = CODEX_CONFIG_DIR / "arize-env.sh"
+CODEX_ENV_FILE = CODEX_CONFIG_DIR / "atatus-env.sh"
 
-NOTIFY_BIN_NAME = "arize-hook-codex-notify"
+NOTIFY_BIN_NAME = "atatus-hook-codex-notify"

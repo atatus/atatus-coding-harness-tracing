@@ -47,7 +47,7 @@ state/
 config.json
 logs/
 run/
-.arize-tmp-traces/
+.atatus-tmp-traces/
 .github/hooks/
 */node_modules/
 wheel.json

@@ -16,9 +16,9 @@ from tracing.claude_code.hooks.handlers import _handle_stop, _handle_stop_failur
 @pytest.fixture(autouse=True)
 def _enable_logging(monkeypatch):
     """Existing assertions expect raw content in spans; opt in to all logging."""
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ class TestUserPromptExpansion:
             "expansion_type": "slash_command",
             "command_name": "review",
             "command_args": "PR-42",
-            "command_source": "user",
+            "command_source": "user"
         }
         _handle_user_prompt_expansion(payload)
         assert state.get("pending_expansion_type") == "slash_command"
@@ -74,7 +74,7 @@ class TestUserPromptExpansion:
     def test_records_only_present_fields(self, mock_resolve, captured_spans, state):
         payload = {
             "session_id": "test-session-123",
-            "command_name": "commit",
+            "command_name": "commit"
         }
         _handle_user_prompt_expansion(payload)
         assert state.get("pending_command_name") == "commit"
@@ -88,7 +88,7 @@ class TestUserPromptExpansion:
             "expansion_type": "slash_command",
             "command_name": "review",
             "command_args": "PR-42",
-            "command_source": "user",
+            "command_source": "user"
         }
         _handle_user_prompt_expansion(payload)
         assert len(captured_spans) == 0
@@ -143,7 +143,7 @@ class TestStopWithCommandMetadata:
             {
                 "session_id": "test-session-123",
                 "error": "context_overflow",
-                "error_details": "too long",
+                "error_details": "too long"
             }
         )
 
@@ -164,7 +164,7 @@ class TestStopWithCommandMetadata:
         assert "command.source" not in attr_keys
 
     def test_command_args_redacted(self, monkeypatch, mock_resolve, captured_spans, state):
-        monkeypatch.setenv("ARIZE_LOG_PROMPTS", "false")
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         self._setup_trace_state(state)
         state.set("pending_expansion_type", "slash_command")
         state.set("pending_command_name", "review")

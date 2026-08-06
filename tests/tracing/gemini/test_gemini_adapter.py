@@ -36,10 +36,10 @@ def gemini_state_dir(tmp_harness_dir, monkeypatch):
 @pytest.fixture
 def disable_env_vars(monkeypatch):
     """Clear env vars that could influence session resolution."""
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
     monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
 
 
 # ── Module-level constants tests ──────────────────────────────────────────────
@@ -52,7 +52,7 @@ class TestModuleConstants:
 
     def test_scope_name(self):
         """SCOPE_NAME matches the gemini harness metadata."""
-        assert adapter.SCOPE_NAME == "arize-gemini-plugin"
+        assert adapter.SCOPE_NAME == "atatus-gemini-plugin"
 
 
 # ── check_requirements tests ─────────────────────────────────────────────────
@@ -61,7 +61,7 @@ class TestModuleConstants:
 class TestCheckRequirements:
     def test_enabled_returns_true(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=True -> returns True and STATE_DIR exists."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         state_dir = tmp_harness_dir / "state" / "gemini-check"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is True
@@ -69,7 +69,7 @@ class TestCheckRequirements:
 
     def test_disabled_returns_false(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=False -> returns False, STATE_DIR not created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         state_dir = tmp_harness_dir / "state" / "gemini-nope"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is False
@@ -176,10 +176,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("session_id") is not None
 
     def test_project_name_from_env(self, gemini_state_dir, monkeypatch):
-        """ARIZE_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
         sm = self._make_state(gemini_state_dir, "proj-env")
         adapter.ensure_session_initialized(sm, {"cwd": "/home/user/other-project"})
@@ -209,9 +209,9 @@ class TestEnsureSessionInitialized:
 
     def test_user_id_from_env(self, gemini_state_dir, monkeypatch):
         """user_id is read from env.user_id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_USER_ID", "test-user-123")
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_USER_ID", "test-user-123")
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
         monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
         sm = self._make_state(gemini_state_dir, "user-env")
         adapter.ensure_session_initialized(sm, {})
@@ -219,16 +219,16 @@ class TestEnsureSessionInitialized:
 
     def test_user_id_per_harness_override(self, gemini_state_dir, monkeypatch):
         """harnesses.gemini.user_id in config overrides the global user_id."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
         monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
 
         monkeypatch.setattr(
             "core.config.load_config",
             lambda config_path=None: {
                 "user_id": "global@x",
-                "harnesses": {adapter.SERVICE_NAME: {"user_id": "scoped@x"}},
+                "harnesses": {adapter.SERVICE_NAME: {"user_id": "scoped@x"}}
             },
         )
         env.__dict__.pop("_top_level_config", None)
@@ -465,9 +465,9 @@ class TestResolveSessionWindowsFallback:
 
 class TestLogFileEnv:
     def test_log_file_default_points_to_gemini_log(self):
-        """The adapter sets ARIZE_LOG_FILE to ~/.arize/harness/logs/gemini.log
+        """The adapter sets ATATUS_LOG_FILE to ~/.atatus/harness/logs/gemini.log
         on import unless the user has already overridden it."""
         # The setdefault on import must have installed a value.
-        assert os.environ.get("ARIZE_LOG_FILE", "").endswith("gemini.log") or os.environ.get(
-            "ARIZE_LOG_FILE"
+        assert os.environ.get("ATATUS_LOG_FILE", "").endswith("gemini.log") or os.environ.get(
+            "ATATUS_LOG_FILE"
         )  # user override is also fine

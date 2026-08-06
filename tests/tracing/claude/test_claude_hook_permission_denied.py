@@ -11,9 +11,9 @@ from tracing.claude_code.hooks.handlers import _handle_permission_denied
 @pytest.fixture(autouse=True)
 def _enable_logging(monkeypatch):
     """Existing assertions expect raw content in spans; opt in to all logging."""
-    monkeypatch.setenv("ARIZE_LOG_PROMPTS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "true")
-    monkeypatch.setenv("ARIZE_LOG_TOOL_CONTENT", "true")
+    monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+    monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def _base_input():
         "cwd": "/home/user/project",
         "permission_mode": "auto",
         "tool_name": "Bash",
-        "tool_input": {"command": "rm -rf /"},
+        "tool_input": {"command": "rm -rf /"}
     }
 
 
@@ -111,7 +111,7 @@ class TestPermissionDenied:
         assert '"command": "rm -rf /"' in attrs["input.value"]
 
     def test_redacts_tool_input_when_disabled(self, mock_resolve, captured_spans, state, monkeypatch):
-        monkeypatch.setenv("ARIZE_LOG_TOOL_DETAILS", "false")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "trace-1")
         state.set("current_trace_span_id", "span-1")
         _handle_permission_denied(_base_input())

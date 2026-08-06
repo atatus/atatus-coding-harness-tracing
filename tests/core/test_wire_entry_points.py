@@ -27,60 +27,60 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 EXPECTED_HARNESS_ENTRY_POINTS = {
     # Claude Code hooks
-    "arize-hook-session-start": "tracing.claude_code.hooks.handlers:session_start",
-    "arize-hook-pre-tool-use": "tracing.claude_code.hooks.handlers:pre_tool_use",
-    "arize-hook-post-tool-use": "tracing.claude_code.hooks.handlers:post_tool_use",
-    "arize-hook-user-prompt-submit": "tracing.claude_code.hooks.handlers:user_prompt_submit",
-    "arize-hook-stop": "tracing.claude_code.hooks.handlers:stop",
-    "arize-hook-subagent-stop": "tracing.claude_code.hooks.handlers:subagent_stop",
-    "arize-hook-stop-failure": "tracing.claude_code.hooks.handlers:stop_failure",
-    "arize-hook-notification": "tracing.claude_code.hooks.handlers:notification",
-    "arize-hook-permission-request": "tracing.claude_code.hooks.handlers:permission_request",
-    "arize-hook-session-end": "tracing.claude_code.hooks.handlers:session_end",
-    "arize-hook-post-tool-use-failure": "tracing.claude_code.hooks.handlers:post_tool_use_failure",
-    "arize-hook-subagent-start": "tracing.claude_code.hooks.handlers:subagent_start",
-    "arize-hook-user-prompt-expansion": "tracing.claude_code.hooks.handlers:user_prompt_expansion",
-    "arize-hook-pre-compact": "tracing.claude_code.hooks.handlers:pre_compact",
-    "arize-hook-post-compact": "tracing.claude_code.hooks.handlers:post_compact",
-    "arize-hook-permission-denied": "tracing.claude_code.hooks.handlers:permission_denied",
+    "atatus-hook-session-start": "tracing.claude_code.hooks.handlers:session_start",
+    "atatus-hook-pre-tool-use": "tracing.claude_code.hooks.handlers:pre_tool_use",
+    "atatus-hook-post-tool-use": "tracing.claude_code.hooks.handlers:post_tool_use",
+    "atatus-hook-user-prompt-submit": "tracing.claude_code.hooks.handlers:user_prompt_submit",
+    "atatus-hook-stop": "tracing.claude_code.hooks.handlers:stop",
+    "atatus-hook-subagent-stop": "tracing.claude_code.hooks.handlers:subagent_stop",
+    "atatus-hook-stop-failure": "tracing.claude_code.hooks.handlers:stop_failure",
+    "atatus-hook-notification": "tracing.claude_code.hooks.handlers:notification",
+    "atatus-hook-permission-request": "tracing.claude_code.hooks.handlers:permission_request",
+    "atatus-hook-session-end": "tracing.claude_code.hooks.handlers:session_end",
+    "atatus-hook-post-tool-use-failure": "tracing.claude_code.hooks.handlers:post_tool_use_failure",
+    "atatus-hook-subagent-start": "tracing.claude_code.hooks.handlers:subagent_start",
+    "atatus-hook-user-prompt-expansion": "tracing.claude_code.hooks.handlers:user_prompt_expansion",
+    "atatus-hook-pre-compact": "tracing.claude_code.hooks.handlers:pre_compact",
+    "atatus-hook-post-compact": "tracing.claude_code.hooks.handlers:post_compact",
+    "atatus-hook-permission-denied": "tracing.claude_code.hooks.handlers:permission_denied",
     # Codex hooks
-    "arize-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
+    "atatus-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
     # Copilot hooks
-    "arize-hook-copilot-session-start": "tracing.copilot.hooks.handlers:session_start",
-    "arize-hook-copilot-user-prompt": "tracing.copilot.hooks.handlers:user_prompt_submitted",
-    "arize-hook-copilot-pre-tool": "tracing.copilot.hooks.handlers:pre_tool_use",
-    "arize-hook-copilot-post-tool": "tracing.copilot.hooks.handlers:post_tool_use",
-    "arize-hook-copilot-stop": "tracing.copilot.hooks.handlers:stop",
-    "arize-hook-copilot-subagent-stop": "tracing.copilot.hooks.handlers:subagent_stop",
+    "atatus-hook-copilot-session-start": "tracing.copilot.hooks.handlers:session_start",
+    "atatus-hook-copilot-user-prompt": "tracing.copilot.hooks.handlers:user_prompt_submitted",
+    "atatus-hook-copilot-pre-tool": "tracing.copilot.hooks.handlers:pre_tool_use",
+    "atatus-hook-copilot-post-tool": "tracing.copilot.hooks.handlers:post_tool_use",
+    "atatus-hook-copilot-stop": "tracing.copilot.hooks.handlers:stop",
+    "atatus-hook-copilot-subagent-stop": "tracing.copilot.hooks.handlers:subagent_stop",
     # Gemini hooks
-    "arize-hook-gemini-session-start": "tracing.gemini.hooks.handlers:session_start",
-    "arize-hook-gemini-session-end": "tracing.gemini.hooks.handlers:session_end",
-    "arize-hook-gemini-before-agent": "tracing.gemini.hooks.handlers:before_agent",
-    "arize-hook-gemini-after-agent": "tracing.gemini.hooks.handlers:after_agent",
-    "arize-hook-gemini-before-model": "tracing.gemini.hooks.handlers:before_model",
-    "arize-hook-gemini-after-model": "tracing.gemini.hooks.handlers:after_model",
-    "arize-hook-gemini-before-tool": "tracing.gemini.hooks.handlers:before_tool",
-    "arize-hook-gemini-after-tool": "tracing.gemini.hooks.handlers:after_tool",
+    "atatus-hook-gemini-session-start": "tracing.gemini.hooks.handlers:session_start",
+    "atatus-hook-gemini-session-end": "tracing.gemini.hooks.handlers:session_end",
+    "atatus-hook-gemini-before-agent": "tracing.gemini.hooks.handlers:before_agent",
+    "atatus-hook-gemini-after-agent": "tracing.gemini.hooks.handlers:after_agent",
+    "atatus-hook-gemini-before-model": "tracing.gemini.hooks.handlers:before_model",
+    "atatus-hook-gemini-after-model": "tracing.gemini.hooks.handlers:after_model",
+    "atatus-hook-gemini-before-tool": "tracing.gemini.hooks.handlers:before_tool",
+    "atatus-hook-gemini-after-tool": "tracing.gemini.hooks.handlers:after_tool",
     # Cursor hook
-    "arize-hook-cursor": "tracing.cursor.hooks.handlers:main",
+    "atatus-hook-cursor": "tracing.cursor.hooks.handlers:main",
     # Kiro hook
-    "arize-hook-kiro": "tracing.kiro.hooks.handlers:main",
+    "atatus-hook-kiro": "tracing.kiro.hooks.handlers:main",
     # opencode hook
-    "arize-hook-opencode": "tracing.opencode.hooks.handlers:main",
+    "atatus-hook-opencode": "tracing.opencode.hooks.handlers:main",
     # omp hook
-    "arize-hook-omp": "tracing.omp.hooks.handlers:main",
+    "atatus-hook-omp": "tracing.omp.hooks.handlers:main"
 }
 
 # Setup wizards stay on core.setup.*
 EXPECTED_SETUP_ENTRY_POINTS = {
-    "arize-setup-claude": "core.setup.claude:main",
-    "arize-setup-codex": "core.setup.codex:main",
-    "arize-setup-copilot": "core.setup.copilot:main",
-    "arize-setup-cursor": "core.setup.cursor:main",
-    "arize-setup-gemini": "core.setup.gemini:main",
-    "arize-setup-kiro": "core.setup.kiro:main",
-    "arize-setup-opencode": "core.setup.opencode:main",
-    "arize-setup-omp": "core.setup.omp:main",
+    "atatus-setup-claude": "core.setup.claude:main",
+    "atatus-setup-codex": "core.setup.codex:main",
+    "atatus-setup-copilot": "core.setup.copilot:main",
+    "atatus-setup-cursor": "core.setup.cursor:main",
+    "atatus-setup-gemini": "core.setup.gemini:main",
+    "atatus-setup-kiro": "core.setup.kiro:main",
+    "atatus-setup-opencode": "core.setup.opencode:main",
+    "atatus-setup-omp": "core.setup.omp:main"
 }
 
 
@@ -122,7 +122,7 @@ class TestPyprojectEntryPointsUpdated:
 
     @pytest.mark.parametrize("name,target", list(EXPECTED_SETUP_ENTRY_POINTS.items()))
     def test_setup_entry_point_unchanged(self, name, target):
-        """arize-setup-* entry points still point at core.setup.*."""
+        """atatus-setup-* entry points still point at core.setup.*."""
         assert name in self.scripts, f"Missing setup entry point: {name}"
         assert self.scripts[name] == target
 
@@ -131,10 +131,10 @@ class TestPyprojectEntryPointsUpdated:
         assert "core.hooks" not in self.pyproject_text
 
     def test_total_entry_point_count(self):
-        """Entry point count should match expected harness + setup + arize-config."""
+        """Entry point count should match expected harness + setup + atatus-config."""
         expected_count = (
             len(EXPECTED_HARNESS_ENTRY_POINTS) + len(EXPECTED_SETUP_ENTRY_POINTS) + 1
-        )  # +1 for arize-config
+        )  # +1 for atatus-config
         assert (
             len(self.scripts) == expected_count
         ), f"Expected {expected_count} entry points, got {len(self.scripts)}: {sorted(self.scripts.keys())}"
@@ -189,11 +189,11 @@ class TestInstalledScripts:
     @pytest.mark.parametrize(
         "script,expected_import",
         [
-            ("arize-hook-session-start", "from tracing.claude_code.hooks.handlers import session_start"),
-            ("arize-hook-codex-notify", "from tracing.codex.hooks.handlers import notify"),
-            ("arize-hook-cursor", "from tracing.cursor.hooks.handlers import main"),
-            ("arize-hook-copilot-session-start", "from tracing.copilot.hooks.handlers import session_start"),
-            ("arize-hook-gemini-session-start", "from tracing.gemini.hooks.handlers import session_start"),
+            ("atatus-hook-session-start", "from tracing.claude_code.hooks.handlers import session_start"),
+            ("atatus-hook-codex-notify", "from tracing.codex.hooks.handlers import notify"),
+            ("atatus-hook-cursor", "from tracing.cursor.hooks.handlers import main"),
+            ("atatus-hook-copilot-session-start", "from tracing.copilot.hooks.handlers import session_start"),
+            ("atatus-hook-gemini-session-start", "from tracing.gemini.hooks.handlers import session_start")
         ],
     )
     def test_installed_script_import(self, script, expected_import):
@@ -206,11 +206,11 @@ class TestInstalledScripts:
     @pytest.mark.parametrize(
         "script",
         [
-            "arize-hook-session-start",
-            "arize-hook-codex-notify",
-            "arize-hook-cursor",
-            "arize-hook-copilot-session-start",
-            "arize-hook-gemini-session-start",
+            "atatus-hook-session-start",
+            "atatus-hook-codex-notify",
+            "atatus-hook-cursor",
+            "atatus-hook-copilot-session-start",
+            "atatus-hook-gemini-session-start"
         ],
     )
     def test_installed_script_no_core_hooks(self, script):
@@ -239,7 +239,7 @@ class TestHooksDirsInHarnessPackages:
             ("tracing/gemini", ["__init__.py", "adapter.py", "handlers.py"]),
             ("tracing/kiro", ["__init__.py", "adapter.py", "handlers.py"]),
             ("tracing/opencode", ["__init__.py", "adapter.py", "handlers.py"]),
-            ("tracing/omp", ["__init__.py", "adapter.py", "handlers.py"]),
+            ("tracing/omp", ["__init__.py", "adapter.py", "handlers.py"])
         ],
     )
     def test_hooks_dir_has_expected_files(self, pkg, expected_files):

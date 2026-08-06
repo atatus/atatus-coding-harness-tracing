@@ -1,7 +1,7 @@
 """Detection and removal of legacy v1-codex-install artifacts.
 
 This module exists only to clean up the previous architecture (proxy shim
-in ~/.arize/harness/bin, PATH blocks in shell profiles). The installer
+in ~/.atatus/harness/bin, PATH blocks in shell profiles). The installer
 calls into it once at the top of `install()` to migrate v1 installs to
 the hooks-based layout. Delete this file in a future release once we're
 confident no v1 installs remain.
@@ -19,8 +19,8 @@ from core.setup import BIN_DIR, dry_run, info
 from tracing.codex._toml import _toml_load, _toml_write
 from tracing.codex.constants import CODEX_CONFIG_FILE
 
-_PATH_MARKER_BEGIN = "# >>> arize codex tracing PATH >>>"
-_PATH_MARKER_END = "# <<< arize codex tracing PATH <<<"
+_PATH_MARKER_BEGIN = "# >>> atatus codex tracing PATH >>>"
+_PATH_MARKER_END = "# <<< atatus codex tracing PATH <<<"
 
 # v1 OTLP endpoint pattern. Matches any 127.0.0.1 endpoint ending in /v1/logs
 # to catch installs where the user customized the buffer port via config.json.
@@ -28,7 +28,7 @@ _V1_OTEL_ENDPOINT_RE = re.compile(r"^https?://127\.0\.0\.1:\d+/v1/logs$")
 
 
 def _codex_proxy_shim_path() -> Path:
-    """Return the primary path where the Arize-managed ``codex`` shim should live."""
+    """Return the primary path where the Atatus-managed ``codex`` shim should live."""
     if os.name == "nt":
         return BIN_DIR / "codex.cmd"
     return BIN_DIR / "codex"
@@ -42,18 +42,18 @@ def _codex_proxy_shim_paths() -> list[Path]:
 
 
 def _is_our_codex_proxy_shim(path: Path) -> bool:
-    """Return True only if *path* exists and is an Arize-managed codex shim."""
+    """Return True only if *path* exists and is an Atatus-managed codex shim."""
     if not path.is_file():
         return False
     try:
         text = path.read_text()
-        return "arize-codex-proxy" in text and "Arize Codex proxy shim" in text
+        return "atatus-codex-proxy" in text and "Atatus Codex proxy shim" in text
     except OSError:
         return False
 
 
 def _remove_codex_proxy_shim(path: Path) -> None:
-    """Remove the codex proxy shim at *path* only if it is Arize-owned.
+    """Remove the codex proxy shim at *path* only if it is Atatus-owned.
 
     Honors ``dry_run()`` — logs intent without deleting.
     """
@@ -61,7 +61,7 @@ def _remove_codex_proxy_shim(path: Path) -> None:
         return
 
     if not _is_our_codex_proxy_shim(path):
-        info(f"Skipping removal of {path} — not an Arize-managed shim")
+        info(f"Skipping removal of {path} — not an Atatus-managed shim")
         return
 
     if dry_run():
@@ -123,7 +123,7 @@ def _remove_profile_block(path: Path) -> bool:
 
     new_text = re.sub(r"\n{3,}", "\n\n", new_text).lstrip("\n")
     if dry_run():
-        info(f"would remove Arize harness bin PATH block from {path}")
+        info(f"would remove Atatus harness bin PATH block from {path}")
         return False
 
     try:
@@ -140,7 +140,7 @@ def _remove_codex_proxy_path_blocks() -> None:
     removed = [profile for profile in profiles if _remove_profile_block(profile)]
     if removed:
         joined = ", ".join(str(p) for p in removed)
-        info(f"Removed Arize harness bin PATH block from: {joined}")
+        info(f"Removed Atatus harness bin PATH block from: {joined}")
 
 
 def _remove_windows_user_path_block() -> None:
@@ -292,7 +292,7 @@ def cleanup_legacy_install(codex_config_file: Path | None = None) -> None:
         codex_config_file = CODEX_CONFIG_FILE
 
     # 1. Stop the buffer service if its PID file exists.
-    pid_file = Path.home() / ".arize" / "harness" / "run" / "codex-buffer.pid"
+    pid_file = Path.home() / ".atatus" / "harness" / "run" / "codex-buffer.pid"
     if pid_file.is_file():
         if dry_run():
             info(f"would stop legacy codex-buffer service (pid file: {pid_file})")

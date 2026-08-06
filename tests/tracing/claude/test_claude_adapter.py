@@ -28,9 +28,9 @@ def claude_state_dir(tmp_harness_dir, monkeypatch):
 def disable_env_vars(monkeypatch):
     """Clear env vars that could influence session resolution."""
     monkeypatch.delenv("CLAUDE_SESSION_KEY", raising=False)
-    monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
-    monkeypatch.delenv("ARIZE_USER_ID", raising=False)
-    monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+    monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("ATATUS_USER_ID", raising=False)
+    monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
 
 
 # ── resolve_session tests ────────────────────────────────────────────────────
@@ -125,10 +125,10 @@ class TestEnsureSessionInitialized:
         int(sid, 16)  # should not raise
 
     def test_project_name_from_env(self, claude_state_dir, monkeypatch):
-        """ARIZE_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ARIZE_USER_ID", raising=False)
+        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
+        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
         sm = self._make_state(claude_state_dir, "proj-env")
         adapter.ensure_session_initialized(sm, {"cwd": "/home/user/other-project"})
         assert sm.get("project_name") == "my-env-project"
@@ -140,10 +140,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("project_name") == "my-project"
 
     def test_user_id_from_env(self, claude_state_dir, monkeypatch):
-        """ARIZE_USER_ID env var takes priority over input."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ARIZE_USER_ID", "env-user")
-        monkeypatch.delenv("ARIZE_PROJECT_NAME", raising=False)
+        """ATATUS_USER_ID env var takes priority over input."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_USER_ID", "env-user")
+        monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
         sm = self._make_state(claude_state_dir, "uid-env")
         adapter.ensure_session_initialized(sm, {"user_id": "input-user"})
         assert sm.get("user_id") == "env-user"
@@ -211,7 +211,7 @@ class TestGcStaleStateFiles:
 class TestCheckRequirements:
     def test_enabled_returns_true(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=True -> returns True and STATE_DIR exists."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         state_dir = tmp_harness_dir / "state" / "claude-code-check"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is True
@@ -219,7 +219,7 @@ class TestCheckRequirements:
 
     def test_disabled_returns_false(self, tmp_harness_dir, monkeypatch):
         """trace_enabled=False -> returns False, STATE_DIR not created."""
-        monkeypatch.setenv("ARIZE_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         state_dir = tmp_harness_dir / "state" / "claude-code-nope"
         monkeypatch.setattr(adapter, "STATE_DIR", state_dir)
         assert adapter.check_requirements() is False

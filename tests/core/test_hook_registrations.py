@@ -21,19 +21,19 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 HARNESS_DIRS = ["tracing/claude_code", "tracing/codex", "tracing/cursor"]
 
 EXPECTED_ENTRY_POINTS = {
-    "arize-config": "core.config:main",
-    "arize-hook-session-start": "tracing.claude_code.hooks.handlers:session_start",
-    "arize-hook-pre-tool-use": "tracing.claude_code.hooks.handlers:pre_tool_use",
-    "arize-hook-post-tool-use": "tracing.claude_code.hooks.handlers:post_tool_use",
-    "arize-hook-user-prompt-submit": "tracing.claude_code.hooks.handlers:user_prompt_submit",
-    "arize-hook-stop": "tracing.claude_code.hooks.handlers:stop",
-    "arize-hook-subagent-stop": "tracing.claude_code.hooks.handlers:subagent_stop",
-    "arize-hook-stop-failure": "tracing.claude_code.hooks.handlers:stop_failure",
-    "arize-hook-notification": "tracing.claude_code.hooks.handlers:notification",
-    "arize-hook-permission-request": "tracing.claude_code.hooks.handlers:permission_request",
-    "arize-hook-session-end": "tracing.claude_code.hooks.handlers:session_end",
-    "arize-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
-    "arize-hook-cursor": "tracing.cursor.hooks.handlers:main",
+    "atatus-config": "core.config:main",
+    "atatus-hook-session-start": "tracing.claude_code.hooks.handlers:session_start",
+    "atatus-hook-pre-tool-use": "tracing.claude_code.hooks.handlers:pre_tool_use",
+    "atatus-hook-post-tool-use": "tracing.claude_code.hooks.handlers:post_tool_use",
+    "atatus-hook-user-prompt-submit": "tracing.claude_code.hooks.handlers:user_prompt_submit",
+    "atatus-hook-stop": "tracing.claude_code.hooks.handlers:stop",
+    "atatus-hook-subagent-stop": "tracing.claude_code.hooks.handlers:subagent_stop",
+    "atatus-hook-stop-failure": "tracing.claude_code.hooks.handlers:stop_failure",
+    "atatus-hook-notification": "tracing.claude_code.hooks.handlers:notification",
+    "atatus-hook-permission-request": "tracing.claude_code.hooks.handlers:permission_request",
+    "atatus-hook-session-end": "tracing.claude_code.hooks.handlers:session_end",
+    "atatus-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
+    "atatus-hook-cursor": "tracing.cursor.hooks.handlers:main"
 }
 
 
@@ -129,7 +129,7 @@ class TestHooksJson:
             "StopFailure",
             "Notification",
             "PermissionRequest",
-            "SessionEnd",
+            "SessionEnd"
         }
         actual_events = set(hooks_data["hooks"].keys())
         assert expected_events == actual_events
@@ -144,12 +144,12 @@ class TestHooksJson:
                     assert "CLAUDE_PLUGIN_ROOT" in cmd, f"{event}: command should reference CLAUDE_PLUGIN_ROOT: {cmd}"
 
     def test_hook_commands_reference_entry_points(self, hooks_data):
-        """Each hook command must pass an arize-hook-* entry point name."""
+        """Each hook command must pass an atatus-hook-* entry point name."""
         for event, hook_list in hooks_data["hooks"].items():
             for hook_group in hook_list:
                 for hook in hook_group["hooks"]:
                     cmd = hook["command"]
-                    assert "arize-hook-" in cmd, f"{event}: command should reference arize-hook- entry point: {cmd}"
+                    assert "atatus-hook-" in cmd, f"{event}: command should reference atatus-hook- entry point: {cmd}"
 
     def test_hook_entry_points_exist_in_pyproject(self, hooks_data):
         """Every entry point referenced in hooks must exist in pyproject.toml."""
@@ -170,16 +170,16 @@ class TestHooksJson:
             entry_point = cmd.strip().split()[-1].strip('"')
             mapping[event] = entry_point
 
-        assert mapping["SessionStart"] == "arize-hook-session-start"
-        assert mapping["UserPromptSubmit"] == "arize-hook-user-prompt-submit"
-        assert mapping["PreToolUse"] == "arize-hook-pre-tool-use"
-        assert mapping["PostToolUse"] == "arize-hook-post-tool-use"
-        assert mapping["Stop"] == "arize-hook-stop"
-        assert mapping["SubagentStop"] == "arize-hook-subagent-stop"
-        assert mapping["StopFailure"] == "arize-hook-stop-failure"
-        assert mapping["Notification"] == "arize-hook-notification"
-        assert mapping["PermissionRequest"] == "arize-hook-permission-request"
-        assert mapping["SessionEnd"] == "arize-hook-session-end"
+        assert mapping["SessionStart"] == "atatus-hook-session-start"
+        assert mapping["UserPromptSubmit"] == "atatus-hook-user-prompt-submit"
+        assert mapping["PreToolUse"] == "atatus-hook-pre-tool-use"
+        assert mapping["PostToolUse"] == "atatus-hook-post-tool-use"
+        assert mapping["Stop"] == "atatus-hook-stop"
+        assert mapping["SubagentStop"] == "atatus-hook-subagent-stop"
+        assert mapping["StopFailure"] == "atatus-hook-stop-failure"
+        assert mapping["Notification"] == "atatus-hook-notification"
+        assert mapping["PermissionRequest"] == "atatus-hook-permission-request"
+        assert mapping["SessionEnd"] == "atatus-hook-session-end"
 
     def test_hook_type_is_command(self, hooks_data):
         """All hooks must have type 'command'."""
@@ -194,7 +194,7 @@ class TestHooksJson:
             for hook_group in hook_list:
                 for hook in hook_group["hooks"]:
                     cmd = hook["command"]
-                    assert "~/.arize" not in cmd, f"{event}: hardcoded ~/.arize path: {cmd}"
+                    assert "~/.atatus" not in cmd, f"{event}: hardcoded ~/.atatus path: {cmd}"
                     assert "/home/" not in cmd, f"{event}: hardcoded /home/ path: {cmd}"
 
 
@@ -273,7 +273,7 @@ class TestNoBashReferences:
             "user_prompt_submit.sh",
             "notify.sh",
             "hook-handler.sh",
-            "common.sh",
+            "common.sh"
         ]
         for f in _collect_md_files():
             content = f.read_text()
@@ -297,7 +297,7 @@ class TestNoBashReferences:
         """
         user_facing = [
             REPO_ROOT / "README.md",
-            *(REPO_ROOT.glob("*-tracing/README.md")),
+            *(REPO_ROOT.glob("*-tracing/README.md"))
         ]
         for f in user_facing:
             if not f.exists():
@@ -335,14 +335,14 @@ class TestDocumentationConsistency:
     def test_cursor_skill_references_cli_entry_points(self):
         """Cursor SKILL.md should use CLI entry points for hooks."""
         skill = (REPO_ROOT / "tracing" / "cursor" / "skills" / "manage-cursor-tracing" / "SKILL.md").read_text()
-        assert "arize-hook-cursor" in skill
+        assert "atatus-hook-cursor" in skill
         assert "send_span()" in skill
         assert "hook-handler.sh" not in skill
 
     def test_codex_skill_references_cli_entry_points(self):
         """Codex SKILL.md should use CLI entry points."""
         skill = (REPO_ROOT / "tracing" / "codex" / "skills" / "manage-codex-tracing" / "SKILL.md").read_text()
-        assert "arize-hook-codex-notify" in skill
+        assert "atatus-hook-codex-notify" in skill
         assert "notify.sh" not in skill
 
     def test_claude_skill_references_cli_entry_points(self):
@@ -363,7 +363,7 @@ class TestCodexHookReference:
     def test_codex_skill_notify_command(self):
         """Codex SKILL.md notify hook should use the CLI entry point."""
         skill = (REPO_ROOT / "tracing" / "codex" / "skills" / "manage-codex-tracing" / "SKILL.md").read_text()
-        assert "arize-hook-codex-notify" in skill
+        assert "atatus-hook-codex-notify" in skill
 
 
 # --- Cursor hooks.json pattern ---
@@ -373,7 +373,7 @@ class TestCursorHookReference:
     """Verify Cursor docs reference the correct handler command."""
 
     def test_cursor_skill_hook_command(self):
-        """Cursor SKILL.md should show arize-hook-cursor for all 12 events."""
+        """Cursor SKILL.md should show atatus-hook-cursor for all 12 events."""
         skill = (REPO_ROOT / "tracing" / "cursor" / "skills" / "manage-cursor-tracing" / "SKILL.md").read_text()
         # All events should reference the same entry point
         events = [
@@ -388,13 +388,13 @@ class TestCursorHookReference:
             "afterFileEdit",
             "stop",
             "beforeTabFileRead",
-            "afterTabFileEdit",
+            "afterTabFileEdit"
         ]
         for event in events:
             assert event in skill, f"Cursor SKILL.md missing event: {event}"
-        # Count occurrences of arize-hook-cursor — should be at least 12 (one per event)
-        count = skill.count("arize-hook-cursor")
-        assert count >= 12, f"Expected at least 12 arize-hook-cursor references, got {count}"
+        # Count occurrences of atatus-hook-cursor — should be at least 12 (one per event)
+        count = skill.count("atatus-hook-cursor")
+        assert count >= 12, f"Expected at least 12 atatus-hook-cursor references, got {count}"
 
 
 # --- State file extension ---
