@@ -62,14 +62,19 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_PROJECT_NAME` | per-harness | Overrides `harnesses.<name>.project_name` from `config.json` for a single session. |
 | `ATATUS_LOG_FILE` | per-harness | Path the harness writes its log to. Adapters default to `~/.atatus/harness/logs/<harness>.log`. |
 | `ATATUS_TRACE_DEBUG` | `false` | Dump raw hook payloads as JSON under `~/.atatus/harness/state/<harness>/debug/`. Codex hooks use this for span-tree inspection. |
+| `ATATUS_TRANSCRIPT_WAIT_MS` | `300` | How long a Stop hook waits for the harness to flush its transcript before reading model and token counts. Those two live only in the transcript, and the hook can fire before the write lands — losing that race emits a span with no model and zero tokens. `0` disables the wait. |
+| `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
+| `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture tool names and arguments (file paths, commands, queries). |
+| `ATATUS_LOG_TOOL_CONTENT` | `true` | Capture tool *output* — file bodies, shell stdout, search results. This is the broadest of the three: it is where file contents and anything pasted into a session end up. |
+| `ATATUS_DISABLE_FORK` | `false` | Testing only. Stops the opencode handler forking a background process so hooks run synchronously. |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | Standard OTel attribute string (`team=payments,environment=prod`) added to every span. Overrides `config.json` `attributes`/`harnesses.<name>.attributes` on key collision; set per-harness by placing it in that harness's settings env block. |
 
 **Backend overrides** (set if you want env to take priority over `config.json` for a single run):
 
 | Variable | Description |
 |----------|-------------|
-| `ATATUS_API_KEY`, `ATATUS_OTLP_ENDPOINT` | Atatus license key and endpoint. |
-| `ATATUS_OTLP_ENDPOINT`, `ATATUS_API_KEY` | Atatus endpoint and (optional) API key. |
+| `ATATUS_API_KEY` | Atatus license key. Required — without it spans are dropped. |
+| `ATATUS_OTLP_ENDPOINT` | Collector URL. Optional; defaults to `https://otel-rx.atatus.com`. |
 
 > Claude Code plugin reads env vars from `~/.claude/settings.json` under the `env` block
 

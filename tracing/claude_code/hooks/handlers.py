@@ -5,7 +5,9 @@ Replaces 9 bash scripts in tracing/claude_code/hooks/. Each function is a CLI
 entry point registered in pyproject.toml [project.scripts].
 """
 import json
+import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -378,6 +380,11 @@ class _TokenUsage:
         Cache detail attributes are only included when non-zero to avoid
         cluttering spans for uncached calls.
         """
+        # Omit everything when nothing was scanned. Emitting zeros makes a lost
+        # transcript race indistinguishable from a turn that genuinely used no
+        # tokens -- both price at $0 and neither is detectable downstream.
+        if not (self.prompt or self.completion):
+            return {}
         attrs: dict = {
             "llm.token_count.prompt": self.prompt,
             "llm.token_count.completion": self.completion,
@@ -390,6 +397,49 @@ class _TokenUsage:
         return attrs
 
 
+def _wait_for_transcript_flush(transcript: Path, start_line: int) -> bool:
+    """Poll briefly for an assistant entry at/after *start_line*.
+
+    Claude Code writes the session JSONL asynchronously, so a Stop hook can fire
+    before the assistant entry lands on disk. The response text is unaffected --
+    it comes from the hook payload (``last_assistant_message``) -- but the model
+    name and token counts exist ONLY in the transcript. Losing this race emits a
+    span with no model and zero tokens, which prices at $0 and is
+    indistinguishable from a turn that genuinely used nothing.
+
+    Bounded, because hooks block Claude Code's UI. Returns True as soon as an
+    entry appears, False if the cap expires; callers emit either way so a span is
+    never lost. Tune or disable with ``ATATUS_TRANSCRIPT_WAIT_MS`` (0 disables).
+    """
+    try:
+        cap_ms = int(os.environ.get("ATATUS_TRANSCRIPT_WAIT_MS", "300"))
+    except ValueError:
+        cap_ms = 300
+    if cap_ms <= 0:
+        return True
+
+    deadline = time.monotonic() + (cap_ms / 1000.0)
+    while True:
+        try:
+            with open(transcript) as f:
+                for i, line in enumerate(f):
+                    if i < start_line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    msg = entry.get("message")
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        return True
+        except OSError:
+            return False
+        if time.monotonic() >= deadline:
+            log(f"transcript not flushed after {cap_ms}ms - model/tokens omitted")
+            return False
+        time.sleep(0.025)
+
+
 def _scan_transcript_for_usage(
     transcript: Path,
     start_line: int,
@@ -400,6 +450,11 @@ def _scan_transcript_for_usage(
     output = ""
     usage_totals = _TokenUsage()
     model = ""
+    # Claude Code writes the same assistant message to the transcript more than
+    # once -- distinct entry uuids, identical message.id. Summing every entry
+    # double-counts tokens (and duplicates text), inflating reported cost by a
+    # clean multiple. Count each API message exactly once.
+    seen_message_ids: set = set()
 
     with open(transcript) as f:
         for i, line in enumerate(f):
@@ -415,6 +470,12 @@ def _scan_transcript_for_usage(
             msg = entry.get("message")
             if not isinstance(msg, dict) or msg.get("role") != "assistant":
                 continue
+
+            message_id = msg.get("id")
+            if message_id:
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
 
             content = msg.get("content")
             if isinstance(content, list):
@@ -474,6 +535,7 @@ def _handle_stop(input_json: dict) -> None:
     transcript = resolve_transcript_path(input_json, session_id)
     if transcript is not None:
         start_line = int(state.get("trace_start_line") or "0")
+        _wait_for_transcript_flush(transcript, start_line)
         scanned_output, usage, scanned_model = _scan_transcript_for_usage(transcript, start_line)
         if not output:
             output = scanned_output
@@ -491,7 +553,7 @@ def _handle_stop(input_json: dict) -> None:
         "trace.number": trace_count,
         "project.name": project_name,
         "openinference.span.kind": "LLM",
-        "llm.model_name": model,
+        **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
         "input.value": redacted_prompt,
         "output.value": redacted_output,
@@ -600,6 +662,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
             birth = getattr(st, "st_birthtime", st.st_ctime)
             start_time = str(int(birth * 1000))
 
+        _wait_for_transcript_flush(transcript, 0)
         scanned_output, usage, scanned_model = _scan_transcript_for_usage(transcript, 0)
         if not output:
             output = scanned_output
@@ -617,7 +680,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
         "openinference.span.kind": "CHAIN",
         "subagent.id": agent_id,
         "subagent.type": agent_type,
-        "llm.model_name": model,
+        **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
         "output.value": output,
     }
