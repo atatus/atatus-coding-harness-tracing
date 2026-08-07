@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import IO, Optional
 
 # ---------------------------------------------------------------------------
-# Content-capture defaults (ADR-011)
+# Content-capture defaults
 # ---------------------------------------------------------------------------
 
 # Prompts and tool *details* are captured; tool *output* is not. Tool output is
@@ -519,8 +519,7 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
       atatus.agent.harness = <harness slug>       (subType, e.g. "claude-code")
       telemetry.sdk.name   = "atatus-coding-harness"
 
-    Mirrors what the upstream Arize path sent as ``arize.project.name``: the
-    project identity travels *in the payload*, not only in config. Kept at the
+    Project identity travels *in the payload*, not only in config. Kept at the
     resource level rather than duplicated onto every span — Atatus reads it from
     the resource, and each POST carries a single project.
 
@@ -986,11 +985,9 @@ def _attrs_to_otlp(attrs: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Emit-time hygiene (M4.1)
+# Emit-time hygiene
 #
-# Ported from the Arize collector, which needed these because it read Claude
-# Code's native telemetry. They apply to transcript-derived data too, and are
-# also implemented defensively in the atatus-go consumer -- either layer alone
+# Also implemented defensively in the atatus-go consumer -- either layer alone
 # would do, but the agent is the cheaper place to fix it and the consumer
 # protects producers we do not control.
 #

@@ -853,7 +853,7 @@ class TestBuildMultiSpan:
         assert scope["name"] == "override-scope"
 
 
-# ── Emit-time hygiene (M4.1) ──────────────────────────────────────────────
+# ── Emit-time hygiene ──────────────────────────────────────────────
 
 
 class TestNormalizeModelName:
@@ -971,7 +971,7 @@ class TestLoggingFlagPrecedence:
         env.__dict__.pop("_logging_config", None)
 
     def test_defaults_when_nothing_set(self, monkeypatch):
-        """ADR-011: prompts and tool details on, tool CONTENT off."""
+        """Prompts and tool details on, tool CONTENT off."""
         self._patch_config(monkeypatch, None)
         assert env.log_prompts is True
         assert env.log_tool_details is True
@@ -995,14 +995,14 @@ class TestLoggingFlagPrecedence:
 
     def test_partial_config_falls_through_to_default(self, monkeypatch):
         # Only `prompts` configured; the other two fall through to their own
-        # defaults -- tool_details True, tool_content False (ADR-011).
+        # defaults -- tool_details True, tool_content False.
         self._patch_config(monkeypatch, {"prompts": False})
         assert env.log_prompts is False
         assert env.log_tool_details is True
         assert env.log_tool_content is False
 
     def test_tool_content_is_opt_in(self, monkeypatch):
-        """Regression guard for ADR-011: tool output must not be captured
+        """Regression guard: tool output must not be captured
         unless explicitly enabled, by env or by config."""
         self._patch_config(monkeypatch, None)
         assert env.log_tool_content is False
@@ -1883,7 +1883,7 @@ class TestStampAtatusIdentity:
     Atatus resolves (and auto-creates) a project from the OTLP resource's
     service.name, so service.name has to carry the user's project name while the
     harness slug moves to atatus.agent.harness. This mirrors what the upstream
-    Arize path shipped as arize.project.name.
+    the project identity travels in the payload.
     """
 
     @staticmethod

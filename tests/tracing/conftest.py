@@ -3,7 +3,7 @@
 These tests assert the *shape* of emitted spans -- which attributes appear and
 what they contain -- so they need tool output present to assert against.
 
-``ATATUS_LOG_TOOL_CONTENT`` defaults to **False** per ADR-011, which would
+``ATATUS_LOG_TOOL_CONTENT`` defaults to **False**, which would
 otherwise replace every ``output.value`` with ``<redacted (N chars)>``. Opting
 in here keeps these tests about span construction, and leaves the default itself
 under test where it belongs: ``tests/core/test_common.py`` covers the flag's

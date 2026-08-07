@@ -228,7 +228,7 @@ def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
 def prompt_project_name(default: str = "") -> str:
     """Prompt for the Atatus project name.
 
-    ADR-013: **the user-supplied name IS the grouping key.** The receiver
+    **The user-supplied name IS the grouping key.** The receiver
     auto-creates one project per ``service.name``, so a silent default means
     every install of a given harness collapses into a single shared project --
     every engineer's sessions in one bucket, which is not recoverable after the
@@ -271,20 +271,20 @@ def _prompt_bool(question: str, default: bool) -> bool:
 def prompt_content_logging() -> dict:
     """Prompt for content logging settings. Returns the dict to write under `logging:`.
 
-    Defaults come from `LOG_FLAG_DEFAULTS` (ADR-011): prompts and tool *details*
-    on, tool *output* off.
+    Defaults come from `LOG_FLAG_DEFAULTS`: prompts and tool *details* on,
+    tool *output* off.
 
     **Only answers that deviate from those defaults are returned**, and
     `write_logging_config` replaces the whole `logging:` block, so accepting a
     default removes any previously-stored override. That is what makes a
     re-install repair an existing config.json rather than preserve it.
 
-    Prior bug (fixed 2026-08-07): every answer was written explicitly, and the
-    tool-content prompt was `[Y/n]`. Pressing Enter therefore wrote
-    `"tool_content": true` into config.json, which outranks the code default in
-    `_resolve_log_flag` — so ADR-011 was never in effect on an installed
-    machine. Both halves matter: keep the hint tied to the default, and keep
-    defaulted answers out of the file.
+    Both halves matter. An earlier version wrote every answer explicitly and
+    prompted `[Y/n]` for tool content, so pressing Enter stored
+    `"tool_content": true`, which outranks the code default in
+    `_resolve_log_flag` — the privacy default was never in effect on an
+    installed machine. Keep the hint tied to the default, and keep defaulted
+    answers out of the file.
     """
     print("")
     if sys.stdout.isatty() and os.name != "nt":

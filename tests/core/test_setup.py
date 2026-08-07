@@ -136,7 +136,7 @@ class TestPromptBackend:
 
 
 class TestPromptProjectName:
-    """ADR-013: the user-supplied name is the grouping key, so a fresh install
+    """The user-supplied name is the grouping key, so a fresh install
     must not silently default. A re-install may confirm the stored name."""
 
     def test_fresh_install_rejects_blank(self):
@@ -166,7 +166,7 @@ class TestPromptProjectName:
 
 
 class TestPromptContentLogging:
-    """ADR-011: prompts and tool *details* captured, tool *output* not.
+    """Prompts and tool *details* captured, tool *output* not.
 
     Regression suite for the 2026-08-07 bug — the wizard prompted `[Y/n]` for
     tool content and wrote every answer explicitly, so pressing Enter stored
@@ -586,7 +586,7 @@ class TestClaudeSetup:
         config_path, settings_file = self._setup_install_env(tmp_path, monkeypatch)
 
         # Inputs: endpoint=default, project_name (REQUIRED on a fresh install --
-        # ADR-013 rejects a blank), user_id="", then three content-logging
+        # a blank is rejected), user_id="", then three content-logging
         # prompts (defaults: Y, N, N). The licence key comes from getpass.
         inputs = iter(["", "my-project", "", "", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
