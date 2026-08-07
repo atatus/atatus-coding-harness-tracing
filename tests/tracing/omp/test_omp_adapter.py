@@ -63,7 +63,7 @@ class TestModuleConstants:
 
     def test_scope_name(self):
         """SCOPE_NAME matches the omp harness metadata."""
-        assert adapter.SCOPE_NAME == "atatus-omp-plugin"
+        assert adapter.SCOPE_NAME == "atatus-omp-tracing"
 
     def test_state_dir_matches_harness_subdir(self):
         """STATE_DIR derives from HARNESSES['omp']['state_subdir']."""

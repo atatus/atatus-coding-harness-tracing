@@ -1012,4 +1012,4 @@ class TestSpanServiceMetadata:
         _handle_close(dict(_load_fixture("reconcile_basic.json"), type="close"))
         s = captured_spans[0]
         scope = s["resourceSpans"][0]["scopeSpans"][0]["scope"]
-        assert scope["name"] == "atatus-opencode-plugin"
+        assert scope["name"] == "atatus-opencode-tracing"

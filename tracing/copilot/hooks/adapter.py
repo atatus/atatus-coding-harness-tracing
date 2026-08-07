@@ -15,7 +15,7 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["copilot"]
 SERVICE_NAME = _HARNESS["service_name"]  # "copilot"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-copilot-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-copilot-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/copilot
 
 # Route hook stderr to a per-harness log file unless the user already set one.

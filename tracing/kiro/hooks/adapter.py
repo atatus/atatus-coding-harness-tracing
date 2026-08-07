@@ -24,7 +24,7 @@ from core.constants import STATE_BASE_DIR
 from tracing.kiro.constants import HARNESS_NAME, KIRO_SESSIONS_DIR
 
 STATE_DIR: Path = STATE_BASE_DIR / HARNESS_NAME
-SCOPE_NAME = "atatus-kiro-plugin"
+SCOPE_NAME = "atatus-kiro-tracing"
 SERVICE_NAME = HARNESS_NAME
 
 # Route hook stderr to a per-harness log file unless ATATUS_LOG_FILE is set.

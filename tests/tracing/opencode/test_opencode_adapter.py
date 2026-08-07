@@ -57,7 +57,7 @@ class TestModuleConstants:
 
     def test_scope_name(self):
         """SCOPE_NAME matches the opencode harness metadata."""
-        assert adapter.SCOPE_NAME == "atatus-opencode-plugin"
+        assert adapter.SCOPE_NAME == "atatus-opencode-tracing"
 
     def test_state_dir_matches_harness_subdir(self):
         """STATE_DIR derives from HARNESSES['opencode']['state_subdir']."""

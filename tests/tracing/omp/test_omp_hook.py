@@ -986,4 +986,4 @@ class TestSpanServiceMetadata:
         _handle_agent_end(_load_fixture("agent_end.json"))
         s = captured_spans[0]
         scope = s["resourceSpans"][0]["scopeSpans"][0]["scope"]
-        assert scope["name"] == "atatus-omp-plugin"
+        assert scope["name"] == "atatus-omp-tracing"

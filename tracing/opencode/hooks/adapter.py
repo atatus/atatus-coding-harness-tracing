@@ -16,7 +16,7 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["opencode"]
 SERVICE_NAME = _HARNESS["service_name"]  # "opencode"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-opencode-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-opencode-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/opencode
 
 # Route hook stderr to a per-harness log file unless the user already set one.

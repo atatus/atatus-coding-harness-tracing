@@ -16,7 +16,7 @@ from core.constants import HARNESSES
 
 _HARNESS = HARNESSES["codex"]
 SERVICE_NAME = _HARNESS["service_name"]  # "codex"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-codex-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-codex-tracing"
 
 # Route hook stderr to a per-harness log file unless the user already set one.
 os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))

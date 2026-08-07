@@ -52,7 +52,7 @@ class TestModuleConstants:
 
     def test_scope_name(self):
         """SCOPE_NAME matches the gemini harness metadata."""
-        assert adapter.SCOPE_NAME == "atatus-gemini-plugin"
+        assert adapter.SCOPE_NAME == "atatus-gemini-tracing"
 
 
 # ── check_requirements tests ─────────────────────────────────────────────────

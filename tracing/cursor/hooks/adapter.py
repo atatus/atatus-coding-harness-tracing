@@ -19,7 +19,7 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants from HARNESSES["cursor"] ---
 _HARNESS = HARNESSES["cursor"]
 SERVICE_NAME = _HARNESS["service_name"]  # "cursor"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-cursor-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-cursor-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/cursor
 MAX_ATTR_CHARS = int(os.environ.get("CURSOR_TRACE_MAX_ATTR_CHARS", "100000"))
 

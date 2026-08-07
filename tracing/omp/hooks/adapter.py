@@ -24,7 +24,7 @@ from tracing.omp.constants import HARNESS_NAME
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["omp"]
 SERVICE_NAME = _HARNESS["service_name"]  # "omp"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-omp-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-omp-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/omp
 
 # Route hook stderr to a per-harness log file unless the user already set one.

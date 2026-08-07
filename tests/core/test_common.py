@@ -1897,7 +1897,7 @@ class TestStampAtatusIdentity:
                         ]
                     },
                     "scopeSpans": [
-                        {"scope": {"name": "atatus-claude-plugin"}, "spans": [{"name": "Turn 1"}]}
+                        {"scope": {"name": "atatus-claude-tracing"}, "spans": [{"name": "Turn 1"}]}
                     ],
                 }
             ]
