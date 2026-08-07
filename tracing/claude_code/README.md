@@ -18,12 +18,16 @@ The marketplace flow registers the hooks but skips the interactive wizard, so ba
     "ATATUS_API_KEY": "<your-atatus-api-key>",
     "ATATUS_LOG_PROMPTS": "true",
     "ATATUS_LOG_TOOL_DETAILS": "true",
-    "ATATUS_LOG_TOOL_CONTENT": "true"
+    "ATATUS_LOG_TOOL_CONTENT": "false"
   }
 }
 ```
 
-`ATATUS_OTLP_ENDPOINT` is optional and defaults to `https://otel-rx.atatus.com`. Each `ATATUS_LOG_*` flag accepts `"true"` or `"false"` — set to `"false"` to opt out per category. Env values take precedence over `~/.atatus/harness/config.json`.
+`ATATUS_OTLP_ENDPOINT` is optional and defaults to `https://otel-rx.atatus.com`. Each `ATATUS_LOG_*` flag accepts `"true"` or `"false"`. The values above mirror the wizard's defaults; omitting a flag entirely gives you the same posture.
+
+> **`ATATUS_LOG_TOOL_CONTENT` is `false` on purpose.** Tool output is where file bodies, shell stdout, and anything pasted into a session end up. Set it to `"true"` only if you intend to capture all of that.
+
+Env values take precedence over `~/.atatus/harness/config.json`.
 
 Install:
 

@@ -25,6 +25,7 @@ from core.setup import (
     info,
     merge_harness_entry,
     prompt_backend,
+    needs_content_logging_prompt,
     prompt_content_logging,
     prompt_project_name,
     prompt_user_id,
@@ -240,8 +241,9 @@ def install(with_skills: bool = False) -> None:
         else:
             info("would write config.json with backend credentials")
 
-    # Logging settings are global. Prompt only if no `logging:` block exists yet.
-    if (config.get("logging") if config else None) is None:
+    # Logging settings are global. Prompt on a fresh install, or once more when
+    # the stored block predates LOG_CONFIG_VERSION (see needs_content_logging_prompt).
+    if needs_content_logging_prompt(config):
         write_logging_config(prompt_content_logging())
     else:
         info("Using existing logging settings from config.json")

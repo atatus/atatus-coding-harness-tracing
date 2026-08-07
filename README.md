@@ -41,13 +41,17 @@ A free-form identifier attached to every span as `user.id`. Useful when multiple
 
 #### 4. Content logging
 
-Three Y/n opt-outs that apply to **all** harnesses:
+Three questions that apply to **all** harnesses. Press Enter to accept each default:
 
-- Log user prompts?
-- Log what tools were asked to do (commands, file paths, URLs)?
-- Log what tools returned (file contents, command output)?
+| Question | Default |
+|---|---|
+| Log user prompts? | **yes** |
+| Log what tools were asked to do (commands, file paths, URLs)? | **yes** |
+| Log what tools returned (file contents, command output)? | **no** — opt in explicitly |
 
-You're only asked these the first time you install a harness — subsequent installs reuse the existing `logging:` block. You can edit them later in `~/.atatus/harness/config.json`.
+Tool *output* is off because it is the broadest capture surface: file bodies, shell stdout, and anything pasted into a session all arrive through it.
+
+Only answers that differ from these defaults are written to `~/.atatus/harness/config.json`, so the defaults stay authoritative and can be changed by an upgrade. You're asked once, on your first harness install — later installs reuse the stored block, except after a change to the defaults themselves, when you'll be asked to re-confirm once. You can also edit the block by hand, or override per session with the `ATATUS_LOG_*` env vars below.
 
 ### Environment variables
 
@@ -65,7 +69,7 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_TRANSCRIPT_WAIT_MS` | `300` | How long a Stop hook waits for the harness to flush its transcript before reading model and token counts. Those two live only in the transcript, and the hook can fire before the write lands — losing that race emits a span with no model and zero tokens. `0` disables the wait. |
 | `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
 | `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture tool names and arguments (file paths, commands, queries). |
-| `ATATUS_LOG_TOOL_CONTENT` | `true` | Capture tool *output* — file bodies, shell stdout, search results. This is the broadest of the three: it is where file contents and anything pasted into a session end up. |
+| `ATATUS_LOG_TOOL_CONTENT` | **`false`** | Capture tool *output* — file bodies, shell stdout, search results. Off by default: this is the broadest of the three, and it is where file contents and anything pasted into a session end up. Opt in explicitly. |
 | `ATATUS_DISABLE_FORK` | `false` | Testing only. Stops the opencode handler forking a background process so hooks run synchronously. |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | Standard OTel attribute string (`team=payments,environment=prod`) added to every span. Overrides `config.json` `attributes`/`harnesses.<name>.attributes` on key collision; set per-harness by placing it in that harness's settings env block. |
 

@@ -165,6 +165,138 @@ class TestPromptProjectName:
             assert prompt_project_name("existing-project") == "renamed"
 
 
+class TestPromptContentLogging:
+    """ADR-011: prompts and tool *details* captured, tool *output* not.
+
+    Regression suite for the 2026-08-07 bug — the wizard prompted `[Y/n]` for
+    tool content and wrote every answer explicitly, so pressing Enter stored
+    `"tool_content": true`, which outranks the code default in
+    `_resolve_log_flag`. The privacy posture was defeated on every installed
+    machine while `core/common.py` looked correct. These tests assert the two
+    properties that together prevent a recurrence: the blank-line answer must
+    equal the default, and a defaulted answer must not be persisted.
+    """
+
+    @staticmethod
+    def _run(answers):
+        from core.setup import prompt_content_logging
+
+        with patch("builtins.input", side_effect=answers):
+            with patch.object(sys.stdout, "isatty", return_value=False):
+                return prompt_content_logging()
+
+    @staticmethod
+    def _flags(block):
+        """The block minus its version stamp — i.e. what was actually persisted."""
+        return {k: v for k, v in block.items() if k != "_v"}
+
+    def test_all_defaults_accepted_persists_no_flags(self):
+        """🔴 The exact bug. Three blank lines must store no flag at all."""
+        assert self._flags(self._run(["", "", ""])) == {}
+
+    def test_every_result_carries_the_version_stamp(self):
+        from core.common import LOG_CONFIG_VERSION
+
+        for answers in (["", "", ""], ["n", "no", "y"]):
+            assert self._run(answers)["_v"] == LOG_CONFIG_VERSION
+
+    def test_defaults_are_the_adr011_posture(self):
+        from core.common import LOG_FLAG_DEFAULTS
+
+        assert LOG_FLAG_DEFAULTS == {
+            "prompts": True,
+            "tool_details": True,
+            "tool_content": False,
+        }
+
+    def test_tool_content_requires_explicit_yes(self):
+        assert self._flags(self._run(["", "", "y"])) == {"tool_content": True}
+        assert self._flags(self._run(["", "", "yes"])) == {"tool_content": True}
+
+    def test_tool_content_junk_answer_stays_off(self):
+        """A False default must not be flipped by anything but yes/y — the
+        old `not in ("n", "no")` parse turned every typo into an opt-in."""
+        for junk in ("sure", "1", "true", "yep", "n"):
+            assert self._flags(self._run(["", "", junk])) == {}, f"{junk!r} must not opt in"
+
+    def test_surrounding_whitespace_is_ignored(self):
+        assert self._flags(self._run(["", "", " y "])) == {"tool_content": True}
+        assert self._flags(self._run([" n ", "", ""])) == {"prompts": False}
+
+    def test_opting_out_of_a_true_default_is_persisted(self):
+        assert self._flags(self._run(["n", "", ""])) == {"prompts": False}
+        assert self._flags(self._run(["", "no", ""])) == {"tool_details": False}
+
+    def test_only_deviations_are_returned(self):
+        assert self._flags(self._run(["n", "no", "y"])) == {
+            "prompts": False,
+            "tool_details": False,
+            "tool_content": True,
+        }
+
+    def test_answers_are_case_insensitive(self):
+        assert self._flags(self._run(["N", "", "Y"])) == {
+            "prompts": False,
+            "tool_content": True,
+        }
+
+    def test_reinstall_accepting_defaults_clears_a_stored_override(self, tmp_path, monkeypatch):
+        """End-to-end repair path for machines already carrying the bad config.
+
+        write_logging_config replaces the block, so returning only the stamp is
+        what wipes a previously-stored `tool_content: true`.
+        """
+        import json
+
+        from core.common import LOG_CONFIG_VERSION
+        from core.setup import write_logging_config
+
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps({"user_id": "dg", "logging": {"prompts": True, "tool_content": True}})
+        )
+        monkeypatch.setattr("core.setup.dry_run", lambda: False)
+
+        write_logging_config(self._run(["", "", ""]), str(config_path))
+
+        written = json.loads(config_path.read_text())
+        assert written["logging"] == {"_v": LOG_CONFIG_VERSION}
+        assert written["user_id"] == "dg", "unrelated keys must survive"
+
+
+class TestNeedsContentLoggingPrompt:
+    """The migration gate. Installers skip the wizard once a block exists, so
+    this predicate is the only thing that can repair a v1 machine."""
+
+    def test_missing_config_prompts(self):
+        from core.setup import needs_content_logging_prompt
+
+        assert needs_content_logging_prompt(None) is True
+        assert needs_content_logging_prompt({}) is True
+
+    def test_v1_block_is_reprompted(self):
+        """🔴 The repair path. A pre-version block carrying the bad override
+        must re-prompt, or the machine keeps `tool_content: true` forever."""
+        from core.setup import needs_content_logging_prompt
+
+        v1 = {"logging": {"prompts": True, "tool_details": True, "tool_content": True}}
+        assert needs_content_logging_prompt(v1) is True
+
+    def test_current_version_is_not_reprompted(self):
+        from core.common import LOG_CONFIG_VERSION
+        from core.setup import needs_content_logging_prompt
+
+        current = {"logging": {"_v": LOG_CONFIG_VERSION, "tool_content": True}}
+        assert needs_content_logging_prompt(current) is False
+
+    def test_non_dict_logging_value_prompts(self):
+        """Fail-safe: a corrupt block re-prompts rather than crashing."""
+        from core.setup import needs_content_logging_prompt
+
+        for junk in ("yes", 1, [], True):
+            assert needs_content_logging_prompt({"logging": junk}) is True
+
+
 class TestPromptUserId:
     """Tests for prompt_user_id()."""
 

@@ -20,6 +20,36 @@ from pathlib import Path
 from typing import IO, Optional
 
 # ---------------------------------------------------------------------------
+# Content-capture defaults (ADR-011)
+# ---------------------------------------------------------------------------
+
+# Prompts and tool *details* are captured; tool *output* is not. Tool output is
+# the broadest surface — file bodies, shell stdout, anything pasted into a
+# session — so it is opt-in.
+#
+# Single source of truth. The setup wizard imports this to decide each prompt's
+# default AND to decide which answers are worth persisting: it writes only the
+# keys that deviate from these values, so a future change here reaches existing
+# installs instead of being pinned by a stale config.json. Do not inline these
+# booleans anywhere else.
+LOG_FLAG_DEFAULTS = {
+    "prompts": True,
+    "tool_details": True,
+    "tool_content": False,
+}
+
+# Stamped into the stored `logging:` block as `_v`. Bump when the meaning of a
+# stored block changes; a block without a matching `_v` is re-prompted once.
+#
+# v2 (2026-08-07): v1 blocks were written by a wizard that prompted `[Y/n]` for
+# tool content and persisted every answer, so accepting the defaults stored
+# `"tool_content": true` — which outranks LOG_FLAG_DEFAULTS. Installers skip the
+# wizard when a block exists, so v1 machines can never be repaired by
+# re-installing. The version bump is what forces the one re-prompt that fixes
+# them. Do not remove it without a replacement migration.
+LOG_CONFIG_VERSION = 2
+
+# ---------------------------------------------------------------------------
 # Environment helper — reads tracing-related env vars with defaults
 # ---------------------------------------------------------------------------
 
@@ -203,15 +233,19 @@ class _Env:
 
     @property
     def log_prompts(self) -> bool:
-        return self._resolve_log_flag("ATATUS_LOG_PROMPTS", "prompts", True)
+        return self._resolve_log_flag("ATATUS_LOG_PROMPTS", "prompts", LOG_FLAG_DEFAULTS["prompts"])
 
     @property
     def log_tool_details(self) -> bool:
-        return self._resolve_log_flag("ATATUS_LOG_TOOL_DETAILS", "tool_details", True)
+        return self._resolve_log_flag(
+            "ATATUS_LOG_TOOL_DETAILS", "tool_details", LOG_FLAG_DEFAULTS["tool_details"]
+        )
 
     @property
     def log_tool_content(self) -> bool:
-        return self._resolve_log_flag("ATATUS_LOG_TOOL_CONTENT", "tool_content", False)
+        return self._resolve_log_flag(
+            "ATATUS_LOG_TOOL_CONTENT", "tool_content", LOG_FLAG_DEFAULTS["tool_content"]
+        )
 
 
 env = _Env()

@@ -23,6 +23,7 @@ from core.setup import (
     info,
     merge_harness_entry,
     prompt_backend,
+    needs_content_logging_prompt,
     prompt_content_logging,
     prompt_project_name,
     prompt_user_id,
@@ -143,9 +144,9 @@ def install() -> None:
         project_name = prompt_project_name(existing_entry.get("project_name") or "")
         merge_harness_entry(HARNESS_NAME, project_name)
 
-    # Logging settings are global. Prompt only if no `logging:` block exists yet —
-    # subsequent harness installs reuse what the first wizard wrote.
-    if (config.get("logging") if config else None) is None:
+    # Logging settings are global. Prompt on a fresh install, or once more when
+    # the stored block predates LOG_CONFIG_VERSION (see needs_content_logging_prompt).
+    if needs_content_logging_prompt(config):
         logging_block = prompt_content_logging()
         write_logging_config(logging_block)
     else:

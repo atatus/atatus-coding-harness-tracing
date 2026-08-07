@@ -10,7 +10,7 @@ from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
-from core.common import DEFAULT_OTLP_ENDPOINT
+from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION, LOG_FLAG_DEFAULTS
 from core.config import delete_value, load_config, save_config, set_value
 
 # ---------------------------------------------------------------------------
@@ -252,33 +252,97 @@ def prompt_project_name(default: str = "") -> str:
     sys.exit(1)
 
 
+def _prompt_bool(question: str, default: bool) -> bool:
+    """Ask a yes/no question whose hint and blank-line answer follow `default`.
+
+    A blank line means "accept the default", so the parse has to be asymmetric:
+    with a True default only an explicit no flips it, and with a False default
+    only an explicit yes does. Getting this backwards is how the tool-content
+    default was silently defeated before — see the note in
+    `prompt_content_logging`.
+    """
+    hint = "[Y/n]" if default else "[y/N]"
+    answer = input(f"  {question} {hint}: ").strip().lower()
+    if default:
+        return answer not in ("n", "no")
+    return answer in ("y", "yes")
+
+
 def prompt_content_logging() -> dict:
     """Prompt for content logging settings. Returns the dict to write under `logging:`.
 
-    All three default to True to match the kit's existing capture-everything
-    behavior. Users opt out per category.
+    Defaults come from `LOG_FLAG_DEFAULTS` (ADR-011): prompts and tool *details*
+    on, tool *output* off.
+
+    **Only answers that deviate from those defaults are returned**, and
+    `write_logging_config` replaces the whole `logging:` block, so accepting a
+    default removes any previously-stored override. That is what makes a
+    re-install repair an existing config.json rather than preserve it.
+
+    Prior bug (fixed 2026-08-07): every answer was written explicitly, and the
+    tool-content prompt was `[Y/n]`. Pressing Enter therefore wrote
+    `"tool_content": true` into config.json, which outranks the code default in
+    `_resolve_log_flag` — so ADR-011 was never in effect on an installed
+    machine. Both halves matter: keep the hint tied to the default, and keep
+    defaulted answers out of the file.
     """
     print("")
     if sys.stdout.isatty() and os.name != "nt":
         print("\033[1;33mSecurity:\033[0m Traces can contain sensitive data — credentials, PII, file contents.")
     else:
         print("Security: Traces can contain sensitive data — credentials, PII, file contents.")
-    print("All content is logged by default. Opt out per category to match your security needs.")
+    print("Prompts and tool details are captured by default; tool output is not.")
+    print("Press Enter to accept each default.")
     print("")
 
-    log_prompts = input("  Log user prompts? [Y/n]: ").strip().lower()
-    log_tool_details = input("  Log what tools were asked to do (commands, file paths, URLs)? [Y/n]: ").strip().lower()
-    log_tool_content = input("  Log what tools returned (file contents, command output)? [Y/n]: ").strip().lower()
-
-    return {
-        "prompts": log_prompts not in ("n", "no"),
-        "tool_details": log_tool_details not in ("n", "no"),
-        "tool_content": log_tool_content not in ("n", "no"),
+    answers = {
+        "prompts": _prompt_bool("Log user prompts?", LOG_FLAG_DEFAULTS["prompts"]),
+        "tool_details": _prompt_bool(
+            "Log what tools were asked to do (commands, file paths, URLs)?",
+            LOG_FLAG_DEFAULTS["tool_details"],
+        ),
+        "tool_content": _prompt_bool(
+            "Log what tools returned (file contents, command output)?",
+            LOG_FLAG_DEFAULTS["tool_content"],
+        ),
     }
+
+    deviations = {k: v for k, v in answers.items() if v != LOG_FLAG_DEFAULTS[k]}
+    return {"_v": LOG_CONFIG_VERSION, **deviations}
+
+
+def needs_content_logging_prompt(config: Optional[dict]) -> bool:
+    """Whether the content-logging wizard should run.
+
+    True when no `logging:` block exists (fresh install) **or** the stored block
+    predates `LOG_CONFIG_VERSION`. The second case is the repair path: the
+    installers deliberately skip this wizard once a block exists, so without a
+    version check a machine carrying a v1 block keeps its bad `tool_content`
+    override through every future re-install.
+
+    Side effect by design: prints a one-line notice when re-prompting over a
+    stale block, so the user understands why a question they already answered is
+    coming back. Keeping it here is what lets all eight installers share one
+    identical call site.
+    """
+    logging_block = (config or {}).get("logging")
+    if not isinstance(logging_block, dict):
+        return True
+    if logging_block.get("_v") == LOG_CONFIG_VERSION:
+        return False
+    info("Content-logging settings need re-confirming — the defaults changed (tool output is now off unless you opt in).")
+    return True
 
 
 def write_logging_config(logging_block: dict, config_path: str | None = None) -> None:
-    """Merge a logging block into the top-level `logging:` key in config.json."""
+    """Write the top-level `logging:` key in config.json.
+
+    **Replaces** the block rather than merging into it — `set_value` assigns.
+    That is load-bearing: `prompt_content_logging` returns only deviations from
+    `LOG_FLAG_DEFAULTS`, so replacement is what clears a stale override when a
+    user re-runs setup and accepts the default. A merge here would make those
+    overrides permanent.
+    """
     config = load_config(config_path)
     if not config:
         config = {}

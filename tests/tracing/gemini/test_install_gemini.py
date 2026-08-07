@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from core.common import LOG_CONFIG_VERSION
+
 import pytest
 
 import tracing.gemini.constants as _gc
@@ -298,7 +300,10 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
 
 
 class TestInstallExistingLoggingBlockSkipsPrompt:
-    """When config.json already has a logging block, skip the logging prompt."""
+    """When config.json already has a **current-version** logging block, skip the
+    prompt. A block without a matching `_v` is re-prompted instead — that is the
+    repair path for machines carrying the pre-2026-08-07 `tool_content: true`
+    override, covered in tests/core/test_setup.py::TestNeedsContentLoggingPrompt."""
 
     def test_existing_logging_not_reprompted(self, cwd_tmp, monkeypatch):
         config_dir = cwd_tmp / ".atatus" / "harness"
@@ -306,7 +311,7 @@ class TestInstallExistingLoggingBlockSkipsPrompt:
         config_path = config_dir / "config.json"
 
         seed_config = {
-            "logging": {"prompts": False, "tool_details": True, "tool_content": False}
+            "logging": {"_v": LOG_CONFIG_VERSION, "prompts": False, "tool_details": True, "tool_content": False}
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 

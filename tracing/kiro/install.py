@@ -18,6 +18,7 @@ from core.setup import (
     info,
     merge_harness_entry,
     prompt_backend,
+    needs_content_logging_prompt,
     prompt_content_logging,
     prompt_project_name,
     prompt_user_id,
@@ -71,7 +72,7 @@ def install(with_skills: bool = False, agent_name: str | None = None) -> None:
         project_name = prompt_project_name(get_value(config, f"harnesses.{HARNESS_NAME}.project_name") or "")
         merge_harness_entry(HARNESS_NAME, project_name)
 
-    if (config.get("logging") if config else None) is None:
+    if needs_content_logging_prompt(config):
         logging_block = prompt_content_logging()
         write_logging_config(logging_block)
     else:
