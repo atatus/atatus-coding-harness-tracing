@@ -61,14 +61,14 @@ def install(with_skills: bool = False, agent_name: str | None = None) -> None:
     if not existing_entry:
         existing_harnesses = config.get("harnesses") if config else None
         target, credentials = prompt_backend(existing_harnesses)
-        project_name = prompt_project_name(HARNESS_NAME)
+        project_name = prompt_project_name()
         user_id = prompt_user_id()
         if not dry_run():
             write_config(target, credentials, HARNESS_NAME, project_name, user_id=user_id)
         else:
             info("would write config.json with backend credentials")
     else:
-        project_name = prompt_project_name(get_value(config, f"harnesses.{HARNESS_NAME}.project_name") or HARNESS_NAME)
+        project_name = prompt_project_name(get_value(config, f"harnesses.{HARNESS_NAME}.project_name") or "")
         merge_harness_entry(HARNESS_NAME, project_name)
 
     if (config.get("logging") if config else None) is None:

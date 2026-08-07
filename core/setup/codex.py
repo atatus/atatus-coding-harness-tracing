@@ -73,8 +73,8 @@ def _run() -> None:
     config = load_config()
     existing_entry = get_value(config, "harnesses.codex")
 
-    # Project name
-    project_name = prompt_project_name("codex")
+    # Project name — offer the stored one on re-install, require a fresh one otherwise
+    project_name = prompt_project_name((existing_entry or {}).get("project_name") or "")
 
     if existing_entry:
         target = existing_entry.get("target", "")

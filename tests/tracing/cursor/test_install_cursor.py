@@ -98,7 +98,7 @@ def _mock_prompts(monkeypatch, backend=None):
         "prompt_backend",
         lambda existing_harnesses=None: backend,
     )
-    monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default: default)
+    monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": default or "cursor")
     monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         cursor_install,
@@ -209,7 +209,7 @@ class TestCopyFrom:
             return ATATUS_BACKEND
 
         monkeypatch.setattr(cursor_install, "prompt_backend", fake_prompt_backend)
-        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default: default)
+        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": default or "cursor")
         monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(
             cursor_install,
@@ -261,7 +261,7 @@ class TestExistingEntry:
             return ATATUS_BACKEND
 
         monkeypatch.setattr(cursor_install, "prompt_backend", fail_prompt_backend)
-        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default: "my-cursor")
+        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": "my-cursor")
         monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(
             cursor_install,

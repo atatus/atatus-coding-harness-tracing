@@ -853,6 +853,75 @@ class TestBuildMultiSpan:
         assert scope["name"] == "override-scope"
 
 
+# ── Emit-time hygiene (M4.1) ──────────────────────────────────────────────
+
+
+class TestNormalizeModelName:
+    """Claude Code reports a context-window suffix that breaks exact-match cost
+    lookup: an unstripped `claude-sonnet-4-5[1m]` silently prices at $0."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("claude-sonnet-4-5[1m]", "claude-sonnet-4-5"),
+            ("claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
+            ("  claude-opus-4 [200k] ", "claude-opus-4"),
+            ("gpt-4o", "gpt-4o"),
+            ("[1m]", ""),
+            ("", ""),
+        ],
+    )
+    def test_suffix_stripped(self, raw, expected):
+        from core.common import normalize_model_name
+
+        assert normalize_model_name(raw) == expected
+
+    def test_span_omits_model_that_is_only_a_suffix(self):
+        span = build_span("t", "LLM", "a" * 16, "b" * 32, "", 1, 2, {"llm.model_name": "[1m]"})
+        keys = {a["key"] for a in span["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
+        assert "llm.model_name" not in keys
+
+
+class TestStripSystemReminders:
+    def test_removes_block(self):
+        from core.common import strip_system_reminders
+
+        assert strip_system_reminders("hi <system-reminder>x</system-reminder> there") == "hi  there"
+
+    def test_removes_multiple(self):
+        from core.common import strip_system_reminders
+
+        text = "a<system-reminder>x</system-reminder>b<system-reminder>y</system-reminder>c"
+        assert strip_system_reminders(text) == "abc"
+
+    def test_unclosed_tag_left_alone(self):
+        """An unterminated block must not swallow the rest of the prompt."""
+        from core.common import strip_system_reminders
+
+        text = "keep me <system-reminder>oops"
+        assert strip_system_reminders(text) == text
+
+    def test_text_without_reminders_is_untouched(self):
+        """Regression: an unconditional trim ate trailing newlines from tool
+        output that never contained a reminder."""
+        from core.common import strip_system_reminders
+
+        text = "Directory listing:\n  foo\n  bar.txt\n"
+        assert strip_system_reminders(text) == text
+
+
+class TestRedactedPlaceholder:
+    def test_literal_redacted_is_dropped_not_stored(self):
+        span = build_span(
+            "t", "LLM", "a" * 16, "b" * 32, "", 1, 2,
+            {"input.value": "<REDACTED>", "output.value": "real output"},
+        )
+        attrs = {a["key"]: list(a["value"].values())[0]
+                 for a in span["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
+        assert "input.value" not in attrs
+        assert attrs["output.value"] == "real output"
+
+
 # ── EnvConfig property tests ──────────────────────────────────────────────
 
 
@@ -901,11 +970,12 @@ class TestLoggingFlagPrecedence:
         # Drop the cached value so the next access re-reads.
         env.__dict__.pop("_logging_config", None)
 
-    def test_default_true_when_nothing_set(self, monkeypatch):
+    def test_defaults_when_nothing_set(self, monkeypatch):
+        """ADR-011: prompts and tool details on, tool CONTENT off."""
         self._patch_config(monkeypatch, None)
         assert env.log_prompts is True
         assert env.log_tool_details is True
-        assert env.log_tool_content is True
+        assert env.log_tool_content is False
 
     def test_config_overrides_default(self, monkeypatch):
         self._patch_config(monkeypatch, {"prompts": False, "tool_details": False, "tool_content": False})
@@ -924,10 +994,24 @@ class TestLoggingFlagPrecedence:
         assert env.log_tool_details is False
 
     def test_partial_config_falls_through_to_default(self, monkeypatch):
-        # Only `prompts` configured; the other two flags use the True default.
+        # Only `prompts` configured; the other two fall through to their own
+        # defaults -- tool_details True, tool_content False (ADR-011).
         self._patch_config(monkeypatch, {"prompts": False})
         assert env.log_prompts is False
         assert env.log_tool_details is True
+        assert env.log_tool_content is False
+
+    def test_tool_content_is_opt_in(self, monkeypatch):
+        """Regression guard for ADR-011: tool output must not be captured
+        unless explicitly enabled, by env or by config."""
+        self._patch_config(monkeypatch, None)
+        assert env.log_tool_content is False
+
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        assert env.log_tool_content is True
+        monkeypatch.delenv("ATATUS_LOG_TOOL_CONTENT")
+
+        self._patch_config(monkeypatch, {"tool_content": True})
         assert env.log_tool_content is True
 
 

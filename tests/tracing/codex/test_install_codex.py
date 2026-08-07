@@ -71,7 +71,7 @@ def _stub_logging_prompts(monkeypatch):
 @pytest.fixture()
 def mock_prompts(monkeypatch):
     """Mock interactive prompts to return atatus defaults."""
-    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
+    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
     monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         codex_install,
@@ -82,7 +82,7 @@ def mock_prompts(monkeypatch):
 
 def _mock_prompts_atatus(monkeypatch):
     """Mock interactive prompts to return atatus defaults."""
-    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
+    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
     monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         codex_install,
@@ -236,7 +236,7 @@ class TestInstall:
             )
         )
 
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: "new-name")
+        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": "new-name")
         monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
 
         codex_install.install()
@@ -277,7 +277,7 @@ class TestInstall:
                 },
             )
 
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
+        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
         monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(codex_install, "prompt_backend", fake_prompt_backend)
 
@@ -306,7 +306,7 @@ class TestInstall:
         assert "hooks" not in data
 
     def test_install_with_user_id(self, fake_home, monkeypatch):
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default: default)
+        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
         monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "test-user")
         monkeypatch.setattr(
             codex_install,

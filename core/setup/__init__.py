@@ -225,11 +225,31 @@ def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
     return None
 
 
-def prompt_project_name(default: str) -> str:
-    """Prompt for project name. Returns default if blank."""
+def prompt_project_name(default: str = "") -> str:
+    """Prompt for the Atatus project name.
+
+    ADR-013: **the user-supplied name IS the grouping key.** The receiver
+    auto-creates one project per ``service.name``, so a silent default means
+    every install of a given harness collapses into a single shared project --
+    every engineer's sessions in one bucket, which is not recoverable after the
+    fact.
+
+    So a fresh install has **no default** and an empty answer is rejected. A
+    re-install passes the name already chosen, which may be accepted with a
+    blank line; that is a confirmation, not a silent default.
+    """
     print("")
-    name = input(f"Project name [{default}]: ").strip()
-    return name if name else default
+    if default:
+        name = input(f"Project name [{default}]: ").strip()
+        return name or default
+
+    for _ in range(3):
+        name = input("Project name (required): ").strip()
+        if name:
+            return name
+        err("A project name is required — it is how your spans are grouped in Atatus.")
+    err("No project name given after 3 attempts. Run setup again.")
+    sys.exit(1)
 
 
 def prompt_content_logging() -> dict:

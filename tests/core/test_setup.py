@@ -135,6 +135,36 @@ class TestPromptBackend:
         assert mock_input.call_count == 1
 
 
+class TestPromptProjectName:
+    """ADR-013: the user-supplied name is the grouping key, so a fresh install
+    must not silently default. A re-install may confirm the stored name."""
+
+    def test_fresh_install_rejects_blank(self):
+        from core.setup import prompt_project_name
+
+        with patch("builtins.input", side_effect=["", "", ""]):
+            with pytest.raises(SystemExit):
+                prompt_project_name()
+
+    def test_fresh_install_reprompts_then_accepts(self):
+        from core.setup import prompt_project_name
+
+        with patch("builtins.input", side_effect=["", "  ", "team-payments"]):
+            assert prompt_project_name() == "team-payments"
+
+    def test_reinstall_blank_confirms_stored_name(self):
+        from core.setup import prompt_project_name
+
+        with patch("builtins.input", side_effect=[""]):
+            assert prompt_project_name("existing-project") == "existing-project"
+
+    def test_reinstall_can_be_overridden(self):
+        from core.setup import prompt_project_name
+
+        with patch("builtins.input", side_effect=["renamed"]):
+            assert prompt_project_name("existing-project") == "renamed"
+
+
 class TestPromptUserId:
     """Tests for prompt_user_id()."""
 
@@ -423,10 +453,10 @@ class TestClaudeSetup:
         """Full Claude _run() flow for Atatus backend writes settings.json and config.json."""
         config_path, settings_file = self._setup_install_env(tmp_path, monkeypatch)
 
-        # Inputs: endpoint=default, project_name=default, user_id="",
-        # then three content-logging prompts (defaults: Y, N, N).
-        # The licence key comes from getpass, not input.
-        inputs = iter(["", "", "", "", "", ""])
+        # Inputs: endpoint=default, project_name (REQUIRED on a fresh install --
+        # ADR-013 rejects a blank), user_id="", then three content-logging
+        # prompts (defaults: Y, N, N). The licence key comes from getpass.
+        inputs = iter(["", "my-project", "", "", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
 
@@ -436,12 +466,12 @@ class TestClaudeSetup:
 
         config = json.loads(config_path.read_text())
         assert config["harnesses"]["claude-code"]["target"] == "atatus"
-        assert config["harnesses"]["claude-code"]["project_name"] == "claude-code"
+        assert config["harnesses"]["claude-code"]["project_name"] == "my-project"
 
         # settings.json should have hooks and env vars
         result = json.loads(settings_file.read_text())
         assert result["env"]["ATATUS_TRACE_ENABLED"] == "true"
-        assert result["env"]["ATATUS_PROJECT_NAME"] == "claude-code"
+        assert result["env"]["ATATUS_PROJECT_NAME"] == "my-project"
         assert len(result.get("hooks", {})) == 16
 
 
@@ -515,8 +545,9 @@ class TestCodexRunFlow:
         # Patch Path.home() to use tmp_path
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        # Inputs: project_name=default, endpoint=default, user_id="" (key via getpass)
-        inputs = iter(["", "", ""])
+        # Inputs: project_name (required on fresh install), endpoint=default,
+        # user_id="" (key via getpass)
+        inputs = iter(["my-project", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
         monkeypatch.setattr(
@@ -539,7 +570,7 @@ class TestCodexRunFlow:
         # config.json written
         config = json.loads(Path(config_path).read_text())
         assert config["harnesses"]["codex"]["target"] == "atatus"
-        assert config["harnesses"]["codex"]["project_name"] == "codex"
+        assert config["harnesses"]["codex"]["project_name"] == "my-project"
 
         # atatus-env.sh written
         env_file = codex_dir / "atatus-env.sh"
@@ -714,9 +745,9 @@ class TestCursorSetup:
         """Cursor _run() with no existing config prompts and writes config.json."""
         config_path = self._patch_cursor_install(tmp_path, monkeypatch)
 
-        # Inputs: endpoint=default, project_name=default, user_id="",
-        # then three content-logging prompts (defaults). Key comes via getpass.
-        inputs = iter(["", "", "", "", "", ""])
+        # Inputs: endpoint=default, project_name (required on fresh install),
+        # user_id="", then three content-logging prompts. Key via getpass.
+        inputs = iter(["", "my-project", "", "", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
 
@@ -726,7 +757,7 @@ class TestCursorSetup:
 
         config = json.loads(Path(config_path).read_text())
         assert config["harnesses"]["cursor"]["target"] == "atatus"
-        assert config["harnesses"]["cursor"]["project_name"] == "cursor"
+        assert config["harnesses"]["cursor"]["project_name"] == "my-project"
 
     def test_run_existing_config_skips_prompts(self, tmp_path, monkeypatch):
         """Cursor _run() with existing cursor entry skips backend prompts."""

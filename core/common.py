@@ -211,7 +211,7 @@ class _Env:
 
     @property
     def log_tool_content(self) -> bool:
-        return self._resolve_log_flag("ATATUS_LOG_TOOL_CONTENT", "tool_content", True)
+        return self._resolve_log_flag("ATATUS_LOG_TOOL_CONTENT", "tool_content", False)
 
 
 env = _Env()
@@ -951,6 +951,96 @@ def _attrs_to_otlp(attrs: dict) -> list:
     return [{"key": k, "value": _to_otlp_attr_value(v)} for k, v in attrs.items()]
 
 
+# ---------------------------------------------------------------------------
+# Emit-time hygiene (M4.1)
+#
+# Ported from the Arize collector, which needed these because it read Claude
+# Code's native telemetry. They apply to transcript-derived data too, and are
+# also implemented defensively in the atatus-go consumer -- either layer alone
+# would do, but the agent is the cheaper place to fix it and the consumer
+# protects producers we do not control.
+#
+# Applied centrally in build_span() rather than at each emit site: there are 16
+# places across 9 harness handlers that set a model name, and a rule enforced in
+# one of them is a rule that silently lapses in the other fifteen.
+# ---------------------------------------------------------------------------
+
+#: Claude Code appends a context-window marker to the model id it reports, e.g.
+#: ``claude-sonnet-4-5[1m]``. Cost lookup is an exact-string match against the
+#: pricing table, so the suffix makes the model unknown and the span prices at
+#: $0 -- silently, because a missing price is indistinguishable from a free turn.
+_REDACTED_PLACEHOLDER = "<REDACTED>"
+
+
+def normalize_model_name(model: str) -> str:
+    """Strip a bracketed suffix from a wire model id.
+
+    ``claude-sonnet-4-5[1m]`` -> ``claude-sonnet-4-5``. Mirrors the collector's
+    ``normalizeModelName`` (mapper.go:221-227).
+    """
+    model = (model or "").strip()
+    idx = model.find("[")
+    if idx >= 0:
+        model = model[:idx].strip()
+    return model
+
+
+def strip_system_reminders(text: str) -> str:
+    """Remove ``<system-reminder>...</system-reminder>`` blocks from *text*.
+
+    Claude Code injects these into the user turn; they are harness scaffolding,
+    not something the user typed, and they dominate prompt text if kept. Mirrors
+    the collector's ``stripSystemReminderText`` (outputs.go:518-534), including
+    its tolerance of an unclosed tag -- an unterminated block is left alone
+    rather than swallowing the rest of the prompt.
+    """
+    text = text or ""
+    start_tag, end_tag = "<system-reminder>", "</system-reminder>"
+    removed = False
+    while True:
+        start = text.find(start_tag)
+        if start < 0:
+            break
+        end = text.find(end_tag, start)
+        if end < 0:
+            break
+        text = text[:start] + text[end + len(end_tag) :]
+        removed = True
+    # Trim only when something was actually removed. The collector trims
+    # unconditionally, but it only ever called this on user prompt text -- we
+    # apply it to every span's input/output, so an unconditional strip would
+    # silently eat trailing newlines from tool output that never contained a
+    # reminder at all.
+    return text.strip() if removed else text
+
+
+def _apply_hygiene(attrs: dict) -> dict:
+    """Normalize model ids and clean prompt text on an outgoing attribute set."""
+    model = attrs.get("llm.model_name")
+    if isinstance(model, str):
+        normalized = normalize_model_name(model)
+        if normalized:
+            attrs["llm.model_name"] = normalized
+        else:
+            # An all-suffix or blank model is not a model; omitting it keeps
+            # "unknown" distinguishable from "known and unpriced" downstream.
+            attrs.pop("llm.model_name", None)
+
+    for key in ("input.value", "output.value"):
+        val = attrs.get(key)
+        if not isinstance(val, str):
+            continue
+        # The collector treats a bare <REDACTED> as absent rather than storing
+        # the literal string as if it were content (mapper.go:82).
+        if val.strip() == _REDACTED_PLACEHOLDER:
+            attrs.pop(key, None)
+            continue
+        cleaned = strip_system_reminders(val)
+        if cleaned != val:
+            attrs[key] = cleaned
+    return attrs
+
+
 def build_span(
     name: str,
     kind: str,
@@ -996,7 +1086,7 @@ def build_span(
         "kind": kind_value,
         "startTimeUnixNano": f"{start}000000",
         "endTimeUnixNano": f"{end}000000",
-        "attributes": _attrs_to_otlp(attrs),
+        "attributes": _attrs_to_otlp(_apply_hygiene(attrs)),
         "status": status,
     }
 

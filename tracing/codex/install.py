@@ -219,7 +219,7 @@ def install(with_skills: bool = False) -> None:
     ensure_shared_runtime()
     config = load_config(str(CONFIG_FILE))
     existing_entry = get_value(config, f"harnesses.{HARNESS_NAME}")
-    project_name = prompt_project_name("codex")
+    project_name = prompt_project_name()
 
     if existing_entry:
         info(f"Reusing existing backend: {existing_entry.get('target')}")

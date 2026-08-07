@@ -69,7 +69,7 @@ def _mock_prompts(monkeypatch, backend=None):
         "prompt_backend",
         lambda existing_harnesses=None: backend,
     )
-    monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
+    monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
     monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
     monkeypatch.setattr(
         _install,
@@ -396,7 +396,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
             return ATATUS_BACKEND
 
         monkeypatch.setattr(_install, "prompt_backend", fake_prompt_backend)
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
+        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
         monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(
             _install,
@@ -440,7 +440,7 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default: "my-omp")
+        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": "my-omp")
         monkeypatch.setattr(
             _install,
             "prompt_content_logging",
@@ -495,7 +495,7 @@ class TestInstallPromptsForLogging:
         mock_write_logging = MagicMock()
 
         monkeypatch.setattr(_install, "prompt_backend", lambda existing_harnesses=None: ATATUS_BACKEND)
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
+        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
         monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
         monkeypatch.setattr(_install, "prompt_content_logging", mock_prompt_logging)
         monkeypatch.setattr(_install, "write_logging_config", mock_write_logging)

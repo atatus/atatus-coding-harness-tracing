@@ -48,13 +48,13 @@ def install(with_skills: bool = False) -> None:
 
     if existing_entry:
         # Already configured — just let user update project_name.
-        project_name = prompt_project_name(existing_entry.get("project_name") or HARNESS_NAME)
+        project_name = prompt_project_name(existing_entry.get("project_name") or "")
         merge_harness_entry(HARNESS_NAME, project_name)
     else:
         # New install. Pass existing harnesses so prompt_backend can offer copy-from.
         existing_harnesses = config.get("harnesses", {})
         target, credentials = prompt_backend(existing_harnesses=existing_harnesses)
-        project_name = prompt_project_name(HARNESS_NAME)
+        project_name = prompt_project_name()
         user_id = prompt_user_id()
         if not dry_run():
             write_config(
