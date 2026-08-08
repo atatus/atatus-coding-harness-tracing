@@ -84,17 +84,13 @@ When you're ready to open a pull request:
 
 ## Code review expectations
 
-A maintainer will review your PR. Respond to feedback by pushing updates to the same branch — the discussion stays in the PR thread. Both CI and the CLA check must pass before a maintainer can merge.
+A maintainer will review your PR. Respond to feedback by pushing updates to the same branch — the discussion stays in the PR thread. CI must pass before a maintainer can merge.
 
-## Contributor License Agreement
+## Licensing of contributions
 
-First-time contributors need to sign our CLA. After you open your first PR, the CLA bot will leave a comment with a link to the CLA. To sign, comment the following on your PR exactly:
-
-```
-I have read the CLA Document and I hereby sign the CLA.
-```
-
-A bot tracks signatures, so you only need to do this once across all Atatus repos. See [`CLA.md`](CLA.md) for the full text.
+There is no separate agreement to sign. Contributions are accepted under the project's
+[Apache-2.0 licence](LICENSE) — as §5 of that licence provides, anything you intentionally submit
+for inclusion is licensed under those same terms, unless you state otherwise.
 
 ## Code of Conduct
 
