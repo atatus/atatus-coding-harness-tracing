@@ -267,6 +267,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         attrs,
         SERVICE_NAME,
         SCOPE_NAME,
+        status_code=2,
+        status_message=error_text or "tool_failure",
     )
     send_span(span)
 
@@ -760,6 +762,8 @@ def _handle_stop_failure(input_json: dict) -> None:
         attrs,
         SERVICE_NAME,
         SCOPE_NAME,
+        status_code=2,
+        status_message=error_type or "turn_failure",
     )
     send_span(span)
 
