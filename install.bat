@@ -8,10 +8,10 @@ REM   install.bat uninstall [harness]
 REM   install.bat update
 
 REM --- Constants ---
-set "REPO_URL=https://github.com/atatus/coding-harness-tracing.git"
+set "REPO_URL=https://github.com/atatus/atatus-coding-harness-tracing.git"
 if not defined ATATUS_INSTALL_BRANCH set "ATATUS_INSTALL_BRANCH=main"
 set "INSTALL_BRANCH=%ATATUS_INSTALL_BRANCH%"
-set "TARBALL_URL=https://github.com/atatus/coding-harness-tracing/archive/refs/heads/%INSTALL_BRANCH%.tar.gz"
+set "TARBALL_URL=https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/%INSTALL_BRANCH%.tar.gz"
 set "INSTALL_DIR=%USERPROFILE%\.atatus\harness"
 set "VENV_DIR=%INSTALL_DIR%\venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
@@ -27,7 +27,7 @@ if /i "%~1"=="-h"        goto :usage
 if /i "%~1"=="--help"    goto :usage
 if /i "%~1"=="help"      goto :usage
 if /i "%~1"=="--with-skills" ( set "WITH_SKILLS=--with-skills" & shift & goto :parse_args )
-if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/atatus/coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
+if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
 for %%C in (claude codex copilot cursor gemini kiro opencode omp) do if /i "%~1"=="%%C" ( set "COMMAND=%%C" & shift & goto :parse_args )
 if /i "%~1"=="update" ( set "COMMAND=update" & shift & goto :parse_args )
 if /i "%~1"=="uninstall" (

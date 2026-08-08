@@ -339,7 +339,7 @@ class TestConstants:
         self.text = _read_install_sh()
 
     def test_repo_url(self):
-        assert "https://github.com/atatus/coding-harness-tracing.git" in self.text
+        assert "https://github.com/atatus/atatus-coding-harness-tracing.git" in self.text
 
     def test_install_dir(self):
         assert "${HOME}/.atatus/harness" in self.text

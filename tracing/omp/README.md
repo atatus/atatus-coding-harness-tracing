@@ -38,13 +38,13 @@ Pass `--with-skills` to also symlink the `manage-omp-tracing` skill into the cur
 Install:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- omp
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- omp
 ```
 
 Uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- uninstall omp
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- uninstall omp
 ```
 
 #### Windows (PowerShell)
@@ -52,22 +52,22 @@ curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/i
 Install:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat omp
 ```
 
 Uninstall:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat uninstall omp
 ```
 
 ### Local setup
 
 ```bash
-git clone https://github.com/atatus/coding-harness-tracing.git
-cd coding-harness-tracing
+git clone https://github.com/atatus/atatus-coding-harness-tracing.git
+cd atatus-coding-harness-tracing
 ```
 
 **macOS / Linux**

@@ -14,7 +14,7 @@
       "description": "Automatic tracing of Claude Code sessions to Atatus with OpenInference spans",
       "version": "1.0.1",
       "homepage": "https://atatus.com",
-      "repository": "https://github.com/atatus/coding-harness-tracing",
+      "repository": "https://github.com/atatus/atatus-coding-harness-tracing",
       "license": "MIT",
       "keywords": [
         "tracing",

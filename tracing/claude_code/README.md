@@ -32,7 +32,7 @@ Env values take precedence over `~/.atatus/harness/config.json`.
 Install:
 
 ```bash
-claude plugin marketplace add atatus/coding-harness-tracing
+claude plugin marketplace add atatus/atatus-coding-harness-tracing
 claude plugin install claude-code-tracing@coding-harness-tracing
 ```
 
@@ -40,7 +40,7 @@ Uninstall:
 
 ```bash
 claude plugin uninstall claude-code-tracing@coding-harness-tracing
-claude plugin marketplace remove atatus/coding-harness-tracing
+claude plugin marketplace remove atatus/atatus-coding-harness-tracing
 ```
 
 ### Remote setup
@@ -50,13 +50,13 @@ claude plugin marketplace remove atatus/coding-harness-tracing
 Install:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- claude
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- claude
 ```
 
 Uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- uninstall claude
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- uninstall claude
 ```
 
 #### Windows (PowerShell)
@@ -64,22 +64,22 @@ curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/i
 Install:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat claude
 ```
 
 Uninstall:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat uninstall claude
 ```
 
 ### Local setup
 
 ```bash
-git clone https://github.com/atatus/coding-harness-tracing.git
-cd coding-harness-tracing
+git clone https://github.com/atatus/atatus-coding-harness-tracing.git
+cd atatus-coding-harness-tracing
 ```
 
 **macOS / Linux**

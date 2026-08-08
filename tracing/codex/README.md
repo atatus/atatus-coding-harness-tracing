@@ -14,13 +14,13 @@ Pass `--with-skills` to also symlink the `manage-codex-tracing` skill into the c
 Install:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- codex
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- codex
 ```
 
 Uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.sh | bash -s -- uninstall codex
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- uninstall codex
 ```
 
 #### Windows (PowerShell)
@@ -28,22 +28,22 @@ curl -sSL https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/i
 Install:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat codex
 ```
 
 Uninstall:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/atatus/coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
 & $env:TEMP\install.bat uninstall codex
 ```
 
 ### Local setup
 
 ```bash
-git clone https://github.com/atatus/coding-harness-tracing.git
-cd coding-harness-tracing
+git clone https://github.com/atatus/atatus-coding-harness-tracing.git
+cd atatus-coding-harness-tracing
 ```
 
 **macOS / Linux**

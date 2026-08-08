@@ -109,7 +109,7 @@ This section configures:
 Ask the user: **"Where is the Codex tracing directory located?"**
 
 Common locations:
-- If cloned: `./coding-harness-tracing/tracing/codex`
+- If cloned: `./atatus-coding-harness-tracing/tracing/codex`
 - If installed via the curl installer: `~/.atatus/harness/tracing/codex`
 
 Store this as `INTEGRATION_PATH` for the hook config.

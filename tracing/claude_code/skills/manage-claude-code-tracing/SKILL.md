@@ -181,9 +181,9 @@ Ask the user: **"Have you already installed this plugin via the Claude Code CLI?
 
 **If no:** Tell them to clone the repo into their project:
 ```bash
-git clone https://github.com/atatus/coding-harness-tracing.git
+git clone https://github.com/atatus/atatus-coding-harness-tracing.git
 ```
-The plugin path will be `./coding-harness-tracing/tracing/claude_code`.
+The plugin path will be `./atatus-coding-harness-tracing/tracing/claude_code`.
 
 > Tip: `tracing.claude_code.agent_sdk.claude_options()` returns a pre-configured `ClaudeAgentOptions` with the plugin path and `setting_sources=["user"]` already wired in, so users can skip the manual plumbing in step 5 below when the harness is installed via `install.sh`.
 
@@ -222,7 +222,7 @@ Give the user the appropriate snippet to add to their application. They must use
 ```python
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-PLUGIN_PATH = "./coding-harness-tracing/tracing/claude_code"  # or ~/.atatus/harness/tracing/claude_code if installed via install.sh
+PLUGIN_PATH = "./atatus-coding-harness-tracing/tracing/claude_code"  # or ~/.atatus/harness/tracing/claude_code if installed via install.sh
 
 options = ClaudeAgentOptions(
     plugins=[{"type": "local", "path": PLUGIN_PATH}],
@@ -238,7 +238,7 @@ async with ClaudeSDKClient(options=options) as client:
 ```typescript
 import { ClaudeSDKClient } from "@anthropic-ai/claude-agent-sdk";
 
-const PLUGIN_PATH = "./coding-harness-tracing/tracing/claude_code"; // or ~/.atatus/harness/tracing/claude_code if installed via install.sh
+const PLUGIN_PATH = "./atatus-coding-harness-tracing/tracing/claude_code"; // or ~/.atatus/harness/tracing/claude_code if installed via install.sh
 
 const client = new ClaudeSDKClient({
   plugins: [{ type: "local", path: PLUGIN_PATH }],

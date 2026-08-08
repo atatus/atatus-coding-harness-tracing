@@ -11,9 +11,9 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/atatus/coding-harness-tracing.git"
+REPO_URL="https://github.com/atatus/atatus-coding-harness-tracing.git"
 INSTALL_BRANCH="${ATATUS_INSTALL_BRANCH:-main}"
-TARBALL_URL="https://github.com/atatus/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
 INSTALL_DIR="${HOME}/.atatus/harness"
 VENV_DIR="${INSTALL_DIR}/venv"
 
@@ -266,7 +266,7 @@ main() {
             --branch)
                 i=$((i + 1))
                 INSTALL_BRANCH="${args[$i]:-main}"
-                TARBALL_URL="https://github.com/atatus/coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+                TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
                 ;;
             *) [[ -z "$subcmd" ]] && subcmd="${args[$i]}" ;;
         esac

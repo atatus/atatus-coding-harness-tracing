@@ -17,7 +17,7 @@ For larger features or behavior changes, please **open an issue first** so we ca
 
 Before starting non-trivial work:
 
-1. Search [existing issues](https://github.com/atatus/coding-harness-tracing/issues) to see if it's already being tracked.
+1. Search [existing issues](https://github.com/atatus/atatus-coding-harness-tracing/issues) to see if it's already being tracked.
 2. If not, open one using the issue templates (bug report, feature request, or new harness integration).
 3. Wait for a quick maintainer ack on the approach for anything beyond a small fix.
 
@@ -26,8 +26,8 @@ Before starting non-trivial work:
 Fork the repo and clone your fork:
 
 ```bash
-git clone https://github.com/<your-username>/coding-harness-tracing.git
-cd coding-harness-tracing
+git clone https://github.com/<your-username>/atatus-coding-harness-tracing.git
+cd atatus-coding-harness-tracing
 ```
 
 Install dependencies with [uv](https://docs.astral.sh/uv/):
