@@ -104,6 +104,29 @@ def _iso_to_ms(ts: str) -> int:
         return 0
 
 
+def _message_text(content) -> str:
+    """Flatten a rollout message's ``content`` into plain text.
+
+    Codex writes it as a list of typed parts (``input_text`` / ``output_text``), and a
+    message can hold several. Older records use a bare string, which is passed through.
+    Anything unrecognised yields "" rather than a repr, so a format change drops the field
+    instead of sending Python object noise as the user's prompt.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for part in content:
+        if isinstance(part, str):
+            parts.append(part)
+        elif isinstance(part, dict):
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                parts.append(text)
+    return "\n".join(parts)
+
+
 def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None":
     """Walk the rollout JSONL and extract everything for one turn.
 
@@ -134,6 +157,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     turn_end_ms = 0
     duration_ms: "int | None" = None
     user_prompt = ""
+    # Fallback prompt source, used only when no user_message event arrives. See the
+    # response_item/message branch below for why it is collected separately.
+    user_messages: list = []
     assistant_output = ""
     model = ""
     cwd = ""
@@ -211,6 +237,23 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     msg = payload.get("message")
                     if msg:
                         user_prompt = msg
+                    continue
+
+                # Fallback prompt source. Newer Codex builds emit no user_message event at
+                # all: the prompt arrives only as a response_item message with role "user",
+                # so relying on the event alone loses the prompt entirely while output and
+                # tokens still record, which reads as a capture bug rather than a format change.
+                #
+                # Two things must be filtered out, or the prompt is replaced by boilerplate:
+                #   role "developer" carries injected instructions, never user text.
+                #   role "user" also carries Codex's own <environment_context> block, which
+                #   precedes the real prompt.
+                # Collected rather than assigned so a user_message event, when present, still wins.
+                if outer == "response_item" and ptype == "message":
+                    if payload.get("role") == "user":
+                        text = _message_text(payload.get("content"))
+                        if text and not text.lstrip().startswith("<environment_context>"):
+                            user_messages.append(text)
                     continue
 
                 # Intermediate assistant message (overwritten by task_complete if both present)
@@ -300,6 +343,11 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     if not turn_end_ms:
         candidates = [e["end_ts"] for e in tool_calls if e.get("end_ts")]
         turn_end_ms = max(candidates) if candidates else turn_start_ms
+
+    # The last user-role message is the prompt; earlier ones are context Codex injected
+    # ahead of it. Only used when no user_message event supplied one.
+    if not user_prompt and user_messages:
+        user_prompt = user_messages[-1]
 
     token_usage: "dict | None" = None
     if saw_tokens:
