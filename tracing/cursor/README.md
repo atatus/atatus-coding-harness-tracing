@@ -3,7 +3,7 @@
 Automatic OpenInference tracing for the Cursor IDE and Cursor CLI. Spans are exported to [Atatus](https://atatus.com).
 
 ## Setup
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `.cursor/hooks.json`.
+The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `~/.cursor/hooks.json`.
 
 Pass `--with-skills` to also symlink the `manage-cursor-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage Cursor tracing configuration.
 
@@ -81,7 +81,7 @@ install.bat uninstall cursor
 | Harness key | `cursor` |
 | Project name | `cursor` |
 | Atatus endpoint | `https://otel-rx.atatus.com` |
-| Hook config file | `.cursor/hooks.json` |
+| Hook config file | `~/.cursor/hooks.json` |
 | Hook events registered | `sessionStart`, `sessionEnd`, `beforeSubmitPrompt`, `afterAgentResponse`, `afterAgentThought`, `beforeShellExecution`, `afterShellExecution`, `beforeMCPExecution`, `afterMCPExecution`, `beforeReadFile`, `afterFileEdit`, `beforeTabFileRead`, `afterTabFileEdit`, `postToolUse`, `stop` |
 | Events emitted by Cursor CLI | `sessionStart`, `sessionEnd`, `beforeShellExecution`, `afterShellExecution`, `afterFileEdit`, `postToolUse`, `stop` (subset of the above; remaining events are IDE-only) |
 | State directory | `~/.atatus/harness/state/cursor/` |
@@ -89,7 +89,7 @@ install.bat uninstall cursor
 
 ## Verifying tracing
 
-Use Cursor (IDE or `agent` CLI) as normal. The hooks fire on agent activity within the workspace that contains `.cursor/hooks.json`.
+Use Cursor (IDE or `agent` CLI) as normal. The hooks are registered per user in `~/.cursor/hooks.json`, so they fire on agent activity in any workspace.
 
 - Errors land in `~/.atatus/harness/logs/cursor.log` always; set `export ATATUS_VERBOSE=true` before launching Cursor to also see routine hook activity.
 - Confirm spans appear in your configured project in Atatus.

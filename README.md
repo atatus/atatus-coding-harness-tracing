@@ -2,6 +2,27 @@
 
 Trace AI coding sessions to [Atatus](https://atatus.com) with OpenInference spans. Each harness integration emits spans for prompts, tool calls, model responses, and session lifecycle events.
 
+📖 **Full documentation:** [LLM Monitoring for coding agents](https://docs.atatus.com/docs/llm-monitoring/coding-agents/overview.html)
+
+## Quick start
+
+One command per harness. On macOS or Linux, replacing `claude` with the name from the table below:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.sh | bash -s -- claude
+```
+
+On Windows (PowerShell):
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/main/install.bat -OutFile $env:TEMP\install.bat
+& $env:TEMP\install.bat claude
+```
+
+The installer asks for your Atatus license key and a project name, then registers the harness's hooks. Traces appear on the **LLM** page in Atatus, not under APM.
+
+> **Privacy posture:** prompts and tool *details* are captured by default; tool *output* is **not**. See [Content logging](#4-content-logging).
+
 ## Supported Harnesses
 
 | Harness Integration | Install command | Name |
@@ -19,6 +40,8 @@ Trace AI coding sessions to [Atatus](https://atatus.com) with OpenInference span
 > **Each install link opens the ready-to-paste command for your OS — copy it and run it in a terminal**
 
 > Installing Claude Code tracing via the Claude marketplace? See [Claude Code Tracing](tracing/claude_code/README.md#claude-code-marketplace) for the marketplace-specific flow — backend credentials must be set directly in `~/.claude/settings.json` since the install wizard is skipped.
+
+> ⚠️ **Do not install both the package and the Claude Code plugin for `claude`.** Both register hooks, both fire on every event, and every span is recorded **twice** — which doubles the token and cost figures you see. Pick one.
 
 ### Setup walkthrough
 
@@ -53,6 +76,21 @@ Tool *output* is off because it is the broadest capture surface: file bodies, sh
 
 Only answers that differ from these defaults are written to `~/.atatus/harness/config.json`, so the defaults stay authoritative and can be changed by an upgrade. You're asked once, on your first harness install — later installs reuse the stored block, except after a change to the defaults themselves, when you'll be asked to re-confirm once. You can also edit the block by hand, or override per session with the `ATATUS_LOG_*` env vars below.
 
+### Managing an install
+
+All three take the same form as the install command, on either OS:
+
+| Action | Command argument | Notes |
+|---|---|---|
+| Add another harness | `bash -s -- codex` | Reuses the license key and project name you already entered. |
+| Update | `bash -s -- update` | Updates the package and re-registers every installed harness. |
+| Remove one harness | `bash -s -- uninstall codex` | Removes that harness's hooks. Everything else is left alone. |
+| Remove everything | `bash -s -- uninstall` | Full wipe: venv, package and `~/.atatus/harness/config.json`. |
+
+Pass `--with-skills` on install to also symlink that harness's `manage-*-tracing` skill into the current directory's `.agents/skills/`, so a coding agent in that workspace can help manage the configuration.
+
+To stop sending traces without uninstalling anything, set `ATATUS_TRACE_ENABLED=false`.
+
 ### Environment variables
 
 Most settings live in `.atatus/harness/config.json`, but a small set of env vars affect runtime behavior on every harness. The installers wire most of these for you; set them yourself when you want to override behavior for a single session or debug locally.
@@ -84,6 +122,9 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 
 ## Links
 
+- [LLM Monitoring documentation](https://docs.atatus.com/docs/llm-monitoring/coding-agents/overview.html) — installation, configuration, privacy and per-harness guides
+- [Span kinds](https://docs.atatus.com/docs/llm-monitoring/reference/span-kinds.html) — how to read a trace
+- [Cost and tokens](https://docs.atatus.com/docs/llm-monitoring/reference/cost-and-tokens.html) — how spend is calculated
 - [Atatus](https://atatus.com)
 - [OpenInference](https://github.com/Arize-ai/openinference)
 
@@ -93,4 +134,4 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for develop
 
 ## License
 
-[Apache 2.0](LICENSE)
+[Apache 2.0](LICENSE). Attribution for the upstream work this is derived from is in [NOTICE](NOTICE), as section 4 of the licence requires.
