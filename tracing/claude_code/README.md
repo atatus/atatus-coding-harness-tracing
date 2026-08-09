@@ -40,7 +40,7 @@ Uninstall:
 
 ```bash
 claude plugin uninstall claude-code-tracing@coding-harness-tracing
-claude plugin marketplace remove atatus/atatus-coding-harness-tracing
+claude plugin marketplace remove coding-harness-tracing
 ```
 
 ### Remote setup
