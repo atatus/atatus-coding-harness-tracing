@@ -115,7 +115,10 @@ def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
         "output.value": redacted_output,
     }
     if description:
-        attrs["tool.description"] = description
+        # Follows log_tool_details like every other harness's tool.description. It was
+        # emitted verbatim, so a user with tool details disabled still had Kiro's
+        # __tool_use_purpose text sent.
+        attrs["tool.description"] = redact_content(env.log_tool_details, description)
     user_id = state.get("user_id") or ""
     if user_id:
         attrs["user.id"] = user_id

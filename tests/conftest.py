@@ -17,7 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 def isolate_config(tmp_path, monkeypatch):
     """Isolate every test from the developer's real ~/.atatus/harness/config.json.
 
-    Two independent leaks are closed here:
+    Three independent leaks are closed here:
 
     1. ``core.config.load_config`` binds its path via ``from core.constants
        import CONFIG_FILE``, so patching ``core.constants.CONFIG_FILE`` (as
@@ -29,8 +29,20 @@ def isolate_config(tmp_path, monkeypatch):
        config reads survive across tests. Clear them before and after each test
        so the next access re-reads the isolated config rather than a stale value
        cached from a sibling test.
+
+    3. The capture flags resolve **env var first**, then config, then default
+       (``_Env._resolve_log_flag``). Isolating the config file therefore does not
+       isolate them: any shell exporting ``ATATUS_LOG_*`` decides what the suite
+       asserts against. That is not hypothetical -- a harness that injects those
+       vars into the processes it spawns (Claude Code's ``settings.json`` ``env``
+       block does) turns ~69 tests red on a clean checkout, which reads as a
+       regression and is not one. Delete them so every test sees the documented
+       defaults unless it sets them itself.
     """
     from core.common import env
+
+    for var in ("ATATUS_LOG_PROMPTS", "ATATUS_LOG_TOOL_DETAILS", "ATATUS_LOG_TOOL_CONTENT"):
+        monkeypatch.delenv(var, raising=False)
 
     monkeypatch.setattr("core.config.CONFIG_FILE", tmp_path / "no-such-config.json")
     env.invalidate_caches()
