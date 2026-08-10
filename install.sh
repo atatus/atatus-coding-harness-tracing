@@ -28,6 +28,20 @@ err()    { echo -e "${RED}[atatus]${NC} $*" >&2; }
 header() { echo -e "\n${BOLD}${BLUE}$*${NC}\n"; }
 command_exists() { command -v "$1" &>/dev/null; }
 
+# Package-manager-appropriate way to get Python 3, for the machine actually running this.
+python_install_hint() {
+    if command_exists brew;      then echo "brew install python@3.12"
+    elif command_exists apt-get; then echo "sudo apt-get install -y python3 python3-venv"
+    elif command_exists dnf;     then echo "sudo dnf install -y python3"
+    elif command_exists yum;     then echo "sudo yum install -y python3"
+    elif command_exists pacman;  then echo "sudo pacman -S python"
+    elif command_exists zypper;  then echo "sudo zypper install -y python3"
+    elif command_exists apk;     then echo "sudo apk add python3"
+    elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then echo "brew install python@3.12"
+    else echo "install Python 3.9 or newer with your package manager"
+    fi
+}
+
 # TTY input for curl|bash scenarios
 _tty_in=""
 if [[ -t 0 ]]; then _tty_in="/dev/stdin"
@@ -213,7 +227,14 @@ install_harness() {
     local cmd="$1" skills="$2"
     local dir; dir=$(harness_dir "$cmd") || { err "Unknown harness: ${cmd}"; usage; exit 1; }
     header "Installing ${cmd} tracing"
-    local python_cmd; python_cmd=$(find_python) || { err "No Python 3.9+ found"; exit 1; }
+    # Name the fix, not just the problem: "No Python 3.9+ found" leaves the reader to work out
+    # which package to install on their distro, which is the same dead end a bare
+    # "jq required" produced.
+    local python_cmd
+    python_cmd=$(find_python) || {
+        err "No Python 3.9+ found. Install it with: $(python_install_hint)"
+        exit 1
+    }
     info "Found Python: ${python_cmd} ($("$python_cmd" --version 2>&1))"
     install_repo
     setup_venv "$python_cmd"
