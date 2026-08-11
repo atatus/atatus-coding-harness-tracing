@@ -369,12 +369,19 @@ class _TokenUsage:
     engine can price them at their own (much cheaper) rates instead of the
     full input rate. Without the breakdown, prompt-cache tokens are billed as
     full-price input, over-reporting cost ~3-4x for heavily-cached agent runs.
+
+    ``cache_write_1h`` is in turn a subset of ``cache_write``: the portion held
+    with a one-hour TTL, which is priced above the default five-minute rate.
+    The five-minute portion is ``cache_write - cache_write_1h``. Leaving it at
+    zero prices the whole write at the cheaper rate, which is the behaviour
+    before the split was reported.
     """
 
     prompt: int = 0
     completion: int = 0
     cache_read: int = 0
     cache_write: int = 0
+    cache_write_1h: int = 0
 
     def token_count_attrs(self) -> dict:
         """Return OpenInference token-count attributes for span emission.
@@ -396,6 +403,8 @@ class _TokenUsage:
             attrs["llm.token_count.prompt_details.cache_read"] = self.cache_read
         if self.cache_write:
             attrs["llm.token_count.prompt_details.cache_write"] = self.cache_write
+        if self.cache_write_1h:
+            attrs["llm.token_count.prompt_details.cache_write_1h"] = self.cache_write_1h
         return attrs
 
 
@@ -503,9 +512,18 @@ def _scan_transcript_for_usage(
             uncached = _usage_int(usage, "input_tokens")
             cache_read = _usage_int(usage, "cache_read_input_tokens")
             cache_write = _usage_int(usage, "cache_creation_input_tokens")
+
+            # ``cache_creation`` breaks the write down by entry lifetime. The
+            # one-hour tier is priced above the five-minute default, so the
+            # split has to travel with the count -- without it every write is
+            # billed at the cheaper rate.
+            cache_creation = usage.get("cache_creation") or {}
+            cache_write_1h = _usage_int(cache_creation, "ephemeral_1h_input_tokens")
+
             usage_totals.prompt += uncached + cache_read + cache_write
             usage_totals.cache_read += cache_read
             usage_totals.cache_write += cache_write
+            usage_totals.cache_write_1h += cache_write_1h
             usage_totals.completion += _usage_int(usage, "output_tokens")
 
     return output, usage_totals, model

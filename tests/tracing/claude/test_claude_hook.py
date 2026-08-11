@@ -606,6 +606,54 @@ class TestScanTranscriptForUsage:
         assert usage.cache_write == 5
         assert model == "claude-sonnet-4-20250514"
 
+    def test_extracts_cache_write_ttl_split(self, tmp_path):
+        """The 1-hour portion of a cache write is read from ``cache_creation``.
+
+        Vendors price a long-lived cache entry above the five-minute default, so
+        the split has to travel with the count or every write bills at the
+        cheaper rate.
+        """
+        t = tmp_path / "ttl.jsonl"
+        t.write_text(json.dumps({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "id": "msg_ttl",
+                "model": "claude-haiku-4-5-20251001",
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {
+                    "input_tokens": 10,
+                    "cache_read_input_tokens": 200,
+                    "cache_creation_input_tokens": 100,
+                    "output_tokens": 5,
+                    "cache_creation": {
+                        "ephemeral_5m_input_tokens": 40,
+                        "ephemeral_1h_input_tokens": 60,
+                    },
+                },
+            },
+        }) + "\n")
+
+        _, usage, _ = _scan_transcript_for_usage(Path(t), 0)
+        assert usage.cache_write == 100
+        assert usage.cache_write_1h == 60          # 40 remain at the 5-minute rate
+        assert usage.prompt == 310                 # 10 + 200 + 100
+
+        attrs = usage.token_count_attrs()
+        assert attrs["llm.token_count.prompt_details.cache_write"] == 100
+        assert attrs["llm.token_count.prompt_details.cache_write_1h"] == 60
+
+    def test_cache_write_ttl_absent_leaves_split_zero(self, transcript_file):
+        """A payload without ``cache_creation`` omits the attribute entirely.
+
+        That is what keeps producers which cannot report the TTL pricing exactly
+        as they did before the split existed.
+        """
+        _, usage, _ = _scan_transcript_for_usage(Path(transcript_file), 0)
+        assert usage.cache_write == 5
+        assert usage.cache_write_1h == 0
+        assert "llm.token_count.prompt_details.cache_write_1h" not in usage.token_count_attrs()
+
     def test_skips_lines_before_start(self, transcript_file):
         """Lines before start_line are skipped entirely."""
         output, usage, model = _scan_transcript_for_usage(Path(transcript_file), 3)
