@@ -76,6 +76,14 @@ def _handle_post_tool_use(input_json: dict) -> None:
     parent_span_id = state.get("current_trace_span_id")
     state.increment("tool_count")
 
+    if trace_id is None:
+        # A tool ran outside a turn -- between Stop and the next prompt, or in a
+        # background session that never submits one. There is no trace to hang it
+        # on, and the consumer rejects an entire payload over one span with an
+        # empty traceId, so emit nothing. Every other hook already guards this
+        # way. The tool is still counted; only the span is skipped.
+        return
+
     # Extract tool info
     tool_name = input_json.get("tool_name", "unknown")
     tool_id = input_json.get("tool_use_id", "")
@@ -175,6 +183,14 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     trace_id = state.get("current_trace_id")
     parent_span_id = state.get("current_trace_span_id")
     state.increment("tool_count")
+
+    if trace_id is None:
+        # A tool ran outside a turn -- between Stop and the next prompt, or in a
+        # background session that never submits one. There is no trace to hang it
+        # on, and the consumer rejects an entire payload over one span with an
+        # empty traceId, so emit nothing. Every other hook already guards this
+        # way. The tool is still counted; only the span is skipped.
+        return
 
     # Extract tool info
     tool_name = input_json.get("tool_name", "unknown")

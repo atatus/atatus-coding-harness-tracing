@@ -13,6 +13,7 @@ from tracing.claude_code.hooks.handlers import (
     _handle_notification,
     _handle_permission_request,
     _handle_post_tool_use,
+    _handle_post_tool_use_failure,
     _handle_pre_tool_use,
     _handle_session_end,
     _handle_session_start,
@@ -1351,3 +1352,43 @@ class TestContentRedaction:
         attrs = _attrs(captured_spans[0])
         assert attrs["notification.message"]["stringValue"].startswith("<redacted (")
         assert attrs["notification.title"]["stringValue"].startswith("<redacted (")
+
+
+class TestSkipsSpanWhenNoActiveTrace:
+    """A tool can run outside a turn — between Stop and the next prompt, or in a
+    background session that never submits one. The consumer rejects an entire
+    payload over a single span with an empty traceId, so nothing is emitted."""
+
+    def _state_without_trace(self, tmp_path):
+        sf = tmp_path / "state_test.json"
+        sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=tmp_path / ".lock_test")
+        sm.init_state()
+        sm.set("session_id", "test-session-123")
+        sm.set("tool_count", "0")
+        # No current_trace_id: Stop deleted it, or none was ever created.
+        return sm
+
+    @pytest.mark.parametrize("handler", [_handle_post_tool_use, _handle_post_tool_use_failure])
+    def test_emits_nothing_without_a_trace(self, tmp_path, handler):
+        sm = self._state_without_trace(tmp_path)
+        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
+             mock.patch("tracing.claude_code.hooks.handlers.send_span") as send:
+            handler({"tool_name": "Read", "tool_input": {"file_path": "/x"}, "tool_response": "ok"})
+        assert send.call_count == 0
+
+    @pytest.mark.parametrize("handler", [_handle_post_tool_use, _handle_post_tool_use_failure])
+    def test_still_counts_the_tool(self, tmp_path, handler):
+        """The span is skipped, not the bookkeeping."""
+        sm = self._state_without_trace(tmp_path)
+        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
+             mock.patch("tracing.claude_code.hooks.handlers.send_span"):
+            handler({"tool_name": "Read", "tool_input": {}, "tool_response": "ok"})
+        assert sm.get("tool_count") == "1"
+
+    def test_emits_normally_once_a_trace_exists(self, tmp_path):
+        sm = self._state_without_trace(tmp_path)
+        sm.set("current_trace_id", "trace-abc")
+        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
+             mock.patch("tracing.claude_code.hooks.handlers.send_span") as send:
+            _handle_post_tool_use({"tool_name": "Read", "tool_input": {}, "tool_response": "ok"})
+        assert send.call_count == 1

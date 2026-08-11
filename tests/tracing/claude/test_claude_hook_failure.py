@@ -33,6 +33,10 @@ def state(tmp_path):
     sm.set("trace_count", "0")
     sm.set("tool_count", "0")
     sm.set("user_id", "test-user")
+    # A tool span needs a trace to hang on; without one the handler emits
+    # nothing, which is what TestSkipsWhenNoActiveTrace covers.
+    sm.set("current_trace_id", "trace-abc")
+    sm.set("current_trace_span_id", "span-abc")
     return sm
 
 
