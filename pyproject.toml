@@ -1,8 +1,19 @@
 [project]
 name = "atatus-coding-harness-tracing"
 version = "0.1.0"
+description = "Atatus tracing for AI coding assistants (OpenTelemetry / OpenInference)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Atatus", email = "hello@atatus.com" },
+]
 requires-python = ">=3.9"
 dependencies = []
+
+[project.urls]
+Homepage = "https://atatus.com"
+Documentation = "https://docs.atatus.com/docs/llm-monitoring/coding-agents/overview.html"
+Repository = "https://github.com/atatus/atatus-coding-harness-tracing"
 
 [project.optional-dependencies]
 dev = [

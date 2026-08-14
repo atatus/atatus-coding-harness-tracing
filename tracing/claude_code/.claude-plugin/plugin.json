@@ -8,7 +8,7 @@
     "url": "https://www.atatus.com"
   },
   "repository": "https://github.com/atatus/atatus-coding-harness-tracing",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "tracing",
     "agents",
