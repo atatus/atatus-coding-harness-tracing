@@ -17,6 +17,7 @@ from core.common import DEFAULT_OTLP_ENDPOINT
 from core.config import get_value, load_config, save_config, set_value
 from core.setup import err, info, print_color, prompt_backend, prompt_project_name, prompt_user_id, write_config
 from tracing.codex import install as _install_mod
+from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 
 
 def install(with_skills: bool = False) -> None:
@@ -62,8 +63,8 @@ def main() -> None:
 
 
 def _run() -> None:
-    codex_config_dir = Path.home() / ".codex"
-    env_file = codex_config_dir / "atatus-env.sh"
+    codex_config_dir = get_codex_home()
+    env_file = codex_config_dir / ENV_FILE_NAME
 
     print("")
     print_color("▸ ATATUS Codex Tracing Setup", "green")

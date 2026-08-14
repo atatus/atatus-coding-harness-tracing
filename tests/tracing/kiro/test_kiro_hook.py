@@ -74,6 +74,10 @@ def _patch_kiro_state(tmp_path, monkeypatch):
     sessions_dir = tmp_path / "sessions" / "cli"
     sessions_dir.mkdir(parents=True)
     monkeypatch.setattr(adapter, "KIRO_SESSIONS_DIR", sessions_dir)
+
+    # Don't burn real time polling for sidecars that will never appear in tests.
+    monkeypatch.setattr(adapter, "_SIDECAR_RETRY_SECS", 0.0)
+
     return state_dir
 
 
@@ -540,15 +544,21 @@ class TestStopSidecarEnrichment:
         # Cost still attached because metering_usage has nonzero values
         assert attrs["kiro.cost.credits"] == pytest.approx(0.103, abs=1e-9)
 
-    def test_uses_correct_turn_index(self, captured_spans, tmp_path):
-        """With multiple turns, stop uses trace_count-1 as the turn index."""
+    def test_uses_most_recent_sidecar_turn(self, captured_spans, tmp_path):
+        """stop always reads turn_index=-1, never an index derived from trace_count.
+
+        `trace_count` is our own counter and drifts from the sidecar's turn list
+        — a cancelled prompt bumps one and not the other — so computing
+        `trace_count - 1` picks the wrong turn or runs off the end. The sidecar's
+        own ordering is the only trustworthy source.
+        """
         sidecar = self._load_sidecar_fixture("session_complete.json")
         # Build 3 turns with distinct token counts
         import copy
 
         base_turn = sidecar["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]
         turns = []
-        for i, (inp, out) in enumerate([(100, 200), (300, 400), (500, 600)]):
+        for inp, out in [(100, 200), (300, 400), (500, 600)]:
             t = copy.deepcopy(base_turn)
             t["input_token_count"] = inp
             t["output_token_count"] = out
@@ -556,7 +566,6 @@ class TestStopSidecarEnrichment:
         sidecar["session_state"]["conversation_metadata"]["user_turn_metadatas"] = turns
         self._place_sidecar(tmp_path, sidecar)
 
-        # Submit twice to get trace_count=2, then stop
         prompt = _load_fixture("user_prompt_submit.json")
         _invoke_main(prompt)  # trace_count becomes 1
         # We need a stop to clear pending keys, then a second prompt
@@ -567,11 +576,37 @@ class TestStopSidecarEnrichment:
         stop2 = _load_fixture("stop.json")
         _invoke_main(stop2)  # emits span for turn 2
 
-        # The second stop should use turn_index=1 (trace_count=2, 0-indexed=1)
         assert len(captured_spans) == 2
-        attrs = _span_attrs(captured_spans[1])
-        assert attrs["llm.token_count.prompt"] == 300
-        assert attrs["llm.token_count.completion"] == 400
+        # Both stops read the last sidecar turn (500/600) — the sidecar is a
+        # static fixture here, so neither stop is meant to see 100/200 or 300/400.
+        for span in captured_spans:
+            attrs = _span_attrs(span)
+            assert attrs["llm.token_count.prompt"] == 500
+            assert attrs["llm.token_count.completion"] == 600
+
+    def test_turn_index_survives_trace_count_overrun(self, captured_spans, tmp_path):
+        """trace_count past the end of the sidecar turn list must not lose tokens.
+
+        This is the failure the old `trace_count - 1` index produced: three turns
+        traced against a one-turn sidecar indexed out of bounds and silently
+        dropped every token count.
+        """
+        sidecar = self._load_sidecar_fixture("session_complete.json")
+        turn = sidecar["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]
+        turn["input_token_count"] = 777
+        turn["output_token_count"] = 888
+        self._place_sidecar(tmp_path, sidecar)
+
+        prompt = _load_fixture("user_prompt_submit.json")
+        stop = _load_fixture("stop.json")
+        for _ in range(3):
+            _invoke_main(prompt)
+            _invoke_main(stop)
+
+        assert len(captured_spans) == 3
+        attrs = _span_attrs(captured_spans[-1])  # trace_count=3, sidecar has 1 turn
+        assert attrs["llm.token_count.prompt"] == 777
+        assert attrs["llm.token_count.completion"] == 888
 
     def test_malformed_sidecar_logs_and_skips(self, captured_spans, tmp_path):
         """Malformed sidecar JSON does not crash; basic LLM span still emitted."""

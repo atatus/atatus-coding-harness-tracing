@@ -4,9 +4,10 @@ Extracted from ``install.py`` so that ``install_legacy.py`` (and any other
 module) can depend on these utilities without creating an import cycle back
 into ``install.py``.
 
-The parser is intentionally lenient — falling back to a line-based parse if
-the file is malformed — so install/uninstall keep working when another tool
-has written ``~/.codex/config.toml`` in a slightly off-spec way.
+``_toml_load`` is intentionally lenient — falling back to a line-based parse if
+the file is malformed — so read-only paths keep working when another tool has
+written ``config.toml`` in a slightly off-spec way. ``_toml_load_strict`` is the
+counterpart for write paths, where a partial parse would destroy user data.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ def _toml_load(path: Path) -> dict:
     If the file is malformed (e.g. another tool wrote unquoted keys with
     `@` or `/`), fall back to the lenient line parser rather than crashing
     so install/uninstall can still proceed.
+
+    Read-only callers should use this. Anything that writes the file back must
+    use :func:`_toml_load_strict` instead — see its docstring.
     """
     if not path.is_file():
         return {}
@@ -46,6 +50,32 @@ def _toml_load(path: Path) -> dict:
         except Exception:
             pass
     return _toml_line_parse(text)
+
+
+def _toml_load_strict(path: Path) -> dict:
+    """Load TOML without falling back to the lenient line parser.
+
+    Write paths use this as a guard before serializing a config back to disk.
+    ``config.toml`` is the user's file, not ours: the lenient parser can drop or
+    misread constructs it does not model, and ``_toml_write`` then rewrites the
+    file from that partial dict — silently deleting whatever it failed to
+    understand. Refusing to parse is the safe outcome; the caller reports the
+    error and leaves the file alone.
+
+    Raises ``ValueError`` if the file exists but is not valid TOML. A missing
+    file is fine and yields ``{}``.
+    """
+    if not path.is_file():
+        return {}
+    text = path.read_text()
+    if _tomllib is None:
+        # No parser available; the lenient path is all we have, and refusing to
+        # install on every 3.9/3.10 box without tomli would be worse.
+        return _toml_line_parse(text)
+    try:
+        return _tomllib.loads(text)
+    except Exception as exc:
+        raise ValueError(f"{path} is not valid TOML: {exc}") from exc
 
 
 def _toml_extract_section(line: str) -> str | None:

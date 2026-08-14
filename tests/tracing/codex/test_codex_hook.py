@@ -35,6 +35,9 @@ def _isolate_sessions_root(tmp_path, monkeypatch):
     import tracing.codex.hooks.handlers as h
 
     monkeypatch.setattr(h, "_CODEX_SESSIONS_ROOT", tmp_path / "sessions")
+    # A CODEX_HOME inherited from the developer's shell would otherwise redirect
+    # the lookup out of tmp_path.
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     return tmp_path
 
 
@@ -103,6 +106,33 @@ class TestFindRolloutFile:
         path = _write_rollout(tmp_path, "sess-abc", _evt({"type": "task_started", "turn_id": "t"}))
         found = _find_rollout_file("sess-abc", sessions_root=tmp_path / "sessions")
         assert found == path
+
+    def test_searches_codex_home_when_set(self, tmp_path, monkeypatch):
+        """A user running with CODEX_HOME keeps rollouts there, not in ~/.codex."""
+        alt = tmp_path / "alt-codex"
+        alt.mkdir()
+        path = _write_rollout(alt, "sess-alt", _evt({"type": "task_started", "turn_id": "t"}))
+        monkeypatch.setenv("CODEX_HOME", str(alt))
+
+        # No explicit sessions_root — resolution must come from CODEX_HOME.
+        assert _find_rollout_file("sess-alt") == path
+
+    def test_explicit_root_still_wins_over_codex_home(self, tmp_path, monkeypatch):
+        alt = tmp_path / "alt-codex"
+        alt.mkdir()
+        _write_rollout(alt, "sess-x", _evt({"type": "task_started", "turn_id": "t"}))
+        expected = _write_rollout(tmp_path, "sess-x", _evt({"type": "task_started", "turn_id": "t"}))
+        monkeypatch.setenv("CODEX_HOME", str(alt))
+
+        assert _find_rollout_file("sess-x", sessions_root=tmp_path / "sessions") == expected
+
+    def test_invalid_codex_home_falls_back_instead_of_raising(self, tmp_path, monkeypatch):
+        """A stale CODEX_HOME must never take down the hook — it degrades to the default."""
+        path = _write_rollout(tmp_path, "sess-def", _evt({"type": "task_started", "turn_id": "t"}))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "gone"))
+
+        # _CODEX_SESSIONS_ROOT is pinned to tmp_path/"sessions" by the autouse fixture.
+        assert _find_rollout_file("sess-def") == path
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +279,77 @@ class TestExtractTurnFromRollout:
         assert tc["args"] == '{"cmd":"ls"}'
         assert tc["output"] == "file1\nfile2"
         assert tc["end_ts"] > tc["start_ts"]
+
+    def test_custom_tool_call_pairs_with_output_by_call_id(self, tmp_path):
+        """Code Mode emits its outer exec as custom_tool_call, not function_call."""
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _resp(
+                {
+                    "type": "custom_tool_call",
+                    "status": "completed",
+                    "name": "exec",
+                    "call_id": "custom-1",
+                    "input": 'await tools.exec_command({cmd: "ls"});',
+                },
+                ts="2026-05-20T00:00:01.000Z",
+            ),
+            _resp(
+                {"type": "custom_tool_call_output", "call_id": "custom-1", "output": "file1\nfile2"},
+                ts="2026-05-20T00:00:02.000Z",
+            ),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        assert len(turn["tool_calls"]) == 1
+        tc = turn["tool_calls"][0]
+        assert tc["tool"] == "exec"
+        assert tc["call_id"] == "custom-1"
+        assert tc["args"] == 'await tools.exec_command({cmd: "ls"});'
+        assert tc["output"] == "file1\nfile2"
+        assert tc["end_ts"] > tc["start_ts"]
+
+    def test_custom_tool_call_without_name_falls_back(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _resp({"type": "custom_tool_call", "call_id": "c9"}, ts="2026-05-20T00:00:01.000Z"),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        tc = turn["tool_calls"][0]
+        assert tc["tool"] == "custom_tool_call"
+        assert tc["args"] == ""
+        assert tc["output"] == ""
+
+    def test_custom_and_function_calls_do_not_cross_pair(self, tmp_path):
+        """Same call_id on both channels must stay in its own bucket."""
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _resp(
+                {"type": "function_call", "name": "exec_command", "arguments": "{}", "call_id": "dup"},
+                ts="2026-05-20T00:00:01.000Z",
+            ),
+            _resp(
+                {"type": "custom_tool_call", "name": "exec", "input": "code", "call_id": "dup"},
+                ts="2026-05-20T00:00:02.000Z",
+            ),
+            _resp(
+                {"type": "custom_tool_call_output", "call_id": "dup", "output": "from-custom"},
+                ts="2026-05-20T00:00:03.000Z",
+            ),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        assert len(turn["tool_calls"]) == 2
+        by_tool = {tc["tool"]: tc for tc in turn["tool_calls"]}
+        assert by_tool["exec"]["output"] == "from-custom"
+        assert by_tool["exec_command"]["output"] == ""  # function channel untouched
 
     def test_web_search_call_pairs_with_preceding_end(self, tmp_path):
         path = _write_rollout(

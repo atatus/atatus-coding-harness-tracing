@@ -250,12 +250,14 @@ class TestLoadSessionSidecar:
         """Empty session_id returns None."""
         assert adapter.load_session_sidecar("") is None
 
-    def test_returns_none_when_file_missing(self, sidecar_dir):
+    def test_returns_none_when_file_missing(self, sidecar_dir, monkeypatch):
         """Missing sidecar file returns None."""
+        monkeypatch.setattr(adapter, "_SIDECAR_RETRY_SECS", 0.0)
         assert adapter.load_session_sidecar("nonexistent-session") is None
 
-    def test_returns_none_for_malformed_json(self, sidecar_dir):
+    def test_returns_none_for_malformed_json(self, sidecar_dir, monkeypatch):
         """Malformed JSON in sidecar file returns None."""
+        monkeypatch.setattr(adapter, "_SIDECAR_RETRY_SECS", 0.0)
         sid = "malformed-session"
         (sidecar_dir / f"{sid}.json").write_text("not json")
         assert adapter.load_session_sidecar(sid) is None
@@ -271,6 +273,99 @@ class TestLoadSessionSidecar:
         sid = "complete-session"
         (sidecar_dir / f"{sid}.json").write_text(json.dumps(sidecar_complete))
         result = adapter.load_session_sidecar(sid)
+        assert isinstance(result, dict)
+        assert "session_state" in result
+
+    def test_returns_immediately_when_metering_present(self, sidecar_dir, sidecar_complete, monkeypatch):
+        """A sidecar that already has metering must not cost a single sleep."""
+        sleeps: list = []
+        monkeypatch.setattr(adapter.time, "sleep", lambda s: sleeps.append(s))
+
+        sid = "early-exit"
+        (sidecar_dir / f"{sid}.json").write_text(json.dumps(sidecar_complete))
+
+        assert adapter.load_session_sidecar(sid) is not None
+        assert sleeps == []
+
+    def test_retries_until_metering_arrives(self, sidecar_dir, sidecar_complete, monkeypatch):
+        """Kiro flushes metering after the stop hook fires — poll until it lands."""
+        no_metering = copy.deepcopy(sidecar_complete)
+        del no_metering["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]["metering_usage"]
+
+        sid = "late-metering"
+        path = sidecar_dir / f"{sid}.json"
+        path.write_text(json.dumps(no_metering))
+
+        sleeps: list = []
+        # Rewrite the file with the flushed version on the 3rd read, the way
+        # Kiro would have written it while we were polling.
+        reads = [0]
+        real_read_text = type(path).read_text
+
+        def _counting_read(self, *a, **kw):
+            reads[0] += 1
+            if reads[0] >= 3:
+                return json.dumps(sidecar_complete)
+            return real_read_text(self, *a, **kw)
+
+        monkeypatch.setattr(type(path), "read_text", _counting_read)
+        monkeypatch.setattr(adapter.time, "sleep", lambda s: sleeps.append(s))
+
+        result = adapter.load_session_sidecar(sid)
+
+        assert result is not None
+        turns = result["session_state"]["conversation_metadata"]["user_turn_metadatas"]
+        assert turns[-1].get("metering_usage")
+        assert len(sleeps) == 2  # two polls before the flush landed
+
+    def test_returns_partial_sidecar_when_metering_never_arrives(
+        self, sidecar_dir, sidecar_complete, monkeypatch
+    ):
+        """Timing out must still yield the model name and token counts we did read."""
+        no_metering = copy.deepcopy(sidecar_complete)
+        del no_metering["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]["metering_usage"]
+
+        sid = "no-metering"
+        (sidecar_dir / f"{sid}.json").write_text(json.dumps(no_metering))
+        monkeypatch.setattr(adapter, "_SIDECAR_RETRY_SECS", 0.0)
+
+        result = adapter.load_session_sidecar(sid)
+
+        assert isinstance(result, dict)
+        assert "session_state" in result
+
+    def test_malformed_read_after_a_good_one_keeps_the_good_one(
+        self, sidecar_dir, sidecar_complete, monkeypatch
+    ):
+        """A truncated re-read mid-flush must not throw away what we already parsed."""
+        no_metering = copy.deepcopy(sidecar_complete)
+        del no_metering["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]["metering_usage"]
+
+        sid = "torn-write"
+        path = sidecar_dir / f"{sid}.json"
+        path.write_text(json.dumps(no_metering))
+
+        reads = [0]
+
+        def _read(self, *a, **kw):
+            reads[0] += 1
+            return json.dumps(no_metering) if reads[0] == 1 else "{ truncated"
+
+        # Deterministic clock so the loop ends after a known number of polls
+        # instead of depending on how fast the machine runs.
+        ticks = [0.0]
+
+        def _monotonic():
+            ticks[0] += 0.1
+            return ticks[0]
+
+        monkeypatch.setattr(type(path), "read_text", _read)
+        monkeypatch.setattr(adapter.time, "sleep", lambda s: None)
+        monkeypatch.setattr(adapter.time, "monotonic", _monotonic)
+        monkeypatch.setattr(adapter, "_SIDECAR_RETRY_SECS", 0.25)
+
+        result = adapter.load_session_sidecar(sid)
+
         assert isinstance(result, dict)
         assert "session_state" in result
 

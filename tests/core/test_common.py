@@ -1604,6 +1604,60 @@ class TestFileLockMkdir:
         assert not lock_path.exists()
 
 
+# ── FileLock msvcrt (Windows) path ────────────────────────────────────────
+
+
+class _FakeMsvcrt:
+    """Stand-in for the stdlib ``msvcrt`` module, exposing only the constants
+    CPython actually defines.
+
+    The point of the test below is the *absence* of ``LK_UNLOCK``: touching a
+    name this class does not define raises AttributeError, which is exactly how
+    the real module behaves on Windows.
+    """
+
+    LK_LOCK = 1
+    LK_NBLCK = 2
+    LK_NBRLCK = 4
+    LK_RLCK = 3
+    LK_UNLCK = 0
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def locking(self, fd, mode, nbytes):
+        self.calls.append((mode, nbytes))
+
+
+class TestFileLockMsvcrt:
+    """The Windows lock path must use the real unlock constant.
+
+    ``msvcrt.LK_UNLOCK`` does not exist — the constant is spelled ``LK_UNLCK``.
+    Because ``_release_msvcrt`` only catches OSError, the AttributeError escaped
+    and every state mutation on Windows failed with
+    "no attribute 'LK_UNLOCK'". Runs on any platform via a stub module.
+    """
+
+    def test_release_uses_lk_unlck(self, tmp_path, monkeypatch):
+        fake = _FakeMsvcrt()
+        monkeypatch.setattr("core.common.msvcrt", fake, raising=False)
+        monkeypatch.setattr("core.common._LOCK_IMPL", "msvcrt")
+
+        lock = FileLock(tmp_path / "test.lock", timeout=1.0)
+        lock._method = "msvcrt"
+
+        with lock:
+            pass
+
+        # acquire (LK_NBLCK) then release (LK_UNLCK) — both real constants.
+        assert fake.calls == [(_FakeMsvcrt.LK_NBLCK, 1), (_FakeMsvcrt.LK_UNLCK, 1)]
+
+    def test_stub_has_no_lk_unlock_alias(self):
+        """Guard the guard: if the stub ever grows LK_UNLOCK the test above
+        would pass against the unfixed code."""
+        assert not hasattr(_FakeMsvcrt, "LK_UNLOCK")
+
+
 # ── Custom attributes tests ──────────────────────────────────────────────
 
 

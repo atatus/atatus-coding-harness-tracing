@@ -12,7 +12,7 @@ import pytest
 
 import tracing.codex._toml as codex_toml
 import tracing.codex.install as codex_install
-from tracing.codex.constants import NOTIFY_BIN_NAME
+from tracing.codex.constants import NOTIFY_BIN_NAME, get_codex_home
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -49,10 +49,12 @@ def fake_home(tmp_path, monkeypatch):
     monkeypatch.setattr("core.constants.CONFIG_FILE", config_file)
     monkeypatch.setattr("core.config.CONFIG_FILE", config_file)
 
-    monkeypatch.setattr(codex_install, "CODEX_CONFIG_DIR", codex_dir)
-    monkeypatch.setattr(codex_install, "CODEX_CONFIG_FILE", codex_dir / "config.toml")
-    monkeypatch.setattr(codex_install, "CODEX_ENV_FILE", codex_dir / "atatus-env.sh")
     monkeypatch.setattr(codex_install, "CONFIG_FILE", config_file)
+
+    # No CODEX_HOME override: get_codex_home() then derives `codex_dir` from the
+    # patched Path.home() above, so the installer writes inside tmp_path.
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    assert codex_install.get_codex_home() == codex_dir
 
     return tmp_path
 
@@ -896,3 +898,111 @@ class TestTomlFallbackQuoting:
         text = p.read_text()
         parsed = tomllib.loads(text)
         assert parsed == data
+
+
+# ---------------------------------------------------------------------------
+# CODEX_HOME
+# ---------------------------------------------------------------------------
+
+
+class TestGetCodexHome:
+    """`get_codex_home()` mirrors Codex's own CODEX_HOME resolution."""
+
+    def test_defaults_to_dot_codex_under_home(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        assert get_codex_home() == tmp_path / ".codex"
+
+    def test_empty_value_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_HOME", "")
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        assert get_codex_home() == tmp_path / ".codex"
+
+    @pytest.mark.parametrize("raw", ["~/custom-codex", "$HOME/custom-codex"], ids=["tilde", "env-var"])
+    def test_expands_like_a_shell(self, tmp_path, monkeypatch, raw):
+        target = tmp_path / "custom-codex"
+        target.mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", raw)
+        assert get_codex_home() == target.resolve()
+
+    def test_missing_directory_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "nope"))
+        with pytest.raises(ValueError, match="invalid path"):
+            get_codex_home()
+
+    def test_file_instead_of_directory_raises(self, tmp_path, monkeypatch):
+        f = tmp_path / "afile"
+        f.write_text("")
+        monkeypatch.setenv("CODEX_HOME", str(f))
+        with pytest.raises(ValueError, match="non-directory"):
+            get_codex_home()
+
+
+class TestInstallHonorsCodexHome:
+    """An invalid override must never fall through to the default profile."""
+
+    def test_install_writes_into_codex_home(self, fake_home, mock_prompts, tmp_path, monkeypatch):
+        alt = tmp_path / "alt-codex"
+        alt.mkdir()
+        monkeypatch.setenv("CODEX_HOME", str(alt))
+
+        codex_install.install()
+
+        assert (alt / "config.toml").is_file()
+        assert (alt / "atatus-env.sh").is_file()
+        # The default profile must be left completely alone.
+        assert not (fake_home / ".codex" / "config.toml").exists()
+
+    def test_uninstall_reverts_inside_codex_home(self, fake_home, mock_prompts, tmp_path, monkeypatch):
+        alt = tmp_path / "alt-codex"
+        alt.mkdir()
+        monkeypatch.setenv("CODEX_HOME", str(alt))
+
+        codex_install.install()
+        codex_install.uninstall()
+
+        data = codex_toml._toml_load(alt / "config.toml")
+        assert "notify" not in data
+        assert not (alt / "atatus-env.sh").exists()
+
+    def test_install_aborts_on_invalid_codex_home(self, fake_home, mock_prompts, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "does-not-exist"))
+
+        with pytest.raises(ValueError):
+            codex_install.install()
+
+        # Nothing was written to the default profile as a consolation prize.
+        assert not (fake_home / ".codex" / "config.toml").exists()
+
+
+class TestStrictTomlGuard:
+    """A config.toml we cannot fully parse must be left byte-for-byte alone."""
+
+    MALFORMED = "notify = [\nthis is not toml\n"
+
+    def test_strict_loader_raises_where_lenient_one_guesses(self, tmp_path):
+        pytest.importorskip("tomllib")
+        p = tmp_path / "config.toml"
+        p.write_text(self.MALFORMED)
+
+        # The lenient parser still returns something — that is exactly the risk.
+        assert isinstance(codex_toml._toml_load(p), dict)
+        with pytest.raises(ValueError, match="not valid TOML"):
+            codex_toml._toml_load_strict(p)
+
+    def test_strict_loader_accepts_missing_file(self, tmp_path):
+        assert codex_toml._toml_load_strict(tmp_path / "absent.toml") == {}
+
+    def test_install_does_not_rewrite_malformed_config(self, fake_home, mock_prompts):
+        pytest.importorskip("tomllib")
+        codex_dir = fake_home / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        toml_path = codex_dir / "config.toml"
+        toml_path.write_text(self.MALFORMED)
+
+        with pytest.raises(ValueError, match="not valid TOML"):
+            codex_install.install()
+
+        assert toml_path.read_text() == self.MALFORMED

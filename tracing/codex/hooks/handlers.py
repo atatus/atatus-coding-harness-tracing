@@ -23,6 +23,7 @@ JSON as a CLI argument). No stdout response expected.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,9 +41,10 @@ from core.common import (
     redact_content,
 )
 from core.common import send_span as send_span_to_backend
+from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file
 
-# Root of Codex's per-session rollout transcripts.
+# Root of Codex's per-session rollout transcripts, when CODEX_HOME is unset.
 _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 
 
@@ -71,7 +73,18 @@ def _find_rollout_file(session_id: str, sessions_root: "Path | None" = None) -> 
     File names embed the session_id, so a filename-pattern match is fast even
     on a deep directory tree.
     """
-    root = sessions_root or _CODEX_SESSIONS_ROOT
+    if sessions_root is not None:
+        root = sessions_root
+    elif os.environ.get("CODEX_HOME", ""):
+        # Only consult CODEX_HOME when it is actually set: get_codex_home()
+        # raises on a stale override, and a hook must never take down the CLI.
+        try:
+            root = get_codex_home() / "sessions"
+        except ValueError as exc:
+            log(f"ignoring CODEX_HOME: {exc}")
+            root = _CODEX_SESSIONS_ROOT
+    else:
+        root = _CODEX_SESSIONS_ROOT
     if not root.is_dir() or not session_id:
         return None
     try:
@@ -168,6 +181,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
 
     tool_calls: list = []
     pending_func: dict = {}  # call_id -> entry being filled
+    pending_custom: dict = {}  # call_id -> Code Mode entry being filled
     pending_search_end: "dict | None" = None  # most recent unmatched web_search_end
 
     try:
@@ -293,6 +307,33 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 if outer == "response_item" and ptype == "function_call_output":
                     call_id = payload.get("call_id") or ""
                     pending = pending_func.get(call_id) if call_id else None
+                    if pending is not None:
+                        pending["output"] = payload.get("output") or ""
+                        pending["end_ts"] = ts_ms or pending["end_ts"]
+                    continue
+
+                # Code Mode exposes its outer exec invocation as a custom tool call
+                # rather than a function_call. Pair it with the durable output
+                # record by call_id so it renders like every other tool.
+                if outer == "response_item" and ptype == "custom_tool_call":
+                    call_id = payload.get("call_id") or ""
+                    entry = {
+                        "tool": payload.get("name") or "custom_tool_call",
+                        "args": payload.get("input") or "",
+                        "output": "",
+                        "call_id": call_id,
+                        "start_ts": ts_ms,
+                        "end_ts": ts_ms,
+                        "decision": None,
+                    }
+                    tool_calls.append(entry)
+                    if call_id:
+                        pending_custom[call_id] = entry
+                    continue
+
+                if outer == "response_item" and ptype == "custom_tool_call_output":
+                    call_id = payload.get("call_id") or ""
+                    pending = pending_custom.get(call_id) if call_id else None
                     if pending is not None:
                         pending["output"] = payload.get("output") or ""
                         pending["end_ts"] = ts_ms or pending["end_ts"]
@@ -619,7 +660,12 @@ def notify() -> None:
     expects no stdout response.
     """
     try:
-        load_env_file(Path.home() / ".codex" / "atatus-env.sh")
+        try:
+            codex_home = get_codex_home()
+        except ValueError as exc:
+            log(f"ignoring CODEX_HOME: {exc}")
+            codex_home = Path.home() / ".codex"
+        load_env_file(codex_home / ENV_FILE_NAME)
         if not check_requirements():
             return
         raw = sys.argv[1] if len(sys.argv) > 1 else "{}"

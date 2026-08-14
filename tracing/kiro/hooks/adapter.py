@@ -27,6 +27,11 @@ STATE_DIR: Path = STATE_BASE_DIR / HARNESS_NAME
 SCOPE_NAME = "atatus-kiro-tracing"
 SERVICE_NAME = HARNESS_NAME
 
+# Kiro writes the session sidecar asynchronously, so the stop hook can beat it
+# to disk. Poll briefly rather than reading once and losing the metering data.
+_SIDECAR_RETRY_SECS = 1.0
+_SIDECAR_POLL_INTERVAL = 0.1
+
 # Route hook stderr to a per-harness log file unless ATATUS_LOG_FILE is set.
 os.environ.setdefault(
     "ATATUS_LOG_FILE",
@@ -111,24 +116,54 @@ def gc_stale_state_files() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _sidecar_has_metering(data: dict) -> bool:
+    """True once the most recent turn carries metering usage."""
+    turns = data.get("session_state", {}).get("conversation_metadata", {}).get("user_turn_metadatas", [])
+    return bool(turns) and bool(turns[-1].get("metering_usage"))
+
+
 def load_session_sidecar(session_id: str) -> dict | None:
     """Load `~/.kiro/sessions/cli/<session_id>.json`.
 
-    Returns the parsed dict, or None if the file is missing, malformed, or
-    not a JSON object. NEVER raises — callers rely on fail-soft semantics.
+    Retries for up to `_SIDECAR_RETRY_SECS`, because Kiro flushes the sidecar
+    *after* the stop hook fires — reading once wins that race only sometimes,
+    and losing it drops the turn's token counts and metering cost silently.
+    Returns early as soon as metering data is present.
+
+    Returns the parsed dict (possibly without metering, if it never arrived),
+    or None if the file is missing, malformed, or not a JSON object. NEVER
+    raises — callers rely on fail-soft semantics.
     """
     if not session_id:
         return None
     path = KIRO_SESSIONS_DIR / f"{session_id}.json"
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        log(f"sidecar load failed for {session_id}: {exc!r}")
-        return None
-    if not isinstance(data, dict):
-        log(f"sidecar for {session_id} is not a JSON object")
-        return None
-    return data
+    deadline = time.monotonic() + _SIDECAR_RETRY_SECS
+    last: dict | None = None
+    last_exc: Exception | None = None
+
+    while True:
+        try:
+            data = json.loads(path.read_text())
+            if not isinstance(data, dict):
+                log(f"sidecar for {session_id} is not a JSON object")
+                return None
+            last, last_exc = data, None
+            if _sidecar_has_metering(data):
+                return data
+        except (OSError, json.JSONDecodeError) as exc:
+            last_exc = exc
+
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(_SIDECAR_POLL_INTERVAL)
+
+    if last_exc is not None:
+        log(f"sidecar load failed for {session_id}: {last_exc!r}")
+    else:
+        log(f"sidecar for {session_id}: metering_usage not present after {_SIDECAR_RETRY_SECS}s")
+    # Whatever we last parsed is still worth enriching with (model name, token
+    # counts) even when metering never landed.
+    return last
 
 
 def extract_sidecar_attrs(sidecar: dict | None, turn_index: int = -1) -> dict[str, Any]:
