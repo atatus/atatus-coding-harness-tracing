@@ -521,21 +521,10 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
         "sessionID": "ses_t",
         "messages": [
             {
-                "info": {
-                    "id": "msg_user_x",
-                    "sessionID": "ses_t",
-                    "role": "user",
-                    "time": {"created": 100}
-                },
+                "info": {"id": "msg_user_x", "sessionID": "ses_t", "role": "user", "time": {"created": 100}},
                 "parts": [
-                    {
-                        "id": "p1",
-                        "sessionID": "ses_t",
-                        "messageID": "msg_user_x",
-                        "type": "text",
-                        "text": "do thing"
-                    }
-                ]
+                    {"id": "p1", "sessionID": "ses_t", "messageID": "msg_user_x", "type": "text", "text": "do thing"}
+                ],
             },
             {
                 "info": {
@@ -549,16 +538,10 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                     "mode": "build",
                     "path": {"cwd": "/x", "root": "/"},
                     "cost": 0,
-                    "tokens": {"input": 1, "output": 1, "reasoning": 0, "cache": {"read": 0, "write": 0}}
+                    "tokens": {"input": 1, "output": 1, "reasoning": 0, "cache": {"read": 0, "write": 0}},
                 },
                 "parts": [
-                    {
-                        "id": "p2",
-                        "sessionID": "ses_t",
-                        "messageID": "msg_assist_x",
-                        "type": "text",
-                        "text": "ok"
-                    },
+                    {"id": "p2", "sessionID": "ses_t", "messageID": "msg_assist_x", "type": "text", "text": "ok"},
                     {
                         "id": "p3",
                         "sessionID": "ses_t",
@@ -572,12 +555,12 @@ def _make_payload_with_tool(tool_name, input_obj, ptype="close"):
                             "output": "tool-out",
                             "title": "tool-title",
                             "metadata": {},
-                            "time": {"start": 210, "end": 220}
-                        }
-                    }
-                ]
-            }
-        ]
+                            "time": {"start": 210, "end": 220},
+                        },
+                    },
+                ],
+            },
+        ],
     }
 
 
@@ -715,7 +698,7 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                 "role": "user",
                 "time": {"created": 10000},
                 "agent": "build",
-                "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"}
+                "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"},
             },
             "parts": [
                 {
@@ -723,9 +706,9 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                     "sessionID": "ses_basic",
                     "messageID": "msg_user_2",
                     "type": "text",
-                    "text": "do something else"
+                    "text": "do something else",
                 }
-            ]
+            ],
         },
         {
             "info": {
@@ -739,12 +722,7 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                 "mode": "build",
                 "path": {"cwd": "/home/user/myproj", "root": "/home/user"},
                 "cost": 0,
-                "tokens": {
-                    "input": 5,
-                    "output": 3,
-                    "reasoning": 0,
-                    "cache": {"read": 0, "write": 0}
-                }
+                "tokens": {"input": 5, "output": 3, "reasoning": 0, "cache": {"read": 0, "write": 0}},
             },
             "parts": [
                 {
@@ -752,10 +730,10 @@ def _multi_turn_payload(ptype: str = "reconcile") -> dict:
                     "sessionID": "ses_basic",
                     "messageID": "msg_assist_2",
                     "type": "text",
-                    "text": "done."
+                    "text": "done.",
                 }
-            ]
-        }
+            ],
+        },
     ]
     return {**base, "type": ptype, "messages": base["messages"] + turn2}
 
@@ -873,7 +851,7 @@ class TestMultiTurnSnapshotDedup:
                         "id": "msg_user_prior",
                         "sessionID": "ses_basic",
                         "role": "user",
-                        "time": {"created": 500}
+                        "time": {"created": 500},
                     },
                     "parts": [
                         {
@@ -881,11 +859,11 @@ class TestMultiTurnSnapshotDedup:
                             "sessionID": "ses_basic",
                             "messageID": "msg_user_prior",
                             "type": "text",
-                            "text": "prior prompt"
+                            "text": "prior prompt",
                         }
-                    ]
+                    ],
                 }
-            ]
+            ],
         }
         chains_before = len(_by_kind(captured_spans, "CHAIN"))
         trace_count_before = state.get("trace_count")

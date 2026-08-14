@@ -66,12 +66,5 @@ class TestCopilotEntryPoints:
             user_prompt_submitted,
         )
 
-        for fn in [
-            session_start,
-            user_prompt_submitted,
-            pre_tool_use,
-            post_tool_use,
-            stop,
-            subagent_stop
-        ]:
+        for fn in [session_start, user_prompt_submitted, pre_tool_use, post_tool_use, stop, subagent_stop]:
             assert callable(fn)

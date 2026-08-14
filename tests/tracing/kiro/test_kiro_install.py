@@ -114,12 +114,10 @@ class TestRegisterKiroHooks:
             "toolAliases": {},
             "allowedTools": [],
             "resources": [],
-            "hooks": {
-                "userPromptSubmit": [{"command": "/usr/bin/other"}]
-            },
+            "hooks": {"userPromptSubmit": [{"command": "/usr/bin/other"}]},
             "toolsSettings": {},
             "includeMcpJson": True,
-            "model": None
+            "model": None,
         }
         agent_path.write_text(json.dumps(existing))
 
@@ -177,12 +175,9 @@ class TestUnregisterAllKiroHooks:
                 "name": "mixed",
                 "description": "custom agent",
                 "hooks": {
-                    "agentSpawn": [
-                        {"command": HOOK_CMD},
-                        {"command": "/usr/bin/other-hook"}
-                    ],
-                    "stop": [{"command": HOOK_CMD}]
-                }
+                    "agentSpawn": [{"command": HOOK_CMD}, {"command": "/usr/bin/other-hook"}],
+                    "stop": [{"command": HOOK_CMD}],
+                },
             },
         )
 
@@ -202,11 +197,7 @@ class TestUnregisterAllKiroHooks:
         hooks = {event: [{"command": HOOK_CMD}] for event in HOOK_EVENTS}
         self._write_agent(
             agent_path,
-            {
-                "name": "ours-only",
-                "description": "custom agent",
-                "hooks": hooks
-            },
+            {"name": "ours-only", "description": "custom agent", "hooks": hooks},
         )
 
         _unregister_all_kiro_hooks()
@@ -221,10 +212,7 @@ class TestUnregisterAllKiroHooks:
         hooks = {event: [{"command": HOOK_CMD}] for event in HOOK_EVENTS}
         self._write_agent(
             agent_path,
-            {
-                **AGENT_SKELETON,
-                "hooks": hooks
-            },
+            {**AGENT_SKELETON, "hooks": hooks},
         )
 
         _unregister_all_kiro_hooks()
@@ -238,11 +226,7 @@ class TestUnregisterAllKiroHooks:
         hooks = {event: [{"command": HOOK_CMD}] for event in HOOK_EVENTS}
         self._write_agent(
             agent_path,
-            {
-                "name": "my-agent",
-                "description": "my agent",
-                "hooks": hooks
-            },
+            {"name": "my-agent", "description": "my agent", "hooks": hooks},
         )
 
         _unregister_all_kiro_hooks()

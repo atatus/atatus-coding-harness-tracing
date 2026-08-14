@@ -50,6 +50,42 @@ def isolate_config(tmp_path, monkeypatch):
     env.invalidate_caches()
 
 
+# Every variable the non-interactive resolver consults. Cleared wholesale rather
+# than per-test: an installed harness exports ATATUS_API_KEY and
+# ATATUS_PROJECT_NAME into every session it spawns, so a developer running the
+# suite from inside a traced terminal would otherwise be testing their own
+# credentials.
+_RESOLVED_ENV_KEYS = (
+    "ATATUS_NONINTERACTIVE",
+    "ATATUS_ENV_FILE",
+    "ATATUS_API_KEY",
+    "ATATUS_OTLP_ENDPOINT",
+    "ATATUS_PROJECT_NAME",
+    "ATATUS_USER_ID",
+    "ATATUS_KIRO_AGENT",
+    "ATATUS_KIRO_SET_DEFAULT",
+    "ATATUS_WHEEL_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_setup_resolver(monkeypatch):
+    """Clear the non-interactive resolver's inputs and its dotenv cache.
+
+    The cache is a module global that lives for the whole pytest process, so
+    without this a test that reads a dotenv file hands its values to every test
+    that runs after it.
+    """
+    import core.setup as _setup
+
+    for var in _RESOLVED_ENV_KEYS:
+        monkeypatch.delenv(var, raising=False)
+
+    _setup._reset_dotenv_cache()
+    yield
+    _setup._reset_dotenv_cache()
+
+
 @pytest.fixture
 def tmp_harness_dir(tmp_path, monkeypatch):
     """Create the full ~/.atatus/harness directory tree in a temp location.

@@ -15,8 +15,11 @@ from core.setup import (
     dry_run,
     ensure_harness_installed,
     ensure_shared_runtime,
+    env_flag,
+    env_value,
     info,
     merge_harness_entry,
+    non_interactive,
     prompt_backend,
     needs_content_logging_prompt,
     prompt_content_logging,
@@ -102,6 +105,8 @@ def uninstall() -> None:
 
 def _prompt_agent_name() -> str:
     """Ask the user which agent to install hooks into. Default atatus-traced."""
+    if non_interactive():
+        return env_value("ATATUS_KIRO_AGENT") or DEFAULT_AGENT_NAME
     raw = input(f"Agent name to install tracing into [{DEFAULT_AGENT_NAME}]: ").strip()
     return raw or DEFAULT_AGENT_NAME
 
@@ -206,10 +211,18 @@ def _unregister_all_kiro_hooks() -> None:
 
 
 def _maybe_set_default(name: str) -> None:
-    """Ask the user whether to set this agent as Kiro's default."""
-    raw = input(f"Set '{name}' as Kiro's default agent? [y/N]: ").strip().lower()
-    if raw not in ("y", "yes"):
-        return
+    """Ask the user whether to set this agent as Kiro's default.
+
+    Stays opt-in when unattended: repointing someone's default Kiro agent is not
+    something to do by inference, so ATATUS_KIRO_SET_DEFAULT must say so.
+    """
+    if non_interactive():
+        if not env_flag("ATATUS_KIRO_SET_DEFAULT", default=False):
+            return
+    else:
+        raw = input(f"Set '{name}' as Kiro's default agent? [y/N]: ").strip().lower()
+        if raw not in ("y", "yes"):
+            return
     if dry_run():
         info(f"would run: kiro-cli agent set-default {name}")
         return

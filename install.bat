@@ -3,7 +3,8 @@ setlocal enabledelayedexpansion
 REM Atatus Coding Harness Tracing — Windows installer router
 REM
 REM Usage:
-REM   install.bat <harness> [--with-skills] [--branch NAME]
+REM   install.bat <harness> [--with-skills] [--branch NAME] [--non-interactive]
+REM   install.bat status [--json]
 REM   install.bat uninstall [harness]
 REM   install.bat update
 
@@ -17,18 +18,34 @@ set "VENV_DIR=%INSTALL_DIR%\venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "VENV_PIP=%VENV_DIR%\Scripts\pip.exe"
 
+REM When set, install from local wheels in this directory instead of fetching the
+REM repo: no network and no remote code execution. Mirrors install.sh --wheel-dir.
+if not defined ATATUS_WHEEL_DIR set "ATATUS_WHEEL_DIR="
+set "WHEEL_DIR=%ATATUS_WHEEL_DIR%"
+
 REM --- Parse arguments ---
 set "COMMAND="
 set "UNINSTALL_HARNESS="
 set "WITH_SKILLS="
+set "STATUS_ARGS="
 :parse_args
 if "%~1"=="" goto :done_args
 if /i "%~1"=="-h"        goto :usage
 if /i "%~1"=="--help"    goto :usage
 if /i "%~1"=="help"      goto :usage
 if /i "%~1"=="--with-skills" ( set "WITH_SKILLS=--with-skills" & shift & goto :parse_args )
+if /i "%~1"=="--non-interactive" ( set "ATATUS_NONINTERACTIVE=1" & shift & goto :parse_args )
+if /i "%~1"=="-y" ( set "ATATUS_NONINTERACTIVE=1" & shift & goto :parse_args )
+if /i "%~1"=="--json" ( set "STATUS_ARGS=--json" & shift & goto :parse_args )
+if /i "%~1"=="--wheel-dir" (
+    set "WHEEL_DIR=%~2"
+    if not exist "%~2\" ( echo [atatus] --wheel-dir needs a directory; got '%~2' >&2 & exit /b 1 )
+    if not exist "%~2\atatus_coding_harness_tracing-*.whl" ( echo [atatus] No atatus_coding_harness_tracing-*.whl in %~2 >&2 & exit /b 1 )
+    shift & shift & goto :parse_args
+)
 if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
 for %%C in (claude codex copilot cursor gemini kiro opencode omp) do if /i "%~1"=="%%C" ( set "COMMAND=%%C" & shift & goto :parse_args )
+if /i "%~1"=="status" ( set "COMMAND=status" & shift & goto :parse_args )
 if /i "%~1"=="update" ( set "COMMAND=update" & shift & goto :parse_args )
 if /i "%~1"=="uninstall" (
     set "COMMAND=uninstall" & shift
@@ -44,6 +61,7 @@ REM --- Harness name -> directory mapping ---
 REM claude->tracing\claude_code  codex->tracing\codex  copilot->tracing\copilot  cursor->tracing\cursor  gemini->tracing\gemini  kiro->tracing\kiro  opencode->tracing\opencode  omp->tracing\omp
 
 REM --- Dispatch ---
+if "%COMMAND%"=="status"    goto :cmd_status
 if "%COMMAND%"=="update"    goto :cmd_update
 if "%COMMAND%"=="uninstall" goto :cmd_uninstall
 
@@ -55,11 +73,14 @@ call :bootstrap_repo
 if %ERRORLEVEL% neq 0 exit /b 1
 call :setup_venv
 if %ERRORLEVEL% neq 0 exit /b 1
-call :resolve_dir "%COMMAND%"
-set "_PY=%INSTALL_DIR%\%HARNESS_DIR%\install.py"
-if not exist "%_PY%" ( echo [atatus] install.py not found at %_PY% >&2 & exit /b 1 )
 echo [atatus] Running %COMMAND% install...
-"%VENV_PYTHON%" "%_PY%" install %WITH_SKILLS%
+call :run_harness_py "%COMMAND%" install "%WITH_SKILLS%"
+exit /b %ERRORLEVEL%
+
+REM --- cmd_status ---
+:cmd_status
+if not exist "%VENV_PYTHON%" ( echo [atatus] Venv not found - nothing installed >&2 & exit /b 1 )
+"%VENV_PYTHON%" -m core.setup.status %STATUS_ARGS%
 exit /b %ERRORLEVEL%
 
 REM --- cmd_update ---
@@ -67,8 +88,23 @@ REM --- cmd_update ---
 if not exist "%INSTALL_DIR%" ( echo [atatus] Not installed at %INSTALL_DIR% >&2 & exit /b 1 )
 call :find_python
 if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
+REM Re-registering runs each harness's installer, which prompts for the project
+REM name. With no console to answer on that dies with an EOFError, so fall back
+REM to stored values there — and only there, so an interactive update keeps
+REM every prompt it has today. cmd has no -t test; ask Python instead.
+%FOUND_PYTHON% -c "import sys; sys.exit(0 if sys.stdin.isatty() else 1)" >nul 2>&1 || set "ATATUS_NONINTERACTIVE=1"
+REM A wheel install has no repo to pull and no newer wheel to hand us. Silently
+REM converting it to a network install would change how it was installed behind
+REM the user's back, so refuse and say who can update.
+if not defined WHEEL_DIR if not exist "%INSTALL_DIR%\.git" if not exist "%INSTALL_DIR%\pyproject.toml" (
+    echo [atatus] This looks like an offline install with no source tree to update. >&2
+    echo [atatus] Re-run the installer that created it, or pass --wheel-dir with a newer wheel. >&2
+    exit /b 1
+)
 set "_UPDATE_NEED_VENV=0"
-if exist "%INSTALL_DIR%\.git" (
+if defined WHEEL_DIR (
+    echo [atatus] Updating from local wheels in %WHEEL_DIR%...
+) else if exist "%INSTALL_DIR%\.git" (
     echo [atatus] Pulling latest changes...
     git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1
     if !ERRORLEVEL! neq 0 (
@@ -90,12 +126,17 @@ if "!_UPDATE_NEED_VENV!"=="1" (
     if !ERRORLEVEL! neq 0 exit /b 1
 ) else if exist "%VENV_PIP%" (
     echo [atatus] Reinstalling package...
-    "%VENV_PIP%" install --quiet "%INSTALL_DIR%" >nul 2>&1
+    call :pip_install_harness "-U"
+    REM Stop here on failure: migrating config and re-registering hooks against
+    REM the package that is still installed would report success for an update
+    REM that did not happen.
+    if !ERRORLEVEL! neq 0 exit /b 1
 )
 if exist "%VENV_PYTHON%" (
     for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
-        call :resolve_dir "%%H"
-        if exist "%INSTALL_DIR%\!HARNESS_DIR!\install.py" ( echo [atatus] Reinstalling %%H... & "%VENV_PYTHON%" "%INSTALL_DIR%\!HARNESS_DIR!\install.py" install )
+        echo [atatus] Reinstalling %%H...
+        call :run_harness_py "%%H" install
+        if !ERRORLEVEL! neq 0 echo [atatus] %%H re-registration failed ^(continuing^) >&2
     )
 )
 echo [atatus] Update complete!
@@ -105,23 +146,24 @@ REM --- cmd_uninstall ---
 :cmd_uninstall
 if not "%UNINSTALL_HARNESS%"=="" (
     if not exist "%VENV_PYTHON%" ( echo [atatus] Venv not found >&2 & exit /b 1 )
-    call :resolve_dir "%UNINSTALL_HARNESS%"
-    set "_PY=%INSTALL_DIR%\!HARNESS_DIR!\install.py"
-    if not exist "!_PY!" ( echo [atatus] install.py not found >&2 & exit /b 1 )
     echo [atatus] Uninstalling %UNINSTALL_HARNESS%...
-    "%VENV_PYTHON%" "!_PY!" uninstall
+    call :run_harness_py "%UNINSTALL_HARNESS%" uninstall
     exit /b !ERRORLEVEL!
 )
 REM Full wipe
-echo [atatus] Uninstalling coding-harness-tracing
+echo [atatus] Uninstalling atatus-coding-harness-tracing
 if exist "%VENV_PYTHON%" (
     for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
-        call :resolve_dir "%%H"
-        if exist "%INSTALL_DIR%\!HARNESS_DIR!\install.py" ( "%VENV_PYTHON%" "%INSTALL_DIR%\!HARNESS_DIR!\install.py" uninstall )
+        call :run_harness_py "%%H" uninstall
     )
     "%VENV_PYTHON%" -c "from core.setup.wipe import wipe_shared_runtime; wipe_shared_runtime()" 2>nul
 )
-if exist "%INSTALL_DIR%" ( rmdir /s /q "%INSTALL_DIR%" 2>nul & echo [atatus] Removed %INSTALL_DIR% )
+REM Everything after this point must live on one line. A full uninstall deletes
+REM the directory this script is running from, and cmd reads a batch file from
+REM disk line by line — so once it is gone there is no next line to read. The
+REM uninstall then succeeded while reporting "The system cannot find the path
+REM specified" and a non-zero exit. Parsed as one line, cmd never looks back.
+if exist "%INSTALL_DIR%" ( rmdir /s /q "%INSTALL_DIR%" 2>nul & echo [atatus] Removed %INSTALL_DIR% & echo [atatus] Uninstall complete. & exit /b 0 )
 echo [atatus] Uninstall complete.
 exit /b 0
 
@@ -147,6 +189,14 @@ goto :eof
 
 REM --- bootstrap_repo: clone or tarball into INSTALL_DIR ---
 :bootstrap_repo
+if defined WHEEL_DIR (
+    if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+    REM `status`, `update` and `uninstall` are documented as running from
+    REM %INSTALL_DIR%\install.bat, which repo mode gets via the extract. Skip the
+    REM copy when we are already running from there, or it would truncate itself.
+    if /i not "%~f0"=="%INSTALL_DIR%\install.bat" copy /y "%~f0" "%INSTALL_DIR%\install.bat" >nul
+    goto :eof
+)
 if exist "%INSTALL_DIR%\.git" (
     echo [atatus] Repository at %INSTALL_DIR%, syncing...
     git -C "%INSTALL_DIR%" fetch --depth 1 origin "%INSTALL_BRANCH%" >nul 2>&1 && git -C "%INSTALL_DIR%" checkout -B "%INSTALL_BRANCH%" FETCH_HEAD >nul 2>&1 && goto :eof
@@ -190,11 +240,48 @@ echo [atatus] Creating venv...
 %FOUND_PYTHON% -m venv "%VENV_DIR%" >nul 2>&1
 if !ERRORLEVEL! neq 0 ( echo [atatus] Failed to create venv >&2 & exit /b 1 )
 if not exist "%VENV_PIP%" ( echo [atatus] pip not found in venv >&2 & exit /b 1 )
-echo [atatus] Installing coding-harness-tracing...
-"%VENV_PIP%" install --quiet "%INSTALL_DIR%" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( echo [atatus] pip install failed >&2 & exit /b 1 )
+echo [atatus] Installing atatus-coding-harness-tracing...
+call :pip_install_harness ""
+if !ERRORLEVEL! neq 0 exit /b 1
 echo [atatus] Venv ready at %VENV_DIR%
 goto :eof
+
+REM --- pip_install_harness: install the package into the venv ---
+REM Extra args are passed through to pip (-U for update).
+REM
+REM Shared so the two callers cannot drift: setup_venv checked ERRORLEVEL and
+REM cmd_update did not, so a failed reinstall let update carry on to re-register
+REM every harness against the OLD package, then print "Update complete!" and
+REM exit 0. install.sh has always checked this.
+REM
+REM Wheel mode deliberately does not send stderr to nul — pip's "No matching
+REM distribution found" is the only thing that explains the failure, and matching
+REM install.sh means a Windows user sees it too.
+:pip_install_harness
+if defined WHEEL_DIR (
+    "%VENV_PIP%" install --quiet %~1 --no-index --find-links "%WHEEL_DIR%" atatus-coding-harness-tracing
+    if !ERRORLEVEL! neq 0 ( echo [atatus] Failed to install atatus-coding-harness-tracing from %WHEEL_DIR% >&2 & exit /b 1 )
+) else (
+    "%VENV_PIP%" install --quiet %~1 "%INSTALL_DIR%" >nul 2>&1
+    if !ERRORLEVEL! neq 0 ( echo [atatus] Failed to install atatus-coding-harness-tracing package >&2 & exit /b 1 )
+)
+exit /b 0
+
+REM --- run_harness_py: invoke a harness installer ---
+REM %1 harness key, %2 verb (install/uninstall), %3 optional flags.
+REM Repo mode runs install.py from the source tree; wheel mode has no source tree
+REM and runs the same code as a module. Both import core.* from site-packages.
+:run_harness_py
+call :resolve_dir "%~1"
+if !ERRORLEVEL! neq 0 exit /b 1
+set "_PY=%INSTALL_DIR%\!HARNESS_DIR!\install.py"
+set "_MOD=!HARNESS_DIR:\=.!.install"
+if exist "!_PY!" (
+    "%VENV_PYTHON%" "!_PY!" %~2 %~3
+) else (
+    "%VENV_PYTHON%" -m "!_MOD!" %~2 %~3
+)
+exit /b !ERRORLEVEL!
 
 REM --- resolve_dir: map command/harness name to directory ---
 :resolve_dir
@@ -227,17 +314,34 @@ echo     gemini              Install tracing for Gemini CLI
 echo     kiro                Install tracing for Kiro CLI
 echo     opencode            Install tracing for opencode
 echo     omp                 Install tracing for Oh My Pi (omp)
+echo     status              Report configured harnesses and hook wiring
 echo     update              Update to latest and reinstall all harnesses
 echo     uninstall [harness] Remove one harness or full wipe
 echo.
 echo   Flags:
 echo     --with-skills   Symlink harness skills into .agents\skills\
 echo     --branch NAME   Install from a specific git branch (default: main)
+echo     --wheel-dir DIR Install from local wheels in DIR instead of downloading
+echo                     the repo. No network and no remote code execution; also
+echo                     settable as ATATUS_WHEEL_DIR.
+echo     --json          With status: emit machine-readable JSON. Exit code is
+echo                     0 wired up, 1 nothing configured, 2 hooks missing.
+echo     --non-interactive, -y  Ask nothing; read values from the environment
+echo                     or the file named by ATATUS_ENV_FILE. Missing required
+echo                     values are an error.
+echo.
+echo   Non-interactive install reads the environment, plus a dotenv file named
+echo   with ATATUS_ENV_FILE — no automatic .env search. ATATUS_API_KEY is
+echo   required; ATATUS_PROJECT_NAME is required on a fresh install. Optional:
+echo   ATATUS_OTLP_ENDPOINT, ATATUS_USER_ID, ATATUS_LOG_PROMPTS,
+echo   ATATUS_LOG_TOOL_DETAILS, ATATUS_LOG_TOOL_CONTENT — all off unless set.
 echo.
 echo   Examples:
 echo     install.bat claude
 echo     install.bat codex --with-skills
 echo     install.bat cursor --branch dev
+echo     install.bat claude --non-interactive
+echo     install.bat status --json
 echo     install.bat uninstall claude
 echo     install.bat uninstall
 echo     install.bat update

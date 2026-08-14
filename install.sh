@@ -6,8 +6,13 @@
 #
 # Usage:
 #   curl -sSL .../install.sh | bash -s -- claude [--with-skills] [--branch NAME]
+#   ./install.sh <harness> --non-interactive
+#   ./install.sh status [--json]
 #   ./install.sh uninstall [<harness>]
 #   ./install.sh update
+#
+# Flag parsing and the pip invocation both run before the venv exists, so
+# neither can move into core/setup/.
 
 set -euo pipefail
 
@@ -16,6 +21,7 @@ INSTALL_BRANCH="${ATATUS_INSTALL_BRANCH:-main}"
 TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
 INSTALL_DIR="${HOME}/.atatus/harness"
 VENV_DIR="${INSTALL_DIR}/venv"
+WHEEL_DIR="${ATATUS_WHEEL_DIR:-}"
 
 # -- Terminal helpers --------------------------------------------------------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -47,12 +53,6 @@ _tty_in=""
 if [[ -t 0 ]]; then _tty_in="/dev/stdin"
 elif (exec 3< /dev/tty) 2>/dev/null; then exec 3<&-; _tty_in="/dev/tty"; fi
 
-tty_input() {
-    local prompt="$1" reply=""
-    [[ -n "$_tty_in" ]] && read -rp "$prompt" reply < "$_tty_in"
-    echo "$reply"
-}
-
 # Run a command with stdin wired to the user's TTY when possible.
 # Under `curl | bash`, our own stdin is the pipe — not a terminal — so any
 # subprocess that calls input() (e.g. tracing/<harness>/install.py) would hit
@@ -64,25 +64,6 @@ run_with_tty() {
     else
         "$@"
     fi
-}
-
-tty_read_masked_line() {
-    REPLY=""
-    [[ -n "${_tty_in:-}" ]] || return 1
-    local prompt="$1" char
-    printf '%s' "$prompt" >&2
-    while IFS= read -rs -n 1 char < "$_tty_in"; do
-        if [[ -z "$char" || "$char" == $'\n' || "$char" == $'\r' ]]; then
-            printf '\n' >&2; return 0
-        fi
-        if [[ "$char" == $'\177' || "$char" == $'\b' ]]; then
-            [[ -n "$REPLY" ]] && { REPLY="${REPLY%?}"; printf '\b \b' >&2; }
-            continue
-        fi
-        [[ "$char" =~ [[:cntrl:]] ]] && continue
-        REPLY+="$char"; printf '*' >&2
-    done
-    printf '\n' >&2
 }
 
 # -- Python discovery --------------------------------------------------------
@@ -143,8 +124,33 @@ install_repo_tarball() {
 }
 
 install_repo() {
+    # Wheel mode fetches nothing. The wheel carries every module the harness
+    # needs, so there is no source tree to place — but install.sh itself has to
+    # land in INSTALL_DIR, because `status`, `update` and `uninstall` are all
+    # documented as running from there and repo mode gets it via the extract.
+    if [[ -n "$WHEEL_DIR" ]]; then
+        mkdir -p "$INSTALL_DIR"
+        if [[ -f "${BASH_SOURCE[0]}" ]] && ! cmp -s "${BASH_SOURCE[0]}" "${INSTALL_DIR}/install.sh"; then
+            cp "${BASH_SOURCE[0]}" "${INSTALL_DIR}/install.sh" && chmod +x "${INSTALL_DIR}/install.sh"
+        fi
+        return 0
+    fi
     git_sync_harness_repo "$INSTALL_BRANCH" && return 0
     install_repo_tarball
+}
+
+# Invoke a harness's install.py. Repo mode runs the file from the source tree;
+# wheel mode has no source tree, so it runs the same code as a module. Both
+# resolve `core.*` from site-packages either way — the package is pip-installed,
+# never on sys.path by accident — so these are equivalent, not a fallback.
+run_harness_py() {
+    local key="$1" vp="$2"; shift 2
+    local dir; dir=$(harness_dir "$key") || return 1
+    if [[ -f "${INSTALL_DIR}/${dir}/install.py" ]]; then
+        run_with_tty "$vp" "${INSTALL_DIR}/${dir}/install.py" "$@"
+    else
+        run_with_tty "$vp" -m "${dir//\//.}.install" "$@"
+    fi
 }
 
 # -- Venv setup --------------------------------------------------------------
@@ -162,8 +168,11 @@ _fix_macos_ssl_certs() {
     local vp
     vp=$(venv_python 2>/dev/null) || return 0
 
-    if ! "$pip" install --quiet certifi 2>/dev/null; then
+    local offline=()
+    [[ -n "$WHEEL_DIR" ]] && offline=(--no-index --find-links "$WHEEL_DIR")
+    if ! "$pip" install --quiet "${offline[@]+"${offline[@]}"}" certifi 2>/dev/null; then
         warn "Could not install certifi — SSL verification may fail on macOS"
+        [[ -n "$WHEEL_DIR" ]] && warn "Bundle a certifi wheel in ${WHEEL_DIR} to fix this offline."
         return 0
     fi
 
@@ -189,6 +198,22 @@ PYEOF
     info "SSL certificates configured via certifi"
 }
 
+# Install the package into the venv. Extra args go to pip (`-U` for update).
+# Shared so install and update cannot drift: they were the same wheel/repo branch
+# written twice, differing only by -U, and a flag added to one would miss the other.
+pip_install_harness() {
+    local pip="$1"; shift
+    if [[ -n "$WHEEL_DIR" ]]; then
+        # --no-index so a missing wheel fails loudly instead of quietly reaching
+        # PyPI, which would defeat the point of installing offline.
+        "$pip" install --quiet "$@" --no-index --find-links "$WHEEL_DIR" atatus-coding-harness-tracing \
+            || { err "Failed to install atatus-coding-harness-tracing from ${WHEEL_DIR}"; return 1; }
+    else
+        "$pip" install --quiet "$@" "$INSTALL_DIR" 2>/dev/null \
+            || { err "Failed to install atatus-coding-harness-tracing package"; return 1; }
+    fi
+}
+
 setup_venv() {
     local python_cmd="$1"
     if ! venv_python &>/dev/null; then
@@ -200,8 +225,8 @@ setup_venv() {
         }
     fi
     local pip; pip=$(venv_pip) || { err "pip not found in venv"; return 1; }
-    info "Installing coding-harness-tracing into venv..."
-    "$pip" install --quiet "$INSTALL_DIR" 2>/dev/null || { err "Failed to install coding-harness-tracing package"; return 1; }
+    info "Installing atatus-coding-harness-tracing into venv..."
+    pip_install_harness "$pip" || return 1
 
     [[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip"
 
@@ -209,9 +234,22 @@ setup_venv() {
 }
 
 # -- Harness name mapping ----------------------------------------------------
+#
+# Accepts both the CLI name and the config key. They are the same for every
+# harness except Claude Code, which writes HARNESS_NAME "claude-code" while its
+# CLI name is "claude". `update` and full `uninstall` discover harnesses via
+# list_installed_harnesses(), which yields *config keys*, so without the alias
+# both skipped Claude Code entirely — a full uninstall wiped the venv and left
+# all 16 hooks in ~/.claude/settings.json pointing at the deleted path, after
+# printing "Uninstall complete." install.bat has accepted both spellings all
+# along (lines 202-203), so this is parity, not new behaviour.
+#
+# The install dispatch below is deliberately left alone: `install.sh claude-code`
+# stays an unknown command, because a second way to install the same harness
+# would imply there are two harnesses.
 harness_dir() {
     case "$1" in
-        claude)  echo "tracing/claude_code" ;;
+        claude|claude-code)  echo "tracing/claude_code" ;;
         codex)   echo "tracing/codex" ;;
         copilot) echo "tracing/copilot" ;;
         cursor)  echo "tracing/cursor" ;;
@@ -225,7 +263,7 @@ harness_dir() {
 
 install_harness() {
     local cmd="$1" skills="$2"
-    local dir; dir=$(harness_dir "$cmd") || { err "Unknown harness: ${cmd}"; usage; exit 1; }
+    harness_dir "$cmd" >/dev/null || { err "Unknown harness: ${cmd}"; usage; exit 1; }
     header "Installing ${cmd} tracing"
     # Name the fix, not just the problem: "No Python 3.9+ found" leaves the reader to work out
     # which package to install on their distro, which is the same dead end a bare
@@ -239,12 +277,10 @@ install_harness() {
     install_repo
     setup_venv "$python_cmd"
     local vp; vp=$(venv_python) || { err "Venv python not found after setup"; exit 1; }
-    local install_py="${INSTALL_DIR}/${dir}/install.py"
-    [[ -f "$install_py" ]] || { err "Harness install script not found: ${install_py}"; exit 1; }
     if [[ "$skills" == true ]]; then
-        run_with_tty "$vp" "$install_py" install --with-skills
+        run_harness_py "$cmd" "$vp" install --with-skills
     else
-        run_with_tty "$vp" "$install_py" install
+        run_harness_py "$cmd" "$vp" install
     fi
     info "Setup complete!"
 }
@@ -265,13 +301,32 @@ Commands:
   kiro        Install and configure tracing for Kiro CLI
   opencode    Install and configure tracing for opencode
   omp         Install and configure tracing for Oh My Pi (omp)
-  update      Update the installed coding-harness-tracing and re-register all harnesses
+  status      Report configured harnesses and whether their hooks are wired up
+  update      Update the installed atatus-coding-harness-tracing and re-register all harnesses
   uninstall <harness>   Tear down one harness
   uninstall             Full wipe: venv + repo + shared config
 
 Flags:
   --with-skills         Symlink harness skills into .agents/skills/
   --branch NAME         Install from a specific git branch (default: main)
+  --wheel-dir DIR       Install from local wheels in DIR instead of downloading.
+                        Fetches nothing and runs no remote code. Also settable
+                        as ATATUS_WHEEL_DIR. Bundle a certifi wheel too if you
+                        need the macOS SSL fix.
+  --json                With `status`: emit machine-readable JSON. Exit code is
+                        0 wired up, 1 nothing configured, 2 hooks missing.
+  --non-interactive, -y Ask nothing; read every value from the environment or
+                        the file named by ATATUS_ENV_FILE. A missing required
+                        value is an error rather than a prompt.
+
+Non-interactive install:
+    Put the licence key in a file so it never reaches argv or shell history:
+
+    printf 'ATATUS_API_KEY=...\nATATUS_PROJECT_NAME=my-team\n' > ~/.atatus/onboarding.env
+    ATATUS_ENV_FILE=~/.atatus/onboarding.env ./install.sh claude --non-interactive
+
+    Content capture is OFF unless ATATUS_LOG_PROMPTS / ATATUS_LOG_TOOL_DETAILS /
+    ATATUS_LOG_TOOL_CONTENT say otherwise — nobody is watching to consent.
 
 EOF
 }
@@ -279,15 +334,25 @@ EOF
 # -- Main dispatch -----------------------------------------------------------
 main() {
     local cmd="${1:-}"; shift || true
-    local subcmd="" with_skills=false
+    local subcmd="" with_skills=false status_args=""
     local args=("$@") i=0
     while [[ $i -lt ${#args[@]} ]]; do
         case "${args[$i]}" in
             --with-skills) with_skills=true ;;
+            --non-interactive|-y) export ATATUS_NONINTERACTIVE=1 ;;
+            --json) status_args="--json" ;;
             --branch)
                 i=$((i + 1))
                 INSTALL_BRANCH="${args[$i]:-main}"
                 TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+                ;;
+            --wheel-dir)
+                i=$((i + 1))
+                WHEEL_DIR="${args[$i]:-}"
+                [[ -d "$WHEEL_DIR" ]] || { err "--wheel-dir needs a directory; got '${WHEEL_DIR}'"; exit 1; }
+                WHEEL_DIR="$(cd "$WHEEL_DIR" && pwd)"
+                compgen -G "${WHEEL_DIR}/atatus_coding_harness_tracing-*.whl" >/dev/null \
+                    || { err "No atatus_coding_harness_tracing-*.whl in ${WHEEL_DIR}"; exit 1; }
                 ;;
             *) [[ -z "$subcmd" ]] && subcmd="${args[$i]}" ;;
         esac
@@ -300,10 +365,10 @@ main() {
             ;;
         uninstall)
             if [[ -n "$subcmd" ]]; then
-                local dir; dir=$(harness_dir "$subcmd") || { err "Unknown harness: ${subcmd}"; usage; exit 1; }
+                harness_dir "$subcmd" >/dev/null || { err "Unknown harness: ${subcmd}"; usage; exit 1; }
                 local vp; vp=$(venv_python) || { err "Venv not found — nothing to uninstall"; exit 1; }
                 header "Uninstalling ${subcmd} tracing"
-                run_with_tty "$vp" "${INSTALL_DIR}/${dir}/install.py" uninstall
+                run_harness_py "$subcmd" "$vp" uninstall
             else
                 local vp; vp=$(venv_python) || {
                     warn "Venv not found — removing install directory"; rm -rf "$INSTALL_DIR"
@@ -318,35 +383,54 @@ main() {
                 harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
                 if [[ -n "$harnesses" ]]; then
                     while IFS= read -r key; do
-                        local dir; dir=$(harness_dir "$key") || { warn "Unknown harness: ${key} (skipping)"; continue; }
-                        if [[ -f "${INSTALL_DIR}/${dir}/install.py" ]]; then
-                            info "Uninstalling ${key} tracing..."
-                            run_with_tty "$vp" "${INSTALL_DIR}/${dir}/install.py" uninstall || warn "${key} uninstall failed (continuing)"
-                        fi
+                        harness_dir "$key" >/dev/null || { warn "Unknown harness: ${key} (skipping)"; continue; }
+                        info "Uninstalling ${key} tracing..."
+                        run_harness_py "$key" "$vp" uninstall || warn "${key} uninstall failed (continuing)"
                     done <<< "$harnesses"
                 fi
                 "$vp" -m core.setup.wipe
             fi
             ;;
+        status)
+            local vp; vp=$(venv_python) || { err "Venv not found — nothing installed"; exit 1; }
+            "$vp" -m core.setup.status $status_args
+            ;;
         update)
-            header "Updating coding-harness-tracing"
-            if [[ -d "${INSTALL_DIR}/.git" ]]; then
+            header "Updating atatus-coding-harness-tracing"
+            # Re-registering runs each harness's installer, which prompts for the
+            # project name. With no terminal to answer on that used to die with an
+            # EOFError partway through, leaving some harnesses re-registered and
+            # others not. Fall back to stored values there — and only there, so an
+            # interactive update keeps every prompt it has today.
+            [[ -n "$_tty_in" ]] || export ATATUS_NONINTERACTIVE=1
+            # A wheel install has no repo to pull and no newer wheel to hand us.
+            # Silently converting it to a network install would change how it was
+            # installed behind the user's back, so refuse and say who can update.
+            if [[ -z "$WHEEL_DIR" && ! -d "${INSTALL_DIR}/.git" && ! -f "${INSTALL_DIR}/pyproject.toml" ]]; then
+                err "This looks like an offline install with no source tree to update."
+                err "Re-run the installer that created it, or pass --wheel-dir <dir> with a newer wheel."
+                exit 1
+            fi
+            if [[ -n "$WHEEL_DIR" ]]; then
+                info "Updating from local wheels in ${WHEEL_DIR}..."
+            elif [[ -d "${INSTALL_DIR}/.git" ]]; then
                 info "Pulling latest changes..."
                 git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || {
                     warn "git pull failed — falling back to tarball re-extract"; install_repo_tarball; }
             else install_repo_tarball; fi
             local pip; pip=$(venv_pip) || { err "Venv not found — run install first"; exit 1; }
-            info "Reinstalling coding-harness-tracing..."
-            "$pip" install --quiet -U "$INSTALL_DIR" 2>/dev/null || { err "Failed to reinstall package"; exit 1; }
+            info "Reinstalling atatus-coding-harness-tracing..."
+            pip_install_harness "$pip" -U || exit 1
             local vp; vp=$(venv_python) || { err "venv python not found"; exit 1; }
             local harnesses
             harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
             if [[ -n "$harnesses" ]]; then
                 while IFS= read -r key; do
-                    local dir; dir=$(harness_dir "$key") || { warn "Unknown harness: ${key} (skipping)"; continue; }
-                    if [[ -f "${INSTALL_DIR}/${dir}/install.py" ]]; then
-                        info "Re-registering ${key}..."; run_with_tty "$vp" "${INSTALL_DIR}/${dir}/install.py" install
-                    else warn "Harness directory not found: ${dir}"; fi
+                    harness_dir "$key" >/dev/null || { warn "Unknown harness: ${key} (skipping)"; continue; }
+                    # Keep going, as the uninstall loop does: one harness whose
+                    # registration fails should not abandon the rest half-updated.
+                    info "Re-registering ${key}..."
+                    run_harness_py "$key" "$vp" install || warn "${key} re-registration failed (continuing)"
                 done <<< "$harnesses"
             else info "No installed harnesses found to re-register"; fi
             info "Update complete."

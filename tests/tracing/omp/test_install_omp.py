@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import json
 
-from core.common import LOG_CONFIG_VERSION
-
 import pytest
 
 import tracing.omp.constants as _omp
 import tracing.omp.install as _install
+from core.common import LOG_CONFIG_VERSION
 
 install = _install.install
 uninstall = _install.uninstall
@@ -53,11 +52,7 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {
-            "isatty": lambda self: False,
-            "write": lambda self, s: None,
-            "flush": lambda self: None
-        },
+        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
     )()
 
 
@@ -149,10 +144,7 @@ class TestInstallFreshWritesFlatHarnessEntry:
 
     @pytest.mark.parametrize(
         "backend,expected_target",
-        [
-            (ATATUS_BACKEND, "atatus"),
-            (ATATUS_BACKEND, "atatus")
-        ],
+        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
         ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch, backend, expected_target):
@@ -167,7 +159,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["project_name"] == "omp"
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
-
 
         # No collector for omp
         assert "collector" not in entry
@@ -385,7 +376,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }
@@ -436,7 +427,7 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
                     "project_name": "omp",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }
@@ -472,7 +463,9 @@ class TestInstallExistingLoggingBlockSkipsPrompt:
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.json"
 
-        seed_config = {"logging": {"_v": LOG_CONFIG_VERSION, "prompts": False, "tool_details": True, "tool_content": False}}
+        seed_config = {
+            "logging": {"_v": LOG_CONFIG_VERSION, "prompts": False, "tool_details": True, "tool_content": False}
+        }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
         _mock_prompts(monkeypatch)

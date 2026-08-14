@@ -46,11 +46,16 @@ class TestShellSyntax:
         text = _read_install_sh()
         assert "set -euo pipefail" in text, "Missing strict mode"
 
-    def test_line_count_under_400(self):
-        """Router should be ~200-330 lines, well under the old 1919."""
+    def test_line_count_under_cap(self):
+        """Router should stay small, well under the old 1919 lines.
+
+        Cap raised 400 -> 460 for non-interactive install, `status` and
+        `--wheel-dir`: flag parsing and the pip invocation both run *before* the
+        venv exists, so neither can move into core/setup/.
+        """
         text = _read_install_sh()
         lines = text.strip().splitlines()
-        assert len(lines) <= 400, f"install.sh has {len(lines)} lines — should be under 400"
+        assert len(lines) <= 460, f"install.sh has {len(lines)} lines — should be under 460"
 
 
 # ---------------------------------------------------------------------------
@@ -73,14 +78,14 @@ class TestFunctionsDefined:
             "err",
             "header",
             "command_exists",
-            "tty_input",
-            "tty_read_masked_line",
             "find_python",
             "venv_python",
             "venv_pip",
             "git_sync_harness_repo",
             "install_repo_tarball",
             "install_repo",
+            "run_harness_py",
+            "pip_install_harness",
             "setup_venv",
             "harness_dir",
             "usage",
@@ -104,7 +109,11 @@ class TestFunctionsDefined:
             "update_install",
             "write_config",
             "collect_backend_credentials",
-            "install_skills"
+            "install_skills",
+            # Dead on arrival: defined, never called. Python's getpass replaced the
+            # masked-input one. Listed here so they cannot creep back.
+            "tty_input",
+            "tty_read_masked_line",
         ]:
             pattern = rf"^{old_func}\s*\(\)"
             assert not re.search(
@@ -125,7 +134,21 @@ class TestHarnessMapping:
         self.text = _read_install_sh()
 
     def test_claude_maps_to_tracing_claude_code(self):
-        assert 'claude)  echo "tracing/claude_code"' in self.text
+        assert 'claude|claude-code)  echo "tracing/claude_code"' in self.text
+
+    def test_claude_code_config_key_is_aliased(self):
+        """`update` and full `uninstall` look harnesses up by *config key*.
+
+        Claude Code is the only harness whose config key ("claude-code") differs
+        from its CLI name ("claude"). Without the alias both loops skipped it, so
+        a full uninstall wiped the venv and left every hook in
+        ~/.claude/settings.json pointing at the deleted path.
+        """
+        import re as _re
+
+        body = _re.search(r"harness_dir\(\) \{(.*?)\n\}", self.text, _re.S)
+        assert body, "harness_dir() not found"
+        assert "claude-code" in body.group(1)
 
     def test_codex_maps_to_tracing_codex(self):
         assert 'codex)   echo "tracing/codex"' in self.text
@@ -280,20 +303,21 @@ class TestDispatchLogic:
         uninstall.
         """
         # Extract the full-uninstall branch (the `else` clause after
-        # `if [[ -n "$subcmd" ]]`). It must list harnesses and invoke
-        # each harness install.py with uninstall BEFORE running wipe.
+        # `if [[ -n "$subcmd" ]]`). It must list harnesses and dispatch
+        # each harness's uninstall BEFORE running wipe.
         text = self.text
         wipe_idx = text.find('"$vp" -m core.setup.wipe')
         assert wipe_idx >= 0, "wipe call not found"
 
         # The list_installed_harnesses invocation must appear before the
-        # wipe call, and an install.py uninstall dispatch must appear
-        # between them.
+        # wipe call, and an uninstall dispatch must appear between them.
+        # run_harness_py is the dispatcher now — it picks the source-tree
+        # install.py or the installed module, depending on install mode.
         pre_wipe = text[:wipe_idx]
         assert "list_installed_harnesses" in pre_wipe, "Full uninstall does not iterate installed harnesses before wipe"
         assert (
-            'install.py" uninstall' in pre_wipe
-        ), "Full uninstall does not invoke per-harness install.py uninstall before wipe"
+            'run_harness_py "$key" "$vp" uninstall' in pre_wipe
+        ), "Full uninstall does not dispatch per-harness uninstall before wipe"
 
     def test_update_calls_pip_install(self):
         assert "pip" in self.text and "install" in self.text
@@ -349,3 +373,136 @@ class TestConstants:
 
     def test_tarball_url(self):
         assert "archive/refs/heads/" in self.text
+
+
+# ---------------------------------------------------------------------------
+# Non-interactive / status / wheel-dir flags
+# ---------------------------------------------------------------------------
+
+
+BAT = os.path.join(os.path.dirname(__file__), "..", "..", "install.bat")
+
+
+def _read_install_bat() -> str:
+    with open(BAT) as f:
+        return f.read()
+
+
+class TestNonInteractiveFlags:
+    """Both routers must expose the same flags — Windows was the half that
+    silently lagged before (see the claude-code alias)."""
+
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.sh = _read_install_sh()
+        self.bat = _read_install_bat()
+
+    def test_sh_exports_noninteractive(self):
+        assert '--non-interactive|-y) export ATATUS_NONINTERACTIVE=1' in self.sh
+
+    def test_bat_exports_noninteractive(self):
+        assert '"--non-interactive" ( set "ATATUS_NONINTERACTIVE=1"' in self.bat
+        assert '"-y" ( set "ATATUS_NONINTERACTIVE=1"' in self.bat
+
+    def test_sh_has_status_command(self):
+        assert "core.setup.status $status_args" in self.sh
+
+    def test_bat_has_status_command(self):
+        assert "core.setup.status %STATUS_ARGS%" in self.bat
+
+    def test_status_is_listed_in_both_usages(self):
+        assert "status      Report configured harnesses" in self.sh
+        assert "status              Report configured harnesses" in self.bat
+
+    def test_update_forces_noninteractive_without_a_terminal(self):
+        """update re-registers every harness, which prompts for the project name.
+
+        With no terminal that died with an unhandled EOFError partway through,
+        leaving some harnesses re-registered and others not.
+        """
+        assert '[[ -n "$_tty_in" ]] || export ATATUS_NONINTERACTIVE=1' in self.sh
+        # cmd has no -t test, so the .bat asks Python instead.
+        assert "sys.stdin.isatty()" in self.bat
+
+
+class TestWheelDir:
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.sh = _read_install_sh()
+        self.bat = _read_install_bat()
+
+    def test_env_var_seeds_the_flag(self):
+        assert 'WHEEL_DIR="${ATATUS_WHEEL_DIR:-}"' in self.sh
+        assert 'set "WHEEL_DIR=%ATATUS_WHEEL_DIR%"' in self.bat
+
+    def test_pip_never_reaches_the_index_offline(self):
+        """--no-index so a missing wheel fails loudly instead of quietly
+        reaching PyPI, which would defeat installing offline."""
+        assert '--no-index --find-links "$WHEEL_DIR" atatus-coding-harness-tracing' in self.sh
+        assert '--no-index --find-links "%WHEEL_DIR%" atatus-coding-harness-tracing' in self.bat
+
+    def test_wheel_presence_is_validated_up_front(self):
+        assert "atatus_coding_harness_tracing-*.whl" in self.sh
+        assert "atatus_coding_harness_tracing-*.whl" in self.bat
+
+    def test_installsh_is_placed_for_later_commands(self):
+        """status/update/uninstall are documented as running from INSTALL_DIR;
+        repo mode gets install.sh via the extract, wheel mode must copy it."""
+        assert '"${INSTALL_DIR}/install.sh"' in self.sh
+        assert '"%INSTALL_DIR%\\install.bat"' in self.bat
+
+    def test_update_refuses_to_convert_offline_to_network(self):
+        assert "offline install with no source tree to update" in self.sh
+        assert "offline install with no source tree to update" in self.bat
+
+
+class TestBatHarnessMapping:
+    """install.bat has always accepted both spellings; install.sh now matches."""
+
+    def test_bat_accepts_claude_code_config_key(self):
+        assert '"claude-code" set "HARNESS_DIR=tracing\\claude_code"' in _read_install_bat()
+
+
+class TestConfigKeysResolve:
+    """Every harness's *config key* must resolve in harness_dir().
+
+    `update` and full `uninstall` discover harnesses via
+    list_installed_harnesses(), which yields config keys (HARNESS_NAME), not CLI
+    names. A key the router cannot map is skipped with a warning — which for a
+    full uninstall wiped the venv and left that harness's hooks pointing at the
+    deleted path, after printing "Uninstall complete."
+
+    Discovered from the constants rather than hardcoded, so a future harness
+    whose config key differs from its CLI name fails here instead of in the field.
+    """
+
+    @staticmethod
+    def _config_keys() -> list[str]:
+        root = os.path.join(os.path.dirname(__file__), "..", "..", "tracing")
+        keys = []
+        for entry in sorted(os.listdir(root)):
+            constants = os.path.join(root, entry, "constants.py")
+            if not os.path.isfile(constants):
+                continue
+            with open(constants) as f:
+                found = re.search(r'^HARNESS_NAME\s*=\s*"([^"]+)"', f.read(), re.MULTILINE)
+            if found:
+                keys.append(found.group(1))
+        return keys
+
+    def test_constants_were_actually_found(self):
+        """An empty list would make the test below vacuously green."""
+        keys = self._config_keys()
+        assert len(keys) >= 8, f"only found {keys}"
+        assert "claude-code" in keys, "the case this test exists for"
+
+    @pytest.mark.parametrize("key", _config_keys.__func__())
+    def test_config_key_maps_to_a_directory(self, key):
+        result = subprocess.run(
+            ["bash", "-c", f'source <(sed -n "/^harness_dir() {{/,/^}}/p" "{INSTALL_SH}"); harness_dir "{key}"'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, f"harness_dir does not accept config key {key!r}"
+        assert result.stdout.strip().startswith("tracing/")

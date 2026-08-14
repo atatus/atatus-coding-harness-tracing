@@ -33,11 +33,7 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {
-            "isatty": lambda self: False,
-            "write": lambda self, s: None,
-            "flush": lambda self: None
-        },
+        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
     )()
 
 
@@ -105,10 +101,7 @@ class TestInstallFreshWritesFlatHarnessEntry:
 
     @pytest.mark.parametrize(
         "backend,expected_target",
-        [
-            (ATATUS_BACKEND, "atatus"),
-            (ATATUS_BACKEND, "atatus")
-        ],
+        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
         ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config_and_hooks(self, cwd_tmp, monkeypatch, backend, expected_target):
@@ -123,7 +116,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["project_name"] == "copilot"
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
-
 
         # No collector for copilot
         assert "collector" not in entry
@@ -146,7 +138,7 @@ class TestInstallFreshWritesFlatHarnessEntry:
             "PreToolUse",
             "PostToolUse",
             "Stop",
-            "SubagentStop"
+            "SubagentStop",
         }
         for event, entries in data["hooks"].items():
             assert len(entries) == 1
@@ -177,7 +169,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }
@@ -230,7 +222,7 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
                     "project_name": "copilot",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }

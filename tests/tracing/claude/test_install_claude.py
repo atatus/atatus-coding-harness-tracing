@@ -59,11 +59,7 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {
-            "isatty": lambda self: False,
-            "write": lambda self, s: None,
-            "flush": lambda self: None
-        },
+        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
     )()
 
 
@@ -100,10 +96,7 @@ class TestFreshInstall:
 
     @pytest.mark.parametrize(
         "backend,expected_target",
-        [
-            (ATATUS_BACKEND, "atatus"),
-            (ATATUS_BACKEND, "atatus")
-        ],
+        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
         ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config_and_hooks(self, fake_home, monkeypatch, backend, expected_target):
@@ -199,7 +192,7 @@ class TestExistingEntry:
             "project_name": "old-name",
             "target": "atatus",
             "endpoint": "https://otel-rx.atatus.com",
-            "api_key": "original-key"
+            "api_key": "original-key",
         }
         config_file.write_text(json.dumps({"harnesses": {"claude-code": original_entry}}, indent=2))
 
@@ -233,15 +226,12 @@ class TestCopyFrom:
             "project_name": "codex",
             "target": "atatus",
             "endpoint": "https://otel-rx.atatus.com",
-            "api_key": "codex-key"
+            "api_key": "codex-key",
         }
         config_file.write_text(json.dumps({"harnesses": {"codex": codex_entry}}, indent=2))
 
         # Mock prompt_backend to return atatus target with codex's credentials (simulating copy-from)
-        copied_creds = {
-            "endpoint": "https://otel-rx.atatus.com",
-            "api_key": "codex-key"
-        }
+        copied_creds = {"endpoint": "https://otel-rx.atatus.com", "api_key": "codex-key"}
         monkeypatch.setattr(
             claude_install,
             "prompt_backend",
@@ -312,7 +302,7 @@ class TestUninstall:
             "project_name": "copilot",
             "target": "atatus",
             "endpoint": "https://otel-rx.atatus.com",
-            "api_key": "copilot-key"
+            "api_key": "copilot-key",
         }
         config_file.write_text(json.dumps(config, indent=2))
 
@@ -355,7 +345,7 @@ class TestUninstall:
                 "ATATUS_USER_ID": "user-42",
                 "ATATUS_API_KEY": "ak-secret",
                 "ATATUS_OTLP_ENDPOINT": "https://otel-rx.atatus.com",
-                "UNRELATED_VAR": "keep-me"
+                "UNRELATED_VAR": "keep-me",
             }
         )
         settings_file.write_text(json.dumps(settings, indent=2) + "\n")

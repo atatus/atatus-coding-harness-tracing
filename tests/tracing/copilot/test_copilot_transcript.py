@@ -18,7 +18,7 @@ class TestParseTranscriptHappyPath:
             f,
             [
                 {"type": "session.start", "data": {"copilotVersion": "1.0.40"}},
-                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}}
+                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}},
             ],
         )
         s = parse_transcript(f)
@@ -29,15 +29,7 @@ class TestParseTranscriptHappyPath:
         f = tmp_path / "events.jsonl"
         _write_jsonl(
             f,
-            [
-                {
-                    "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "do the thing"}
-                    }
-                }
-            ],
+            [{"type": "hook.start", "data": {"hookType": "userPromptSubmitted", "input": {"prompt": "do the thing"}}}],
         )
         s = parse_transcript(f)
         assert s["input_text"] == "do the thing"
@@ -49,7 +41,7 @@ class TestParseTranscriptHappyPath:
             [
                 {"type": "hook.start", "data": {"hookType": "preToolUse", "input": {}}},
                 {"type": "hook.start", "data": {"hookType": "preToolUse", "input": {}}},
-                {"type": "hook.start", "data": {"hookType": "postToolUse", "input": {}}}
+                {"type": "hook.start", "data": {"hookType": "postToolUse", "input": {}}},
             ],
         )
         s = parse_transcript(f)
@@ -106,7 +98,7 @@ class TestParseTranscriptOverwriteSemantics:
             f,
             [
                 {"type": "session.model_change", "data": {"newModel": "gpt-4"}},
-                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}}
+                {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}},
             ],
         )
         s = parse_transcript(f)
@@ -119,18 +111,12 @@ class TestParseTranscriptOverwriteSemantics:
             [
                 {
                     "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "first prompt"}
-                    }
+                    "data": {"hookType": "userPromptSubmitted", "input": {"prompt": "first prompt"}},
                 },
                 {
                     "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "second prompt"}
-                    }
-                }
+                    "data": {"hookType": "userPromptSubmitted", "input": {"prompt": "second prompt"}},
+                },
             ],
         )
         s = parse_transcript(f)
@@ -142,7 +128,7 @@ class TestParseTranscriptOverwriteSemantics:
             f,
             [
                 {"type": "session.model_change", "data": {"newModel": "gpt-4"}},
-                {"type": "session.model_change", "data": {"newModel": ""}}
+                {"type": "session.model_change", "data": {"newModel": ""}},
             ],
         )
         s = parse_transcript(f)
@@ -153,20 +139,8 @@ class TestParseTranscriptOverwriteSemantics:
         _write_jsonl(
             f,
             [
-                {
-                    "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "real prompt"}
-                    }
-                },
-                {
-                    "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": ""}
-                    }
-                }
+                {"type": "hook.start", "data": {"hookType": "userPromptSubmitted", "input": {"prompt": "real prompt"}}},
+                {"type": "hook.start", "data": {"hookType": "userPromptSubmitted", "input": {"prompt": ""}}},
             ],
         )
         s = parse_transcript(f)
@@ -184,7 +158,7 @@ class TestParseTranscriptReturnShape:
             "input_text",
             "output_text",
             "tool_count",
-            "events_seen"
+            "events_seen",
         }
 
     def test_output_text_always_empty_string(self, tmp_path):
@@ -194,13 +168,7 @@ class TestParseTranscriptReturnShape:
             [
                 {"type": "session.start", "data": {"copilotVersion": "1.0.40"}},
                 {"type": "session.model_change", "data": {"newModel": "gpt-5-mini"}},
-                {
-                    "type": "hook.start",
-                    "data": {
-                        "hookType": "userPromptSubmitted",
-                        "input": {"prompt": "hello"}
-                    }
-                }
+                {"type": "hook.start", "data": {"hookType": "userPromptSubmitted", "input": {"prompt": "hello"}}},
             ],
         )
         s = parse_transcript(f)

@@ -71,11 +71,7 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {
-            "isatty": lambda self: False,
-            "write": lambda self, s: None,
-            "flush": lambda self: None
-        },
+        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
     )()
 
 
@@ -114,10 +110,7 @@ class TestFreshInstall:
 
     @pytest.mark.parametrize(
         "backend,expected_target",
-        [
-            (ATATUS_BACKEND, "atatus"),
-            (ATATUS_BACKEND, "atatus")
-        ],
+        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
         ids=["atatus", "atatus"],
     )
     def test_install_fresh_writes_flat_harness_entry(self, fake_home, monkeypatch, backend, expected_target):
@@ -195,7 +188,7 @@ class TestCopyFrom:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "existing-key"
+                    "api_key": "existing-key",
                 }
             }
         }
@@ -247,7 +240,7 @@ class TestExistingEntry:
                     "project_name": "cursor",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": ""
+                    "api_key": "",
                 }
             }
         }

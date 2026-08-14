@@ -151,7 +151,7 @@ class TestHelpers:
                 {"type": "text", "text": "Hello "},
                 {"type": "thinking", "text": "SECRET"},
                 {"type": "toolCall", "id": "c1", "name": "bash", "arguments": {}},
-                {"type": "text", "text": "world"}
+                {"type": "text", "text": "world"},
             ]
         }
         assert _assistant_text(message) == "Hello world"
@@ -178,7 +178,7 @@ class TestHelpers:
             "content": [
                 {"type": "text", "text": "ok"},
                 {"type": "toolCall", "id": "c1", "name": "bash", "arguments": {"command": "ls"}},
-                {"type": "toolCall", "id": "c2", "name": "edit", "arguments": {"filePath": "/a"}}
+                {"type": "toolCall", "id": "c2", "name": "edit", "arguments": {"filePath": "/a"}},
             ]
         }
         calls = _tool_calls(message)
@@ -192,11 +192,7 @@ class TestHelpers:
         assert _tool_calls({}) == {}
 
     def test_text_of_content_joins_text_parts(self):
-        content = [
-            {"type": "text", "text": "a"},
-            {"type": "image"},
-            {"type": "text", "text": "b"}
-        ]
+        content = [{"type": "text", "text": "a"}, {"type": "image"}, {"type": "text", "text": "b"}]
         assert _text_of_content(content) == "ab"
 
     def test_text_of_content_handles_empty(self):
@@ -469,7 +465,7 @@ class TestTurnEndToolSpans:
                 "model": "claude-sonnet-4",
                 "provider": "anthropic",
                 "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0},
-                "timestamp": 100
+                "timestamp": 100,
             },
             "toolResults": [
                 {
@@ -478,9 +474,9 @@ class TestTurnEndToolSpans:
                     "toolName": "bash",
                     "content": [{"type": "text", "text": "out"}],
                     "isError": False,
-                    "timestamp": 120
+                    "timestamp": 120,
                 }
-            ]
+            ],
         }
         _handle_before_agent_start(_load_fixture("before_agent_start.json"))
         _handle_turn_end(payload)
@@ -632,9 +628,7 @@ class TestAgentEnd:
             {
                 "type": "agent_end",
                 "sessionId": "omp_sess_1",
-                "messages": [
-                    {"role": "toolResult", "content": [{"type": "text", "text": "tool output"}]}
-                ]
+                "messages": [{"role": "toolResult", "content": [{"type": "text", "text": "tool output"}]}],
             }
         )
         attrs = _get_attrs(_by_kind(captured_spans, "CHAIN")[0])
@@ -765,12 +759,12 @@ def _make_turn_end_with_tool(tool_name, arguments):
             "role": "assistant",
             "content": [
                 {"type": "text", "text": "ok"},
-                {"type": "toolCall", "id": "call_x", "name": tool_name, "arguments": arguments}
+                {"type": "toolCall", "id": "call_x", "name": tool_name, "arguments": arguments},
             ],
             "model": "claude-sonnet-4",
             "provider": "anthropic",
             "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "cost": {"total": 0}},
-            "timestamp": 200
+            "timestamp": 200,
         },
         "toolResults": [
             {
@@ -779,9 +773,9 @@ def _make_turn_end_with_tool(tool_name, arguments):
                 "toolName": tool_name,
                 "content": [{"type": "text", "text": "tool-out"}],
                 "isError": False,
-                "timestamp": 220
+                "timestamp": 220,
             }
-        ]
+        ],
     }
 
 

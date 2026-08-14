@@ -33,7 +33,7 @@ EXPECTED_ENTRY_POINTS = {
     "atatus-hook-permission-request": "tracing.claude_code.hooks.handlers:permission_request",
     "atatus-hook-session-end": "tracing.claude_code.hooks.handlers:session_end",
     "atatus-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
-    "atatus-hook-cursor": "tracing.cursor.hooks.handlers:main"
+    "atatus-hook-cursor": "tracing.cursor.hooks.handlers:main",
 }
 
 
@@ -129,7 +129,7 @@ class TestHooksJson:
             "StopFailure",
             "Notification",
             "PermissionRequest",
-            "SessionEnd"
+            "SessionEnd",
         }
         actual_events = set(hooks_data["hooks"].keys())
         assert expected_events == actual_events
@@ -273,7 +273,7 @@ class TestNoBashReferences:
             "user_prompt_submit.sh",
             "notify.sh",
             "hook-handler.sh",
-            "common.sh"
+            "common.sh",
         ]
         for f in _collect_md_files():
             content = f.read_text()
@@ -295,10 +295,7 @@ class TestNoBashReferences:
         so we only check that user-facing READMEs point to install.sh as the
         entry point.
         """
-        user_facing = [
-            REPO_ROOT / "README.md",
-            *(REPO_ROOT.glob("*-tracing/README.md"))
-        ]
+        user_facing = [REPO_ROOT / "README.md", *(REPO_ROOT.glob("*-tracing/README.md"))]
         for f in user_facing:
             if not f.exists():
                 continue
@@ -388,7 +385,7 @@ class TestCursorHookReference:
             "afterFileEdit",
             "stop",
             "beforeTabFileRead",
-            "afterTabFileEdit"
+            "afterTabFileEdit",
         ]
         for event in events:
             assert event in skill, f"Cursor SKILL.md missing event: {event}"

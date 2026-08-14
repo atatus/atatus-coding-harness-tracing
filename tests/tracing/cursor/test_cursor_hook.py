@@ -162,10 +162,7 @@ class TestDispatch:
         ):
             _dispatch(
                 "beforeSubmitPrompt",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"conversation_id": "c1", "generation_id": "g1"},
             )
             h.assert_called_once()
 
@@ -214,11 +211,7 @@ class TestDispatch:
         ):
             _dispatch(
                 "beforeSubmitPrompt",
-                {
-                    "hook_event_name": "beforeSubmitPrompt",
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"hook_event_name": "beforeSubmitPrompt", "conversation_id": "c1", "generation_id": "g1"},
             )
             assert send_mock.call_count == 0
             _dispatch(
@@ -227,18 +220,14 @@ class TestDispatch:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "c1",
                     "generation_id": "g1",
-                    "response": "done"
+                    "response": "done",
                 },
             )
             # afterAgentResponse sends the deferred root User Prompt only; LLM is deferred to stop.
             assert send_mock.call_count == 1
             _dispatch(
                 "stop",
-                {
-                    "hook_event_name": "stop",
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"hook_event_name": "stop", "conversation_id": "c1", "generation_id": "g1"},
             )
             # stop flushes the deferred LLM span (Agent Response) and emits Agent Stop.
             assert send_mock.call_count == 3
@@ -266,7 +255,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -286,7 +275,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I fixed the bug",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -297,11 +286,7 @@ class TestHandleBeforeSubmitPrompt:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=10000):
             _dispatch(
                 "stop",
-                {
-                    "hookEventName": "stop",
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1"
-                },
+                {"hookEventName": "stop", "conversation_id": "conv-1", "generation_id": "gen-1"},
             )
 
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
@@ -327,7 +312,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -341,7 +326,7 @@ class TestHandleBeforeSubmitPrompt:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I fixed the bug",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -359,11 +344,7 @@ class TestHandleBeforeSubmitPrompt:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=10000):
             _dispatch(
                 "stop",
-                {
-                    "hook_event_name": "stop",
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1"
-                },
+                {"hook_event_name": "stop", "conversation_id": "conv-1", "generation_id": "gen-1"},
             )
 
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
@@ -396,7 +377,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "I found the issue",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -436,7 +417,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-9",
                     "generation_id": "gen-9",
                     "prompt": "do the thing",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
             _dispatch(
@@ -446,7 +427,7 @@ class TestHandleAfterAgentResponse:
                     "conversation_id": "conv-9",
                     "generation_id": "gen-9",
                     "response": "did the thing",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
@@ -478,11 +459,7 @@ class TestHandleAfterAgentResponse:
         ):
             _dispatch(
                 "afterAgentResponse",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "response": "yo"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "response": "yo"},
             )
 
         with (
@@ -510,10 +487,7 @@ class TestHandleAfterAgentResponse:
         ):
             _dispatch(
                 "afterAgentResponse",
-                {
-                    "conversation_id": "conv-1",
-                    "response": "I found the issue"
-                },
+                {"conversation_id": "conv-1", "response": "I found the issue"},
             )
 
         assert len(captured_spans) == 1
@@ -543,12 +517,7 @@ class TestHandleAfterShellExecution:
         ):
             _dispatch(
                 "afterShellExecution",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "output": "total 0",
-                    "exit_code": "0"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "output": "total 0", "exit_code": "0"},
             )
 
         assert len(captured_spans) == 1
@@ -571,12 +540,7 @@ class TestHandleAfterShellExecution:
         ):
             _dispatch(
                 "afterShellExecution",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "command": "new_cmd",
-                    "output": "ok"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "command": "new_cmd", "output": "ok"},
             )
 
         attrs = {
@@ -595,11 +559,7 @@ class TestHandleAfterShellExecution:
         ):
             _dispatch(
                 "afterShellExecution",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "output": "ok"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "output": "ok"},
             )
 
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -643,12 +603,7 @@ class TestHandleStop:
         ):
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "status": "completed",
-                    "loop_count": "3"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "status": "completed", "loop_count": "3"},
             )
 
         cleanup.assert_called_once_with("gen-1")
@@ -704,12 +659,7 @@ class TestHandleBeforeShellExecution:
         ):
             _dispatch(
                 "beforeShellExecution",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "gen-1",
-                    "command": "ls -la",
-                    "cwd": "/home"
-                },
+                {"conversation_id": "c1", "generation_id": "gen-1", "command": "ls -la", "cwd": "/home"},
             )
 
         push_mock.assert_called_once()
@@ -728,10 +678,7 @@ class TestHandleBeforeShellExecution:
         ):
             _dispatch(
                 "beforeShellExecution",
-                {
-                    "conversation_id": "c1",
-                    "command": "ls"
-                },
+                {"conversation_id": "c1", "command": "ls"},
             )
 
         push_mock.assert_not_called()
@@ -754,11 +701,7 @@ class TestHandleAfterAgentThought:
         ):
             _dispatch(
                 "afterAgentThought",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "thought": "thinking about the problem"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "thought": "thinking about the problem"},
             )
 
         get_mock.assert_called_once_with("gen-1")
@@ -793,7 +736,7 @@ class TestHandleBeforeMcpExecution:
                     "generation_id": "gen-1",
                     "tool_name": "search",
                     "tool_input": '{"query": "test"}',
-                    "url": "http://localhost:3000"
+                    "url": "http://localhost:3000",
                 },
             )
 
@@ -813,10 +756,7 @@ class TestHandleBeforeMcpExecution:
         ):
             _dispatch(
                 "beforeMCPExecution",
-                {
-                    "conversation_id": "c1",
-                    "tool_name": "search"
-                },
+                {"conversation_id": "c1", "tool_name": "search"},
             )
 
         push_mock.assert_not_called()
@@ -839,7 +779,7 @@ class TestHandleAfterMcpExecution:
             "command": "",
             "start_ms": "1000",
             "trace_id": "t1",
-            "conversation_id": "c1"
+            "conversation_id": "c1",
         }
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
@@ -849,11 +789,7 @@ class TestHandleAfterMcpExecution:
         ):
             _dispatch(
                 "afterMCPExecution",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "result": "found 3 items"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "result": "found 3 items"},
             )
 
         assert len(captured_spans) == 1
@@ -877,12 +813,7 @@ class TestHandleAfterMcpExecution:
         ):
             _dispatch(
                 "afterMCPExecution",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "tool_name": "list_repos",
-                    "result": "ok"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "tool_name": "list_repos", "result": "ok"},
             )
 
         assert len(captured_spans) == 1
@@ -909,11 +840,7 @@ class TestHandleBeforeReadFile:
         ):
             _dispatch(
                 "beforeReadFile",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "file_path": "/foo/bar.py"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "file_path": "/foo/bar.py"},
             )
 
         assert len(captured_spans) == 1
@@ -947,7 +874,7 @@ class TestHandleAfterFileEdit:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "file_path": "/foo/bar.py",
-                    "diff": "+added line"
+                    "diff": "+added line",
                 },
             )
 
@@ -970,11 +897,7 @@ class TestHandleAfterFileEdit:
         ):
             _dispatch(
                 "afterFileEdit",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "file_path": "/foo/bar.py"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "file_path": "/foo/bar.py"},
             )
 
         attrs = {
@@ -1001,11 +924,7 @@ class TestHandleBeforeTabFileRead:
         ):
             _dispatch(
                 "beforeTabFileRead",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "file_path": "/src/main.ts"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "file_path": "/src/main.ts"},
             )
 
         assert len(captured_spans) == 1
@@ -1039,7 +958,7 @@ class TestHandleAfterTabFileEdit:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "file_path": "/src/main.ts",
-                    "edits": "replaced function"
+                    "edits": "replaced function",
                 },
             )
 
@@ -1062,11 +981,7 @@ class TestHandleAfterTabFileEdit:
         ):
             _dispatch(
                 "afterTabFileEdit",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "file_path": "/src/main.ts"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "file_path": "/src/main.ts"},
             )
 
         attrs = {
@@ -1092,7 +1007,7 @@ class TestMain:
             "hook_event_name": "beforeSubmitPrompt",
             "conversation_id": "c1",
             "generation_id": "g1",
-            "prompt": "hello"
+            "prompt": "hello",
         }
         stdout_buf = io.StringIO()
 
@@ -1131,11 +1046,7 @@ class TestMain:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
-        input_data = {
-            "hook_event_name": "afterAgentResponse",
-            "conversation_id": "c1",
-            "generation_id": "g1"
-        }
+        input_data = {"hook_event_name": "afterAgentResponse", "conversation_id": "c1", "generation_id": "g1"}
         stdout_buf = io.StringIO()
 
         with (
@@ -1276,10 +1187,7 @@ class TestDispatchNewEvents:
         ):
             _dispatch(
                 "sessionStart",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"conversation_id": "c1", "generation_id": "g1"},
             )
             h.assert_called_once()
 
@@ -1291,10 +1199,7 @@ class TestDispatchNewEvents:
         ):
             _dispatch(
                 "sessionEnd",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"conversation_id": "c1", "generation_id": "g1"},
             )
             h.assert_called_once()
 
@@ -1306,10 +1211,7 @@ class TestDispatchNewEvents:
         ):
             _dispatch(
                 "postToolUse",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"conversation_id": "c1", "generation_id": "g1"},
             )
             h.assert_called_once()
 
@@ -1326,12 +1228,7 @@ class TestMainCamelCase:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         monkeypatch.setenv("ATATUS_LOG_FILE", str(tmp_path / "hook.log"))
 
-        input_data = {
-            "hookEventName": "sessionStart",
-            "conversation_id": "c1",
-            "generation_id": "g1",
-            "cwd": "/tmp"
-        }
+        input_data = {"hookEventName": "sessionStart", "conversation_id": "c1", "generation_id": "g1", "cwd": "/tmp"}
         stdout_buf = io.StringIO()
 
         with (
@@ -1366,7 +1263,7 @@ class TestHandleSessionStart:
                     "conversation_id": "conv-sess",
                     "generation_id": "gen-sess",
                     "cwd": "/Users/alice/code/myrepo",
-                    "user_email": "alice@example.com"
+                    "user_email": "alice@example.com",
                 },
             )
 
@@ -1388,10 +1285,7 @@ class TestHandleSessionStart:
         ):
             _dispatch(
                 "sessionStart",
-                {
-                    "conversation_id": "conv-sess",
-                    "cwd": "/tmp"
-                },
+                {"conversation_id": "conv-sess", "cwd": "/tmp"},
             )
 
         save_mock.assert_not_called()
@@ -1403,9 +1297,7 @@ class TestHandleSessionStart:
         with (mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),):
             _dispatch(
                 "sessionStart",
-                {
-                    "conversation_id": "conv-sess"
-                },
+                {"conversation_id": "conv-sess"},
             )
 
         attr_keys = {a["key"] for a in captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
@@ -1434,7 +1326,7 @@ class TestHandlePostToolUse:
                     "generation_id": "gen-pt",
                     "toolName": "code_search",
                     "toolInput": '{"query": "main function"}',
-                    "result": "<search results>"
+                    "result": "<search results>",
                 },
             )
 
@@ -1463,7 +1355,7 @@ class TestHandlePostToolUse:
                     "generation_id": "g1",
                     "toolName": "custom_runner",
                     "command": "ls -la",
-                    "stdout": "total 40\ndrwxr-xr-x ..."
+                    "stdout": "total 40\ndrwxr-xr-x ...",
                 },
             )
 
@@ -1484,10 +1376,7 @@ class TestHandlePostToolUse:
         ):
             _dispatch(
                 "postToolUse",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1"
-                },
+                {"conversation_id": "c1", "generation_id": "g1"},
             )
 
         attr_keys = {a["key"] for a in captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
@@ -1504,12 +1393,7 @@ class TestHandlePostToolUse:
         ):
             _dispatch(
                 "postToolUse",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "toolName": "shell",
-                    "command": "ls -la"
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "toolName": "shell", "command": "ls -la"},
             )
 
         assert len(captured_spans) == 0
@@ -1527,11 +1411,7 @@ class TestHandlePostToolUse:
         ):
             _dispatch(
                 "postToolUse",
-                {
-                    "conversation_id": "c1",
-                    "generation_id": "g1",
-                    "toolName": tool_name
-                },
+                {"conversation_id": "c1", "generation_id": "g1", "toolName": tool_name},
             )
 
         assert len(captured_spans) == 0, f"Expected no span for tool_name={tool_name!r}"
@@ -1549,7 +1429,7 @@ class TestHandlePostToolUse:
                     "conversation_id": "c1",
                     "generation_id": "g1",
                     "toolName": "glob",
-                    "toolInput": '{"pattern": "*.py"}'
+                    "toolInput": '{"pattern": "*.py"}',
                 },
             )
 
@@ -1586,7 +1466,7 @@ class TestHandleStopTokenCounts:
                     "output_tokens": 1523,
                     "cache_read_tokens": 68000,
                     "cache_write_tokens": 0,
-                    "model": "claude-sonnet-4.5"
+                    "model": "claude-sonnet-4.5",
                 },
             )
 
@@ -1612,11 +1492,7 @@ class TestHandleStopTokenCounts:
         ):
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "status": "completed"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "status": "completed"},
             )
 
         attr_keys = {a["key"] for a in captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
@@ -1642,7 +1518,7 @@ class TestHandleStopTokenCounts:
                     "generation_id": "gen-1",
                     "input_tokens": "100",
                     "output_tokens": "--",
-                    "cache_read_tokens": None
+                    "cache_read_tokens": None,
                 },
             )
 
@@ -1678,7 +1554,7 @@ class TestHandleSessionEnd:
                     "generation_id": "gen-end",
                     "duration_ms": 7447445,
                     "final_status": "completed",
-                    "reason": "window_close"
+                    "reason": "window_close",
                 },
             )
 
@@ -1703,10 +1579,7 @@ class TestHandleSessionEnd:
         ):
             _dispatch(
                 "sessionEnd",
-                {
-                    "conversation_id": "conv-end",
-                    "generation_id": "g-123"
-                },
+                {"conversation_id": "conv-end", "generation_id": "g-123"},
             )
 
         cleanup.assert_called_once_with("g-123")
@@ -1721,9 +1594,7 @@ class TestHandleSessionEnd:
         ):
             _dispatch(
                 "sessionEnd",
-                {
-                    "conversation_id": "conv-end"
-                },
+                {"conversation_id": "conv-end"},
             )
 
         assert len(captured_spans) == 1
@@ -1749,69 +1620,38 @@ class TestConversationIdAttribute:
             "hookEventName": "beforeSubmitPrompt",  # CLI path — sends span immediately
             "conversation_id": "conv-abc",
             "generation_id": "gen-abc",
-            "prompt": "test"
+            "prompt": "test",
         },
         # afterAgentResponse is excluded: under the deferred-LLM design it no longer
         # emits a span on its own — the Agent Response LLM span is flushed at stop.
         # cursor.conversation.id on that deferred span is covered by
         # TestDeferredLlmSpan below.
-        "afterAgentThought": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-aat",
-            "thought": "thinking"
-        },
+        "afterAgentThought": {"conversation_id": "conv-abc", "generation_id": "gen-aat", "thought": "thinking"},
         "afterShellExecution": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ase",
             "command": "ls",
-            "output": "ok"
+            "output": "ok",
         },
         "afterMCPExecution": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ame",
             "tool_name": "my_tool",
-            "result": "ok"
+            "result": "ok",
         },
-        "beforeReadFile": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-brf",
-            "file_path": "/tmp/a.py"
-        },
-        "afterFileEdit": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-afe",
-            "file_path": "/tmp/a.py"
-        },
-        "beforeTabFileRead": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-btfr",
-            "file_path": "/tmp/a.py"
-        },
-        "afterTabFileEdit": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-atfe",
-            "file_path": "/tmp/a.py"
-        },
-        "stop": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-stop",
-            "status": "completed"
-        },
-        "sessionStart": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-ss",
-            "cwd": "/tmp"
-        },
-        "sessionEnd": {
-            "conversation_id": "conv-abc",
-            "generation_id": "gen-se"
-        },
+        "beforeReadFile": {"conversation_id": "conv-abc", "generation_id": "gen-brf", "file_path": "/tmp/a.py"},
+        "afterFileEdit": {"conversation_id": "conv-abc", "generation_id": "gen-afe", "file_path": "/tmp/a.py"},
+        "beforeTabFileRead": {"conversation_id": "conv-abc", "generation_id": "gen-btfr", "file_path": "/tmp/a.py"},
+        "afterTabFileEdit": {"conversation_id": "conv-abc", "generation_id": "gen-atfe", "file_path": "/tmp/a.py"},
+        "stop": {"conversation_id": "conv-abc", "generation_id": "gen-stop", "status": "completed"},
+        "sessionStart": {"conversation_id": "conv-abc", "generation_id": "gen-ss", "cwd": "/tmp"},
+        "sessionEnd": {"conversation_id": "conv-abc", "generation_id": "gen-se"},
         "postToolUse": {
             "conversation_id": "conv-abc",
             "generation_id": "gen-ptu",
             "toolName": "glob",
-            "toolInput": "*.py"
-        }
+            "toolInput": "*.py",
+        },
     }
 
     # Events that push state but don't emit a span
@@ -1851,10 +1691,7 @@ class TestConversationIdAttribute:
         ):
             _dispatch(
                 "stop",
-                {
-                    "generation_id": "gen-1",
-                    "status": "completed"
-                },
+                {"generation_id": "gen-1", "status": "completed"},
             )
 
         attr_keys = {a["key"] for a in captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
@@ -1882,7 +1719,7 @@ class TestIdeSafety:
                     "conversation_id": "conv-ide",
                     "generation_id": "gen-ide",
                     "command": "echo hello",
-                    "cwd": "/tmp"
+                    "cwd": "/tmp",
                 },
             )
 
@@ -1901,7 +1738,7 @@ class TestIdeSafety:
                     "generation_id": "gen-ide",
                     "command": "echo hello",
                     "output": "hello",
-                    "exit_code": "0"
+                    "exit_code": "0",
                 },
             )
 
@@ -1950,7 +1787,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "prompt": "fix the bug",
-                    "model_name": "claude-sonnet-4.5"
+                    "model_name": "claude-sonnet-4.5",
                 },
             )
 
@@ -1962,7 +1799,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "fixed",
-                    "model_name": "claude-sonnet-4.5"
+                    "model_name": "claude-sonnet-4.5",
                 },
             )
 
@@ -1978,7 +1815,7 @@ class TestDeferredLlmSpan:
                     "output_tokens": 1523,
                     "cache_read_tokens": 68000,
                     "cache_write_tokens": 0,
-                    "model": "claude-sonnet-4.5"
+                    "model": "claude-sonnet-4.5",
                 },
             )
 
@@ -2014,11 +1851,7 @@ class TestDeferredLlmSpan:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
             _dispatch(
                 "afterAgentResponse",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "response": "done"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "response": "done"},
             )
 
         assert len(captured_spans) == 0
@@ -2026,12 +1859,7 @@ class TestDeferredLlmSpan:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=4000):
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "input_tokens": 10,
-                    "output_tokens": 5
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "input_tokens": 10, "output_tokens": 5},
             )
 
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
@@ -2056,7 +1884,7 @@ class TestDeferredLlmSpan:
                     "cache_read_tokens": 25,
                     "cache_write_tokens": 5,
                     "model": "claude-sonnet-4.5",
-                    "status": "completed"
+                    "status": "completed",
                 },
             )
 
@@ -2083,7 +1911,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "beforeSubmitPrompt",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "prompt": "p"
+                    "prompt": "p",
                 },
             )
             _dispatch(
@@ -2092,7 +1920,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "r"
+                    "response": "r",
                 },
             )
 
@@ -2106,20 +1934,13 @@ class TestDeferredLlmSpan:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
             _dispatch(
                 "afterAgentResponse",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "response": "done"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "response": "done"},
             )
 
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000):
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1"},
             )
 
         spans = _spans_by_name(captured_spans)
@@ -2140,11 +1961,7 @@ class TestDeferredLlmSpan:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
             _dispatch(
                 "afterAgentResponse",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "response": "done"
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "response": "done"},
             )
             _dispatch(
                 "stop",
@@ -2154,7 +1971,7 @@ class TestDeferredLlmSpan:
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cache_read_tokens": 0,
-                    "cache_write_tokens": 0
+                    "cache_write_tokens": 0,
                 },
             )
 
@@ -2176,12 +1993,7 @@ class TestDeferredLlmSpan:
         ):
             _dispatch(
                 "sessionEnd",
-                {
-                    "conversation_id": "conv-end",
-                    "generation_id": "gen-end",
-                    "input_tokens": 200,
-                    "output_tokens": 75
-                },
+                {"conversation_id": "conv-end", "generation_id": "gen-end", "input_tokens": 200, "output_tokens": 75},
             )
 
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
@@ -2202,7 +2014,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "beforeSubmitPrompt",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "prompt": "p"
+                    "prompt": "p",
                 },
             )
 
@@ -2219,7 +2031,7 @@ class TestDeferredLlmSpan:
                     "hook_event_name": "afterAgentResponse",
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
-                    "response": "r"
+                    "response": "r",
                 },
             )
 
@@ -2227,11 +2039,7 @@ class TestDeferredLlmSpan:
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=99999):
             _dispatch(
                 "stop",
-                {
-                    "hook_event_name": "stop",
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1"
-                },
+                {"hook_event_name": "stop", "conversation_id": "conv-1", "generation_id": "gen-1"},
             )
 
         spans = _spans_by_name(captured_spans)
@@ -2251,7 +2059,7 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "first response",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
@@ -2261,19 +2069,14 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-1",
                     "generation_id": "gen-1",
                     "response": "second response",
-                    "model_name": "claude-4"
+                    "model_name": "claude-4",
                 },
             )
 
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000):
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-1",
-                    "generation_id": "gen-1",
-                    "input_tokens": 100,
-                    "output_tokens": 20
-                },
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "input_tokens": 100, "output_tokens": 20},
             )
 
         spans = _spans_by_name(captured_spans)
@@ -2314,15 +2117,12 @@ class TestDeferredLlmSpan:
                     "conversation_id": "conv-abc",
                     "generation_id": "gen-1",
                     "response": "r",
-                    "user_email": "alice@example.com"
+                    "user_email": "alice@example.com",
                 },
             )
             _dispatch(
                 "stop",
-                {
-                    "conversation_id": "conv-abc",
-                    "generation_id": "gen-1"
-                },
+                {"conversation_id": "conv-abc", "generation_id": "gen-1"},
             )
 
         spans = _spans_by_name(captured_spans)

@@ -201,7 +201,7 @@ class TestEnsureSessionInitialized:
             "session_id": "d4870649-2f69-472d-96a2-599e55ab13f0",
             "timestamp": "2026-05-04T23:25:33.735Z",
             "initial_prompt": "fix the bug",
-            "source": "new"
+            "source": "new",
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("session_id") == "d4870649-2f69-472d-96a2-599e55ab13f0"

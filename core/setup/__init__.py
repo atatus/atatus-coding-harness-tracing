@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from getpass import getpass
@@ -140,6 +141,9 @@ def prompt_backend(
     """
     target = "atatus"
 
+    if non_interactive():
+        return _backend_from_env(target)
+
     # --- copy-from logic ---
     copied = _try_copy_from(target, existing_harnesses)
     if copied is not None:
@@ -169,6 +173,23 @@ def prompt_backend(
             "api_key": api_key,
         },
     )
+
+
+def _backend_from_env(target: str) -> tuple[str, dict]:
+    """Resolve credentials from the environment, for non-interactive installs.
+
+    There is only one backend, so nothing has to be inferred — the licence key is
+    required and the endpoint falls back to the default collector. Exits with an
+    actionable message when the key is missing; this path must never fall back to
+    a prompt, because there is nobody to answer it.
+    """
+    api_key = _require_env("ATATUS_API_KEY", "An Atatus licence key")
+    endpoint = _env("ATATUS_OTLP_ENDPOINT") or DEFAULT_OTLP_ENDPOINT
+
+    info(f"Licence key: found (from {_source_of('ATATUS_API_KEY')})")
+    info(f"OTLP endpoint: {endpoint} (from {_source_of('ATATUS_OTLP_ENDPOINT', fallback='default')})")
+
+    return (target, {"endpoint": endpoint, "api_key": api_key})
 
 
 def _try_copy_from(target: str, existing_harnesses: dict | None) -> dict | None:
@@ -237,7 +258,29 @@ def prompt_project_name(default: str = "") -> str:
     So a fresh install has **no default** and an empty answer is rejected. A
     re-install passes the name already chosen, which may be accepted with a
     blank line; that is a confirmation, not a silent default.
+
+    Non-interactively the same rule holds: the name comes from the dotenv file
+    or the stored value, and there being neither is a hard error rather than an
+    invented default.
     """
+    if non_interactive():
+        # Deliberately not _env(): the ambient ATATUS_PROJECT_NAME belongs to
+        # whichever harness is already installed — `claude_code/install.py`
+        # bakes it into settings.json and it is exported into every session.
+        # Inheriting it would name *this* harness's project after a different
+        # one and silently collide their spans.
+        name = _dotenv_only("ATATUS_PROJECT_NAME") or default
+        if not name:
+            err(
+                "A project name is required — it is how your spans are grouped in Atatus.\n"
+                "        Set ATATUS_PROJECT_NAME in the file named by ATATUS_ENV_FILE."
+            )
+            sys.exit(1)
+        # "default" rather than "harness default": on a re-install the caller
+        # passes the stored project name as the default.
+        info(f"Project name: {name} (from {_source_of('ATATUS_PROJECT_NAME', 'default', include_env=False)})")
+        return name
+
     print("")
     if default:
         name = input(f"Project name [{default}]: ").strip()
@@ -285,7 +328,29 @@ def prompt_content_logging() -> dict:
     `_resolve_log_flag` — the privacy default was never in effect on an
     installed machine. Keep the hint tied to the default, and keep defaulted
     answers out of the file.
+
+    **Non-interactively every category starts off**, including the two that
+    `LOG_FLAG_DEFAULTS` has on. That asymmetry is the point: a `[Y/n]` default is
+    a human declining to change an answer they were shown, which is consent; the
+    same default with nobody watching is capture of prompts and command output
+    that no one agreed to. Reaching it needs no malice — `update` forces
+    non-interactive mode whenever there is no terminal, so a cron or CI run
+    against a config with no `logging:` block would switch capture on silently.
+    Each category needs its `ATATUS_LOG_*` variable to say so explicitly.
     """
+    if non_interactive():
+        answers = {
+            "prompts": env_flag("ATATUS_LOG_PROMPTS", default=False),
+            "tool_details": env_flag("ATATUS_LOG_TOOL_DETAILS", default=False),
+            "tool_content": env_flag("ATATUS_LOG_TOOL_CONTENT", default=False),
+        }
+        info("Content logging: " + ", ".join(f"{k}={'on' if v else 'off'}" for k, v in answers.items()))
+        if not any(answers.values()):
+            info("No ATATUS_LOG_* settings given, so no content is captured — span structure only.")
+            info("Set ATATUS_LOG_PROMPTS, ATATUS_LOG_TOOL_DETAILS or ATATUS_LOG_TOOL_CONTENT to true to capture it.")
+        deviations = {k: v for k, v in answers.items() if v != LOG_FLAG_DEFAULTS[k]}
+        return {"_v": LOG_CONFIG_VERSION, **deviations}
+
     print("")
     if sys.stdout.isatty() and os.name != "nt":
         print("\033[1;33mSecurity:\033[0m Traces can contain sensitive data — credentials, PII, file contents.")
@@ -355,6 +420,9 @@ def write_logging_config(logging_block: dict, config_path: str | None = None) ->
 
 def prompt_user_id() -> str:
     """Optional user ID prompt. Returns "" if skipped."""
+    if non_interactive():
+        return _env("ATATUS_USER_ID")
+
     print("")
     if sys.stdout.isatty() and os.name != "nt":
         print("\033[0;34mOptional:\033[0m Set a user ID to identify your spans (useful for teams).")
@@ -415,6 +483,246 @@ def write_config(
 def dry_run() -> bool:
     """True when ATATUS_DRY_RUN env var is set to a truthy value ('1','true','yes')."""
     return os.environ.get("ATATUS_DRY_RUN", "").lower() in ("1", "true", "yes")
+
+
+def non_interactive() -> bool:
+    """True when ATATUS_NONINTERACTIVE is set to a truthy value ('1','true','yes').
+
+    In this mode the setup wizards never call ``input()``/``getpass()``: every
+    value resolves from the environment (or the dotenv file named by
+    ``ATATUS_ENV_FILE``) and a missing required value is a hard error instead of
+    a prompt. Deliberately opt-in — without it, an exported ``ATATUS_API_KEY``
+    would silently stop the interactive wizard asking its questions, and every
+    installed harness exports that variable into every agent session.
+    """
+    return os.environ.get("ATATUS_NONINTERACTIVE", "").lower() in ("1", "true", "yes")
+
+
+# Keys we will read out of a dotenv file. Everything else in the file is
+# ignored, so pointing at an app's .env cannot inject unrelated settings.
+_DOTENV_KEYS = (
+    "ATATUS_API_KEY",
+    "ATATUS_OTLP_ENDPOINT",
+    "ATATUS_PROJECT_NAME",
+    "ATATUS_USER_ID",
+    "ATATUS_LOG_PROMPTS",
+    "ATATUS_LOG_TOOL_DETAILS",
+    "ATATUS_LOG_TOOL_CONTENT",
+    "ATATUS_KIRO_AGENT",
+    "ATATUS_KIRO_SET_DEFAULT",
+)
+
+_dotenv_cache: Optional[dict] = None
+_dotenv_path: Optional[Path] = None
+
+
+def _dotenv_file() -> Optional[Path]:
+    """The dotenv file to read, from ``ATATUS_ENV_FILE`` only. None when unset.
+
+    Deliberately does **not** fall back to ``./.env`` or ``./.env.local``.
+    Values from a dotenv file outrank the process environment (see ``_env``), and
+    the working directory is whatever repository the user happens to be sitting
+    in. An implicit search would let a cloned repo's dotenv supply the *routing*
+    (``ATATUS_OTLP_ENDPOINT``) while the user's real licence key came from the
+    ambient environment — writing a config that ships every later session's
+    prompts, tool output and bearer key to an endpoint the repo chose.
+
+    An explicit path that cannot be read is a hard error rather than a silent
+    fall-back: naming a file states where the credentials are meant to come
+    from, and a typo would otherwise quietly install with whatever happened to
+    be exported instead.
+    """
+    explicit = os.environ.get("ATATUS_ENV_FILE", "").strip()
+    if not explicit:
+        return None
+    path = Path(explicit).expanduser()
+    if not path.is_file():
+        err(f"ATATUS_ENV_FILE points at {path}, which is not a readable file.")
+        sys.exit(1)
+    return path
+
+
+def _split_dotenv_value(raw: str) -> str:
+    """Return the value part of a dotenv assignment, quotes and comment resolved.
+
+    Raises ``ValueError`` on an unbalanced quote. That is the whole reason this
+    is strict: ``ATATUS_API_KEY="abc`` parsed leniently yields a licence key with
+    a quote welded on, which reports as "found" and then fails authentication
+    with nothing pointing at the typo.
+    """
+    raw = raw.strip()
+    if not raw:
+        return ""
+
+    quote = raw[0]
+    if quote not in ("'", '"'):
+        # Unquoted: a whitespace-preceded '#' starts a comment, per dotenv
+        # convention. `KEY=a#b` keeps the '#'.
+        cut = re.search(r"\s#", raw)
+        return (raw[: cut.start()] if cut else raw).strip()
+
+    body = raw[1:]
+    if quote == "'":
+        end = body.find("'")
+        if end < 0:
+            raise ValueError("unbalanced single quote")
+        return body[:end]
+
+    # Double-quoted: honour backslash escapes, and do not let an escaped quote
+    # close the string.
+    out: list[str] = []
+    i = 0
+    escapes = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", '"': '"'}
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            out.append(escapes.get(body[i + 1], "\\" + body[i + 1]))
+            i += 2
+            continue
+        if ch == '"':
+            return "".join(out)
+        out.append(ch)
+        i += 1
+    raise ValueError("unbalanced double quote")
+
+
+def _parse_dotenv(path: Path) -> dict:
+    """Extract `_DOTENV_KEYS` from a dotenv file. Unreadable file → {}.
+
+    Handles ``export KEY=value``, both quote styles, inline comments and blank
+    lines. Values are not shell-expanded — a literal ``$FOO`` stays literal.
+
+    Hand-rolled rather than ``python-dotenv`` on purpose. This package ships
+    ``dependencies = []``; every hook invocation is a fresh short-lived process,
+    and a runtime dependency would also have to be bundled for any future
+    offline/wheel install to keep working. Only the nine keys above are read, so
+    a file holding unrelated application settings is safe to point at.
+
+    An unparseable line for a key we want is **fatal**, not skipped: skipping
+    would fall through to the environment and report a value that did not come
+    from the file the caller named.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return {}
+
+    values: dict = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
+        key, sep, raw = stripped.partition("=")
+        key = key.strip()
+        if not sep or key not in _DOTENV_KEYS:
+            continue
+        try:
+            values[key] = _split_dotenv_value(raw).strip()
+        except ValueError as exc:
+            err(f"{path}: could not parse {key} — {exc}.")
+            err("Fix the line rather than leaving it: the value would otherwise be taken from the environment.")
+            sys.exit(1)
+
+    return values
+
+
+def _dotenv_values() -> dict:
+    """Load Atatus values from the dotenv file, once per process.
+
+    This is what keeps a licence key out of argv, shell history and a coding
+    agent's transcript: the key goes into a file, and the installer reads the
+    file. Values found here take precedence over the real environment — see
+    ``_env``.
+    """
+    global _dotenv_cache, _dotenv_path
+    if _dotenv_cache is not None:
+        return _dotenv_cache
+
+    _dotenv_cache = {}
+    path = _dotenv_file()
+    if path is not None:
+        found = _parse_dotenv(path)
+        if found:
+            info(f"Reading configuration from {path} ({len(found)} value(s))")
+            _dotenv_cache = found
+            _dotenv_path = path
+
+    return _dotenv_cache
+
+
+def _reset_dotenv_cache() -> None:
+    """Clear the dotenv cache. For tests, which vary the file and its contents."""
+    global _dotenv_cache, _dotenv_path
+    _dotenv_cache = None
+    _dotenv_path = None
+
+
+def _dotenv_only(name: str) -> str:
+    """Resolve a value from the dotenv file alone, ignoring the environment."""
+    return _dotenv_values().get(name, "").strip()
+
+
+def _source_of(name: str, fallback: str = "unset", include_env: bool = True) -> str:
+    """Name where a value was resolved from, for reporting back to the user.
+
+    ``include_env=False`` for values that ignore the environment by design, so
+    the label never credits a source that was not consulted.
+    """
+    if _dotenv_only(name):
+        return str(_dotenv_path) if _dotenv_path else "dotenv file"
+    if include_env and os.environ.get(name, "").strip():
+        return f"${name}"
+    return fallback
+
+
+def _env(name: str) -> str:
+    """Resolve a config value: dotenv file first, then the real environment.
+
+    The file deliberately wins. A dotenv file is an explicit, inspectable
+    statement of intent; ``ATATUS_*`` variables are frequently *inherited* rather
+    than chosen — an installed harness bakes ``ATATUS_API_KEY`` and
+    ``ATATUS_PROJECT_NAME`` into its settings file and exports them into every
+    agent session. Reading the environment first would let those stale values
+    beat credentials the caller had just written.
+    """
+    return _dotenv_only(name) or os.environ.get(name, "").strip()
+
+
+def env_value(name: str) -> str:
+    """Resolve a config value from the dotenv file or environment.
+
+    Public entry point for harness installers that have a prompt of their own to
+    resolve (currently only Kiro's agent name).
+    """
+    return _env(name)
+
+
+def env_flag(name: str, default: bool = True) -> bool:
+    """Read a boolean setting from the dotenv file or environment.
+
+    Only explicit falsey words turn a default-on setting off, and only explicit
+    truthy words turn a default-off setting on.
+    """
+    raw = _env(name).lower()
+    if not raw:
+        return default
+    if default:
+        return raw not in ("0", "false", "no", "n", "off")
+    return raw in ("1", "true", "yes", "y", "on")
+
+
+def _require_env(name: str, what: str) -> str:
+    """Resolve a required value, or exit with an actionable message."""
+    value = _env(name)
+    if not value:
+        err(
+            f"{what} is required for a non-interactive install — set {name}, or add it to the file\n"
+            f"        named by ATATUS_ENV_FILE."
+        )
+        sys.exit(1)
+    return value
 
 
 def ensure_shared_runtime() -> None:

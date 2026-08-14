@@ -51,7 +51,7 @@ def populated_config(fake_install):
                 "project_name": "claude-code",
                 "target": "atatus",
                 "endpoint": "https://otel-rx.atatus.com",
-                "api_key": ""
+                "api_key": "",
             }
         }
     }
@@ -568,7 +568,7 @@ class TestWriteConfigFlat:
             "project_name": "cursor",
             "target": "atatus",
             "endpoint": "https://otel-rx.atatus.com",
-            "api_key": ""
+            "api_key": "",
         }
         assert "backend" not in cfg
 
@@ -622,11 +622,7 @@ class TestWriteConfigFlat:
 
         config_path = str(fake_install / "config.json")
         # Pre-write a config with legacy top-level keys
-        legacy = {
-            "backend": {"target": "atatus"},
-            "collector": {"host": "127.0.0.1", "port": 4318},
-            "harnesses": {}
-        }
+        legacy = {"backend": {"target": "atatus"}, "collector": {"host": "127.0.0.1", "port": 4318}, "harnesses": {}}
         with open(config_path, "w") as f:
             json.dump(legacy, f, indent=2)
 
@@ -733,7 +729,7 @@ class TestPromptBackendCopyFrom:
                 "project_name": "claude-code",
                 "target": "atatus",
                 "endpoint": "https://otel-rx.atatus.com",
-                "api_key": "ak-1"
+                "api_key": "ak-1",
             }
         }
         # No backend menu any more — the first prompt is the copy-from choice
@@ -754,7 +750,7 @@ class TestPromptBackendCopyFrom:
                 "project_name": "claude-code",
                 "target": "atatus",
                 "endpoint": "https://otel-rx.atatus.com",
-                "api_key": ""
+                "api_key": "",
             }
         }
         # Choose atatus (2), then provide fresh credentials
@@ -782,7 +778,7 @@ class TestPromptBackendCopyFrom:
                 "project_name": "claude-code",
                 "target": "atatus",
                 "endpoint": "https://otel-rx.atatus.com",
-                "api_key": ""
+                "api_key": "",
             }
         }
         # An entry with a blank api_key is not copyable, so no menu appears —
@@ -832,4 +828,3 @@ class TestPromptBackendMasking:
         # getpass was called for api_key
         assert len(getpass_calls) == 1
         assert "License Key" in getpass_calls[0]
-

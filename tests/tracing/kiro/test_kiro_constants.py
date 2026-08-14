@@ -16,18 +16,9 @@ SIDECAR_DIR = FIXTURES_DIR / "sidecars"
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-PROBE_FILES = [
-    "agent_spawn.json",
-    "user_prompt_submit.json",
-    "pre_tool_use.json",
-    "post_tool_use.json",
-    "stop.json"
-]
+PROBE_FILES = ["agent_spawn.json", "user_prompt_submit.json", "pre_tool_use.json", "post_tool_use.json", "stop.json"]
 
-SIDECAR_FILES = [
-    "session_complete.json",
-    "session_no_turns.json"
-]
+SIDECAR_FILES = ["session_complete.json", "session_no_turns.json"]
 
 # Expected per-event extra keys beyond the common {hook_event_name, cwd, session_id}.
 EVENT_EXTRA_KEYS: dict[str, set[str]] = {
@@ -35,7 +26,7 @@ EVENT_EXTRA_KEYS: dict[str, set[str]] = {
     "userPromptSubmit": {"prompt"},
     "preToolUse": {"tool_name", "tool_input"},
     "postToolUse": {"tool_name", "tool_input", "tool_response"},
-    "stop": {"assistant_response"}
+    "stop": {"assistant_response"},
 }
 
 
@@ -128,7 +119,7 @@ EXPECTED_SKELETON_KEYS = {
     "hooks",
     "toolsSettings",
     "includeMcpJson",
-    "model"
+    "model",
 }
 
 

@@ -466,7 +466,7 @@ class TestAfterModel:
                 "model": "gemini-2.5-pro",
                 "llm_response": {"candidates": [{"content": {"parts": ["4"]}}]},
                 "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
-                "model_call_id": "mc-1"
+                "model_call_id": "mc-1",
             }
         )
         assert len(captured_spans) == 1
@@ -497,7 +497,7 @@ class TestAfterModel:
             {
                 "llm_response": {"text": ""},
                 "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 3},
-                "model_call_id": "mc-1"
+                "model_call_id": "mc-1",
             }
         )
         assert len(captured_spans) == 1
@@ -568,7 +568,7 @@ class TestAfterModel:
                 {
                     "model": "gemini-2.5-pro",
                     "llm_response": {"candidates": [{"content": {"parts": ["secret response"]}}]},
-                    "model_call_id": "mc-1"
+                    "model_call_id": "mc-1",
                 }
             )
         )
@@ -637,7 +637,7 @@ class TestAfterModel:
                 {
                     "model": "gemini-2.5-pro",
                     "llm_response": {"candidates": [{"content": {"parts": [{"text": "Hello"}, {"text": " world"}]}}]},
-                    "model_call_id": "mc-1"
+                    "model_call_id": "mc-1",
                 }
             )
         )
@@ -656,9 +656,9 @@ class TestAfterModel:
                 "llm_response": {
                     "candidates": [{"content": {"parts": ["Actual response content"], "role": "model"}}],
                     "text": "",
-                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}
+                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
                 },
-                "model_call_id": "mc-1"
+                "model_call_id": "mc-1",
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -753,7 +753,7 @@ class TestAfterTool:
             "tool_name": "read_file",
             "tool_call_id": "tc-1",
             "tool_args": {"file_path": "/foo/bar.py"},
-            "tool_result": "file content"
+            "tool_result": "file content",
         }
         _handle_after_tool(inp)
         assert len(captured_spans) == 1
@@ -773,8 +773,8 @@ class TestAfterTool:
                 "tool_input": {"dir_path": "."},
                 "tool_response": {
                     "llmContent": "Directory listing for /tmp:\n  [DIR] foo\n  bar.txt\n",
-                    "returnDisplay": {"files": ["foo", "bar.txt"], "summary": "2 items"}
-                }
+                    "returnDisplay": {"files": ["foo", "bar.txt"], "summary": "2 items"},
+                },
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -806,13 +806,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         state.set("tool_tc-1_start", "1000000")
-        _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_call_id": "tc-1",
-                "tool_result": "content"
-            }
-        )
+        _handle_after_tool({"tool_name": "read_file", "tool_call_id": "tc-1", "tool_result": "content"})
         span = _get_span(captured_spans[0])
         assert span["startTimeUnixNano"] == "1000000000000"
         # Start time key should be cleaned up
@@ -834,11 +828,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "run_shell_command",
-                "tool_args": {"command": "git status"},
-                "tool_result": "clean"
-            }
+            {"tool_name": "run_shell_command", "tool_args": {"command": "git status"}, "tool_result": "clean"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.command"]["stringValue"] == "git status"
@@ -849,11 +839,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_args": {"file_path": "/src/main.py"},
-                "tool_result": "content"
-            }
+            {"tool_name": "read_file", "tool_args": {"file_path": "/src/main.py"}, "tool_result": "content"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.file_path"]["stringValue"] == "/src/main.py"
@@ -863,13 +849,7 @@ class TestAfterTool:
         """write_file sets tool.file_path."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "write_file",
-                "tool_args": {"file_path": "/src/out.py"},
-                "tool_result": "ok"
-            }
-        )
+        _handle_after_tool({"tool_name": "write_file", "tool_args": {"file_path": "/src/out.py"}, "tool_result": "ok"})
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.file_path"]["stringValue"] == "/src/out.py"
 
@@ -877,13 +857,7 @@ class TestAfterTool:
         """edit sets tool.file_path."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "edit",
-                "tool_args": {"absolute_path": "/src/app.py"},
-                "tool_result": "ok"
-            }
-        )
+        _handle_after_tool({"tool_name": "edit", "tool_args": {"absolute_path": "/src/app.py"}, "tool_result": "ok"})
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.file_path"]["stringValue"] == "/src/app.py"
 
@@ -891,13 +865,7 @@ class TestAfterTool:
         """replace sets tool.file_path."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "replace",
-                "tool_args": {"file_path": "/src/fix.py"},
-                "tool_result": "ok"
-            }
-        )
+        _handle_after_tool({"tool_name": "replace", "tool_args": {"file_path": "/src/fix.py"}, "tool_result": "ok"})
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.file_path"]["stringValue"] == "/src/fix.py"
 
@@ -906,11 +874,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "glob",
-                "tool_args": {"pattern": "**/*.py", "path": "/src"},
-                "tool_result": "matches"
-            }
+            {"tool_name": "glob", "tool_args": {"pattern": "**/*.py", "path": "/src"}, "tool_result": "matches"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "**/*.py"
@@ -925,7 +889,7 @@ class TestAfterTool:
             {
                 "tool_name": "search_file_content",
                 "tool_args": {"pattern": "TODO", "path": "/src"},
-                "tool_result": "matches"
+                "tool_result": "matches",
             }
         )
         attrs = _get_span_attrs(captured_spans[0])
@@ -938,11 +902,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "grep",
-                "tool_args": {"pattern": "FIXME", "path": "/lib"},
-                "tool_result": "matches"
-            }
+            {"tool_name": "grep", "tool_args": {"pattern": "FIXME", "path": "/lib"}, "tool_result": "matches"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "FIXME"
@@ -953,11 +913,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "web_fetch",
-                "tool_args": {"url": "https://example.com"},
-                "tool_result": "page content"
-            }
+            {"tool_name": "web_fetch", "tool_args": {"url": "https://example.com"}, "tool_result": "page content"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.url"]["stringValue"] == "https://example.com"
@@ -968,11 +924,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "google_web_search",
-                "tool_args": {"query": "python async"},
-                "tool_result": "results"
-            }
+            {"tool_name": "google_web_search", "tool_args": {"query": "python async"}, "tool_result": "results"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "python async"
@@ -983,11 +935,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "web_search",
-                "tool_args": {"query": "rust tutorial"},
-                "tool_result": "results"
-            }
+            {"tool_name": "web_search", "tool_args": {"query": "rust tutorial"}, "tool_result": "results"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "rust tutorial"
@@ -996,13 +944,7 @@ class TestAfterTool:
         """Unknown tool gets description from input_value[:200]."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "custom_tool",
-                "tool_args": {"key": "value"},
-                "tool_result": "result"
-            }
-        )
+        _handle_after_tool({"tool_name": "custom_tool", "tool_args": {"key": "value"}, "tool_result": "result"})
         attrs = _get_span_attrs(captured_spans[0])
         assert "tool.description" in attrs
         # Should not have tool-specific attributes
@@ -1019,11 +961,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_args": {"file_path": "/secret.py"},
-                "tool_result": "secret file content"
-            }
+            {"tool_name": "read_file", "tool_args": {"file_path": "/secret.py"}, "tool_result": "secret file content"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert "redacted" in attrs["input.value"]["stringValue"]
@@ -1035,11 +973,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "run_shell_command",
-                "tool_args": {"command": "rm -rf /"},
-                "tool_result": "output"
-            }
+            {"tool_name": "run_shell_command", "tool_args": {"command": "rm -rf /"}, "tool_result": "output"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert "redacted" in attrs["tool.description"]["stringValue"]
@@ -1052,11 +986,7 @@ class TestAfterTool:
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_args": {"file_path": "/secret.py"},
-                "tool_result": "secret"
-            }
+            {"tool_name": "read_file", "tool_args": {"file_path": "/secret.py"}, "tool_result": "secret"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.name"]["stringValue"] == "read_file"
@@ -1066,13 +996,7 @@ class TestAfterTool:
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content"
-            }
-        )
+        _handle_after_tool({"tool_name": "read_file", "tool_args": {"file_path": "/foo.py"}, "tool_result": "content"})
         attrs = _get_span_attrs(captured_spans[0])
         # tool.file_path should be set and redacted
         assert "tool.file_path" in attrs
@@ -1085,12 +1009,7 @@ class TestAfterTool:
         """Handles None/missing tool_args gracefully."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "custom_tool",
-                "tool_result": "result"
-            }
-        )
+        _handle_after_tool({"tool_name": "custom_tool", "tool_result": "result"})
         assert len(captured_spans) == 1
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.name"]["stringValue"] == "custom_tool"
@@ -1101,11 +1020,7 @@ class TestAfterTool:
         state.set("current_trace_span_id", "b" * 16)
         long_command = "x" * 300
         _handle_after_tool(
-            {
-                "tool_name": "run_shell_command",
-                "tool_args": {"command": long_command},
-                "tool_result": "output"
-            }
+            {"tool_name": "run_shell_command", "tool_args": {"command": long_command}, "tool_result": "output"}
         )
         attrs = _get_span_attrs(captured_spans[0])
         assert len(attrs["tool.description"]["stringValue"]) <= 200
@@ -1175,7 +1090,7 @@ ENTRY_POINTS = [
     ("before_model", before_model, "_handle_before_model"),
     ("after_model", after_model, "_handle_after_model"),
     ("before_tool", before_tool, "_handle_before_tool"),
-    ("after_tool", after_tool, "_handle_after_tool")
+    ("after_tool", after_tool, "_handle_after_tool"),
 ]
 
 
@@ -1268,7 +1183,7 @@ class TestTurnFlow:
             {
                 "model": "gemini-2.5-pro",
                 "response": {"content": "answer", "usage": {"prompt_tokens": 5, "candidates_tokens": 3}},
-                "model_call_id": "mc-1"
+                "model_call_id": "mc-1",
             }
         )
         assert len(captured_spans) == 1
@@ -1290,7 +1205,7 @@ class TestTurnFlow:
                 "tool_name": "read_file",
                 "tool_call_id": "tc-1",
                 "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content"
+                "tool_result": "content",
             }
         )
         assert len(captured_spans) == 1
@@ -1329,13 +1244,7 @@ class TestProjectNameOnAllSpans:
         """TOOL spans include project.name."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "read_file",
-                "tool_args": {"file_path": "/foo.py"},
-                "tool_result": "content"
-            }
-        )
+        _handle_after_tool({"tool_name": "read_file", "tool_args": {"file_path": "/foo.py"}, "tool_result": "content"})
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["project.name"]["stringValue"] == "test-gemini-project"
 
@@ -1442,12 +1351,7 @@ class TestExtractTokensEdgeCases:
     def test_non_numeric_tokens_default_to_zero(self):
         """Non-int token values fall back to (0, 0) rather than raising."""
         payload = {
-            "llm_response": {
-                "usageMetadata": {
-                    "promptTokenCount": "not-a-number",
-                    "candidatesTokenCount": [1, 2]
-                }
-            }
+            "llm_response": {"usageMetadata": {"promptTokenCount": "not-a-number", "candidatesTokenCount": [1, 2]}}
         }
         assert _extract_tokens(payload) == (0, 0)
 
@@ -1609,13 +1513,7 @@ class TestAfterToolEdgeCases:
         """Non-dict tool_args are stringified into the tool description."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool(
-            {
-                "tool_name": "raw_string_tool",
-                "tool_input": "not-a-dict-arg",
-                "tool_response": "result"
-            }
-        )
+        _handle_after_tool({"tool_name": "raw_string_tool", "tool_input": "not-a-dict-arg", "tool_response": "result"})
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.description"]["stringValue"] == "not-a-dict-arg"
 

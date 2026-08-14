@@ -30,8 +30,8 @@ from core.setup import err as _err
 from core.setup import (
     info,
     merge_harness_entry,
-    prompt_backend,
     needs_content_logging_prompt,
+    prompt_backend,
     prompt_content_logging,
     prompt_project_name,
     prompt_user_id,

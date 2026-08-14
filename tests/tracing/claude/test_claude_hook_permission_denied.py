@@ -53,7 +53,7 @@ def _base_input():
         "cwd": "/home/user/project",
         "permission_mode": "auto",
         "tool_name": "Bash",
-        "tool_input": {"command": "rm -rf /"}
+        "tool_input": {"command": "rm -rf /"},
     }
 
 

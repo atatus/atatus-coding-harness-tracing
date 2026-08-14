@@ -228,7 +228,7 @@ class TestEnsureSessionInitialized:
             "core.config.load_config",
             lambda config_path=None: {
                 "user_id": "global@x",
-                "harnesses": {adapter.SERVICE_NAME: {"user_id": "scoped@x"}}
+                "harnesses": {adapter.SERVICE_NAME: {"user_id": "scoped@x"}},
             },
         )
         env.__dict__.pop("_top_level_config", None)

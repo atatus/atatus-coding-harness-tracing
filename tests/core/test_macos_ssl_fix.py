@@ -52,7 +52,19 @@ class TestFixMacOSSslCertsDefined:
         assert "venv_python" in self.text
 
     def test_installs_certifi(self):
-        assert "install --quiet certifi" in self.text
+        # The offline array expands to nothing in repo mode, so this is still a
+        # plain `pip install certifi` there.
+        assert 'install --quiet "${offline[@]+"${offline[@]}"}" certifi' in self.text
+
+    def test_certifi_resolves_from_wheel_dir_offline(self):
+        """An offline install must not reach the network for certifi.
+
+        It used to be an unconditional network install whose failure only
+        warned, so an offline macOS install completed and then failed at runtime
+        on the first span export.
+        """
+        assert 'offline=(--no-index --find-links "$WHEEL_DIR")' in self.text
+        assert "Bundle a certifi wheel" in self.text
 
     def test_warns_on_certifi_failure(self):
         assert "Could not install certifi" in self.text

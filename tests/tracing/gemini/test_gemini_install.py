@@ -80,7 +80,7 @@ class TestGeminiEntryPoints:
             before_model,
             after_model,
             before_tool,
-            after_tool
+            after_tool,
         ]:
             assert callable(fn)
 

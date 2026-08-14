@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 
-from core.common import LOG_CONFIG_VERSION
-
 import pytest
 
 import tracing.gemini.constants as _gc
 import tracing.gemini.install as _install
+from core.common import LOG_CONFIG_VERSION
 
 install = _install.install
 uninstall = _install.uninstall
@@ -36,11 +35,7 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {
-            "isatty": lambda self: False,
-            "write": lambda self, s: None,
-            "flush": lambda self: None
-        },
+        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
     )()
 
 
@@ -113,10 +108,7 @@ class TestInstallFreshWritesFlatHarnessEntry:
 
     @pytest.mark.parametrize(
         "backend,expected_target",
-        [
-            (ATATUS_BACKEND, "atatus"),
-            (ATATUS_BACKEND, "atatus")
-        ],
+        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
         ids=["atatus", "atatus"],
     )
     def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch, backend, expected_target):
@@ -131,7 +123,6 @@ class TestInstallFreshWritesFlatHarnessEntry:
         assert entry["project_name"] == "gemini"
         assert entry["endpoint"] == backend[1]["endpoint"]
         assert entry["api_key"] == backend[1]["api_key"]
-
 
         # No collector for gemini
         assert "collector" not in entry
@@ -209,7 +200,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }
@@ -267,7 +258,7 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
                     "project_name": "gemini",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-existing"
+                    "api_key": "ak-existing",
                 }
             }
         }
@@ -406,7 +397,7 @@ class TestInstallPreservesUserSettings:
                 "BeforeTool": [
                     {
                         "matcher": "grep",
-                        "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}]
+                        "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}],
                     }
                 ]
             }
@@ -511,7 +502,7 @@ class TestUninstallPreservesUserHooks:
         data["hooks"]["BeforeTool"].append(
             {
                 "matcher": "grep",
-                "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}]
+                "hooks": [{"type": "command", "name": "user-grep-hook", "command": "/usr/bin/grep-hook"}],
             }
         )
         settings_file.write_text(json.dumps(data, indent=2) + "\n")
@@ -697,9 +688,9 @@ class TestDedupeByHookName:
                                 "type": "command",
                                 "name": _gc.HOOK_NAME,
                                 "command": "/old/path/venv/bin/atatus-hook-gemini-session-start",
-                                "timeout": _gc.HOOK_TIMEOUT_MS
+                                "timeout": _gc.HOOK_TIMEOUT_MS,
                             }
-                        ]
+                        ],
                     }
                 ]
             }
@@ -859,7 +850,7 @@ class TestHandlersImportable:
             before_model,
             after_model,
             before_tool,
-            after_tool
+            after_tool,
         ]:
             assert callable(fn)
 

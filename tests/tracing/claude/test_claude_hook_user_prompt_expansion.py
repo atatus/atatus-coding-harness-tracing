@@ -63,7 +63,7 @@ class TestUserPromptExpansion:
             "expansion_type": "slash_command",
             "command_name": "review",
             "command_args": "PR-42",
-            "command_source": "user"
+            "command_source": "user",
         }
         _handle_user_prompt_expansion(payload)
         assert state.get("pending_expansion_type") == "slash_command"
@@ -72,10 +72,7 @@ class TestUserPromptExpansion:
         assert state.get("pending_command_source") == "user"
 
     def test_records_only_present_fields(self, mock_resolve, captured_spans, state):
-        payload = {
-            "session_id": "test-session-123",
-            "command_name": "commit"
-        }
+        payload = {"session_id": "test-session-123", "command_name": "commit"}
         _handle_user_prompt_expansion(payload)
         assert state.get("pending_command_name") == "commit"
         assert state.get("pending_expansion_type") is None
@@ -88,7 +85,7 @@ class TestUserPromptExpansion:
             "expansion_type": "slash_command",
             "command_name": "review",
             "command_args": "PR-42",
-            "command_source": "user"
+            "command_source": "user",
         }
         _handle_user_prompt_expansion(payload)
         assert len(captured_spans) == 0
@@ -140,11 +137,7 @@ class TestStopWithCommandMetadata:
         state.set("pending_command_name", "review")
 
         _handle_stop_failure(
-            {
-                "session_id": "test-session-123",
-                "error": "context_overflow",
-                "error_details": "too long"
-            }
+            {"session_id": "test-session-123", "error": "context_overflow", "error_details": "too long"}
         )
 
         assert state.get("pending_command_name") is None

@@ -252,9 +252,7 @@ class TestPromptContentLogging:
         from core.setup import write_logging_config
 
         config_path = tmp_path / "config.json"
-        config_path.write_text(
-            json.dumps({"user_id": "dg", "logging": {"prompts": True, "tool_content": True}})
-        )
+        config_path.write_text(json.dumps({"user_id": "dg", "logging": {"prompts": True, "tool_content": True}}))
         monkeypatch.setattr("core.setup.dry_run", lambda: False)
 
         write_logging_config(self._run(["", "", ""]), str(config_path))
@@ -320,7 +318,6 @@ class TestPromptUserId:
 class TestWriteConfig:
     """Tests for write_config()."""
 
-
     def test_creates_new_config_atatus(self, tmp_path, monkeypatch):
         """write_config creates fresh config.json for Atatus."""
         config_path = str(tmp_path / "config.json")
@@ -359,7 +356,7 @@ class TestWriteConfig:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "http://custom:9999",
-                    "api_key": "secret"
+                    "api_key": "secret",
                 }
             }
         }
@@ -415,7 +412,6 @@ class TestWriteConfig:
 class TestClaudeSetup:
     """Tests for core.setup.claude."""
 
-
     def test_settings_json_atatus(self, tmp_path):
         """Claude setup creates settings.json with Atatus env block."""
         settings_path = tmp_path / ".claude" / "settings.local.json"
@@ -439,14 +435,7 @@ class TestClaudeSetup:
         """Existing settings.json keys are preserved when adding env block."""
         settings_path = tmp_path / ".claude" / "settings.local.json"
         settings_path.parent.mkdir(parents=True)
-        settings_path.write_text(
-            json.dumps(
-                {
-                    "theme": "dark",
-                    "env": {"EXISTING_VAR": "keep_me"}
-                }
-            )
-        )
+        settings_path.write_text(json.dumps({"theme": "dark", "env": {"EXISTING_VAR": "keep_me"}}))
 
         from core.setup.claude import _load_settings, _save_settings
 
@@ -571,11 +560,7 @@ class TestClaudeSetup:
             type(
                 "FakeOut",
                 (),
-                {
-                    "isatty": lambda self: False,
-                    "write": lambda self, s: None,
-                    "flush": lambda self: None
-                },
+                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
             )(),
         )
 
@@ -605,7 +590,6 @@ class TestClaudeSetup:
         assert result["env"]["ATATUS_TRACE_ENABLED"] == "true"
         assert result["env"]["ATATUS_PROJECT_NAME"] == "my-project"
         assert len(result.get("hooks", {})) == 16
-
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +623,6 @@ class TestCodexWriteEnvFile:
         content = env_path.read_text()
         assert 'export ATATUS_API_KEY="my-key"' in content
 
-
     def test_env_file_creates_parent_dir(self, tmp_path):
         """_write_env_file creates parent directories."""
         env_path = tmp_path / "deep" / "nested" / "atatus-env.sh"
@@ -658,8 +641,6 @@ class TestCodexWriteEnvFile:
         _write_env_file(env_path, "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
         mode = oct(env_path.stat().st_mode & 0o777)
         assert mode == "0o600"
-
-
 
 
 class TestCodexRunFlow:
@@ -687,11 +668,7 @@ class TestCodexRunFlow:
             type(
                 "FakeOut",
                 (),
-                {
-                    "isatty": lambda self: False,
-                    "write": lambda self, s: None,
-                    "flush": lambda self: None
-                },
+                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
             )(),
         )
 
@@ -727,7 +704,7 @@ class TestCodexRunFlow:
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
                     "api_key": "",
-                    "collector": {"host": "127.0.0.1", "port": 4318}
+                    "collector": {"host": "127.0.0.1", "port": 4318},
                 }
             }
         }
@@ -748,11 +725,7 @@ class TestCodexRunFlow:
             type(
                 "FakeOut",
                 (),
-                {
-                    "isatty": lambda self: False,
-                    "write": lambda self, s: None,
-                    "flush": lambda self: None
-                },
+                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
             )(),
         )
 
@@ -787,7 +760,11 @@ class TestCursorSetup:
         from core.setup import write_config
 
         write_config(
-            "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""}, "cursor", "cursor", config_path=config_path
+            "atatus",
+            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            "cursor",
+            "cursor",
+            config_path=config_path,
         )
 
         config = json.loads(Path(config_path).read_text())
@@ -807,7 +784,7 @@ class TestCursorSetup:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "key"
+                    "api_key": "key",
                 }
             }
         }
@@ -863,11 +840,7 @@ class TestCursorSetup:
             type(
                 "FakeOut",
                 (),
-                {
-                    "isatty": lambda self: False,
-                    "write": lambda self, s: None,
-                    "flush": lambda self: None
-                },
+                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
             )(),
         )
 
@@ -900,14 +873,14 @@ class TestCursorSetup:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "k"
+                    "api_key": "k",
                 },
                 "cursor": {
                     "project_name": "cursor",
                     "target": "atatus",
                     "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "k"
-                }
+                    "api_key": "k",
+                },
             }
         }
         Path(config_path).parent.mkdir(parents=True, exist_ok=True)

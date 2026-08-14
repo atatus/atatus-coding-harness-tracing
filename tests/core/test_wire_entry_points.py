@@ -68,7 +68,7 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     # opencode hook
     "atatus-hook-opencode": "tracing.opencode.hooks.handlers:main",
     # omp hook
-    "atatus-hook-omp": "tracing.omp.hooks.handlers:main"
+    "atatus-hook-omp": "tracing.omp.hooks.handlers:main",
 }
 
 # Setup wizards stay on core.setup.*
@@ -80,7 +80,7 @@ EXPECTED_SETUP_ENTRY_POINTS = {
     "atatus-setup-gemini": "core.setup.gemini:main",
     "atatus-setup-kiro": "core.setup.kiro:main",
     "atatus-setup-opencode": "core.setup.opencode:main",
-    "atatus-setup-omp": "core.setup.omp:main"
+    "atatus-setup-omp": "core.setup.omp:main",
 }
 
 
@@ -193,7 +193,7 @@ class TestInstalledScripts:
             ("atatus-hook-codex-notify", "from tracing.codex.hooks.handlers import notify"),
             ("atatus-hook-cursor", "from tracing.cursor.hooks.handlers import main"),
             ("atatus-hook-copilot-session-start", "from tracing.copilot.hooks.handlers import session_start"),
-            ("atatus-hook-gemini-session-start", "from tracing.gemini.hooks.handlers import session_start")
+            ("atatus-hook-gemini-session-start", "from tracing.gemini.hooks.handlers import session_start"),
         ],
     )
     def test_installed_script_import(self, script, expected_import):
@@ -210,7 +210,7 @@ class TestInstalledScripts:
             "atatus-hook-codex-notify",
             "atatus-hook-cursor",
             "atatus-hook-copilot-session-start",
-            "atatus-hook-gemini-session-start"
+            "atatus-hook-gemini-session-start",
         ],
     )
     def test_installed_script_no_core_hooks(self, script):
@@ -239,7 +239,7 @@ class TestHooksDirsInHarnessPackages:
             ("tracing/gemini", ["__init__.py", "adapter.py", "handlers.py"]),
             ("tracing/kiro", ["__init__.py", "adapter.py", "handlers.py"]),
             ("tracing/opencode", ["__init__.py", "adapter.py", "handlers.py"]),
-            ("tracing/omp", ["__init__.py", "adapter.py", "handlers.py"])
+            ("tracing/omp", ["__init__.py", "adapter.py", "handlers.py"]),
         ],
     )
     def test_hooks_dir_has_expected_files(self, pkg, expected_files):

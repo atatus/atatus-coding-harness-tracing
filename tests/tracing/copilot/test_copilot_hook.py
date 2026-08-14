@@ -92,7 +92,7 @@ def transcript_file(tmp_path):
     """Write a sample transcript to a temp file and return its path."""
     lines = [
         '{"type": "user", "message": {"role": "user", "content": "fix the bug"}}',
-        '{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I found the issue."}], "model": "gpt-4o", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 5}}}'
+        '{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I found the issue."}], "model": "gpt-4o", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 5}}}',
     ]
     tf = tmp_path / "transcript.jsonl"
     tf.write_text("\n".join(lines) + "\n")
@@ -130,22 +130,11 @@ class TestPrintResponse:
         _print_response("PreToolUse")
         out = capsys.readouterr().out.strip()
         payload = json.loads(out)
-        assert payload == {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow"
-            }
-        }
+        assert payload == {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
 
     @pytest.mark.parametrize(
         "event",
-        [
-            "SessionStart",
-            "UserPromptSubmit",
-            "PostToolUse",
-            "Stop",
-            "SubagentStop"
-        ],
+        ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"],
     )
     def test_non_pre_tool_use_emits_continue(self, event, capsys):
         _print_response(event)
@@ -173,7 +162,7 @@ class TestSessionStart:
             "session_id": "sess-123",
             "initial_prompt": "kick off",
             "source": "new",
-            "timestamp": "2026-05-04T00:00:00Z"
+            "timestamp": "2026-05-04T00:00:00Z",
         }
         _handle_session_start(payload)
 
@@ -202,7 +191,7 @@ class TestUserPromptSubmitted:
             "hook_event_name": "UserPromptSubmit",
             "session_id": "sess-abc",
             "prompt": "what is the capital of France?",
-            "timestamp": "2026-05-04T00:00:00Z"
+            "timestamp": "2026-05-04T00:00:00Z",
         }
         _handle_user_prompt_submitted(payload)
 
@@ -238,7 +227,7 @@ class TestPreToolUse:
             "session_id": "sess-1",
             "tool_use_id": "tool-42",
             "tool_name": "bash",
-            "tool_input": {"command": "ls"}
+            "tool_input": {"command": "ls"},
         }
         _handle_pre_tool_use(inp)
         val = state.get("tool_tool-42_start")
@@ -252,7 +241,7 @@ class TestPreToolUse:
             "hook_event_name": "PreToolUse",
             "session_id": "sess-1",
             "tool_name": "bash",
-            "tool_input": {"command": "ls"}
+            "tool_input": {"command": "ls"},
         }
         _handle_pre_tool_use(inp)
         val = state.get("tool_bash_start")
@@ -285,7 +274,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "bash",
             "tool_input": {"command": "ls -la", "description": "list"},
-            "tool_result": {"result_type": "success", "text_result_for_llm": "out"}
+            "tool_result": {"result_type": "success", "text_result_for_llm": "out"},
         }
         _handle_post_tool_use(inp)
         assert len(captured_spans) == 1
@@ -308,7 +297,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "report_intent",
             "tool_input": {"intent": "checking copilot"},
-            "tool_result": {"result_type": "success", "text_result_for_llm": "ack"}
+            "tool_result": {"result_type": "success", "text_result_for_llm": "ack"},
         }
         _handle_post_tool_use(inp)
         assert len(captured_spans) == 1
@@ -327,7 +316,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "read",
             "tool_input": {"file_path": "/foo.py"},
-            "tool_result": {"result_type": "success", "text_result_for_llm": "file contents here"}
+            "tool_result": {"result_type": "success", "text_result_for_llm": "file contents here"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -343,7 +332,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "edit",
             "tool_input": {},
-            "tool_result": {"result_type": "failure", "text_result_for_llm": "error"}
+            "tool_result": {"result_type": "failure", "text_result_for_llm": "error"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -359,7 +348,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "bash",
             "tool_input": {"command": "echo hi"},
-            "tool_result": {"text_result_for_llm": "hi"}
+            "tool_result": {"text_result_for_llm": "hi"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -375,7 +364,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "Bash",
             "tool_input": {"command": "git status"},
-            "tool_result": {"result_type": "success", "text_result_for_llm": "clean"}
+            "tool_result": {"result_type": "success", "text_result_for_llm": "clean"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -400,7 +389,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "read",
             "tool_input": {"file_path": "/a.py"},
-            "tool_result": {"text_result_for_llm": "content"}
+            "tool_result": {"text_result_for_llm": "content"},
         }
         _handle_post_tool_use(inp)
         span = _get_span(captured_spans[0])
@@ -417,7 +406,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "grep",
             "tool_input": {"pattern": "TODO", "path": "/src"},
-            "tool_result": {"text_result_for_llm": "matches"}
+            "tool_result": {"text_result_for_llm": "matches"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -435,7 +424,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "WebFetch",
             "tool_input": {"url": "https://example.com"},
-            "tool_result": {"text_result_for_llm": "page"}
+            "tool_result": {"text_result_for_llm": "page"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -451,7 +440,7 @@ class TestPostToolUse:
             "cwd": "/repo",
             "tool_name": "Read",
             "tool_input": {"file_path": "/foo/bar.py"},
-            "tool_result": {"result_type": "success", "text_result_for_llm": "file content"}
+            "tool_result": {"result_type": "success", "text_result_for_llm": "file content"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
@@ -474,12 +463,7 @@ class TestHandleStop:
         from tracing.copilot.hooks.handlers import _handle_user_prompt_submitted
 
         _handle_user_prompt_submitted(
-            {
-                "session_id": "sess-1",
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": "/repo",
-                "prompt": prompt
-            }
+            {"session_id": "sess-1", "hook_event_name": "UserPromptSubmit", "cwd": "/repo", "prompt": prompt}
         )
 
     def test_emits_llm_span_with_model_from_transcript(self, tmp_path, monkeypatch):
@@ -501,7 +485,7 @@ class TestHandleStop:
                 "hook_event_name": "Stop",
                 "cwd": "/repo",
                 "stop_reason": "end_turn",
-                "transcript_path": str(tpath)
+                "transcript_path": str(tpath),
             }
         )
 
@@ -520,12 +504,7 @@ class TestHandleStop:
         monkeypatch.setattr(_handlers, "send_span", lambda s: sent.append(s))
 
         _handlers._handle_stop(
-            {
-                "session_id": "sess-1",
-                "hook_event_name": "Stop",
-                "cwd": "/repo",
-                "stop_reason": "end_turn"
-            }
+            {"session_id": "sess-1", "hook_event_name": "Stop", "cwd": "/repo", "stop_reason": "end_turn"}
         )
 
         assert len(sent) == 1
@@ -540,12 +519,7 @@ class TestHandleStop:
         monkeypatch.setattr(_handlers, "send_span", lambda s: None)
         from tracing.copilot.hooks.adapter import resolve_session
 
-        payload = {
-            "session_id": "sess-1",
-            "hook_event_name": "Stop",
-            "cwd": "/repo",
-            "stop_reason": "end_turn"
-        }
+        payload = {"session_id": "sess-1", "hook_event_name": "Stop", "cwd": "/repo", "stop_reason": "end_turn"}
         _handlers._handle_stop(payload)
 
         state = resolve_session(payload)
@@ -568,12 +542,7 @@ class TestHandleSubagentStop:
         from tracing.copilot.hooks.handlers import _handle_user_prompt_submitted
 
         _handle_user_prompt_submitted(
-            {
-                "session_id": "sess-X",
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": "/repo",
-                "prompt": "p"
-            }
+            {"session_id": "sess-X", "hook_event_name": "UserPromptSubmit", "cwd": "/repo", "prompt": "p"}
         )
 
         sent = []
@@ -587,7 +556,7 @@ class TestHandleSubagentStop:
                 "hook_event_name": "SubagentStop",
                 "cwd": "/repo",
                 "agent_id": "ag-7",
-                "agent_type": "research"
+                "agent_type": "research",
             }
         )
 
@@ -660,7 +629,7 @@ ENTRY_POINTS = [
     ("pre_tool_use", pre_tool_use, "_handle_pre_tool_use", "PreToolUse"),
     ("post_tool_use", post_tool_use, "_handle_post_tool_use", "PostToolUse"),
     ("stop", stop, "_handle_stop", "Stop"),
-    ("subagent_stop", subagent_stop, "_handle_subagent_stop", "SubagentStop")
+    ("subagent_stop", subagent_stop, "_handle_subagent_stop", "SubagentStop"),
 ]
 
 
@@ -760,7 +729,7 @@ class TestProjectNameOnAllSpans:
             "cwd": "/repo",
             "tool_name": "bash",
             "tool_input": {"command": "ls"},
-            "tool_result": {"text_result_for_llm": "output"}
+            "tool_result": {"text_result_for_llm": "output"},
         }
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])

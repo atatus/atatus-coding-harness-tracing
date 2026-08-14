@@ -201,13 +201,10 @@ class TestEnsureSessionInitialized:
             "sessionID": "ses_e",
             "messages": [
                 {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"cwd": "/home/user/other-project", "root": "/home/user"}
-                    },
-                    "parts": []
+                    "info": {"role": "assistant", "path": {"cwd": "/home/user/other-project", "root": "/home/user"}},
+                    "parts": [],
                 }
-            ]
+            ],
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "my-env-project"
@@ -218,14 +215,8 @@ class TestEnsureSessionInitialized:
         payload = {
             "sessionID": "ses_c",
             "messages": [
-                {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"cwd": "/some/path/myproj", "root": "/some/path"}
-                    },
-                    "parts": []
-                }
-            ]
+                {"info": {"role": "assistant", "path": {"cwd": "/some/path/myproj", "root": "/some/path"}}, "parts": []}
+            ],
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "myproj"
@@ -235,15 +226,7 @@ class TestEnsureSessionInitialized:
         sm = self._make_state(opencode_state_dir, "proj-root")
         payload = {
             "sessionID": "ses_r",
-            "messages": [
-                {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"root": "/workspace/rootproj"}
-                    },
-                    "parts": []
-                }
-            ]
+            "messages": [{"info": {"role": "assistant", "path": {"root": "/workspace/rootproj"}}, "parts": []}],
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "rootproj"

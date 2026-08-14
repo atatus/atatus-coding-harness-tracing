@@ -162,7 +162,7 @@ class TestPostToolUse:
                 "tool_name": "Read",
                 "tool_use_id": "t1",
                 "tool_input": {"file_path": "/foo/bar.py"},
-                "tool_response": "file content"
+                "tool_response": "file content",
             }
         )
         assert len(captured_spans) == 1
@@ -181,7 +181,7 @@ class TestPostToolUse:
                 "tool_name": "Bash",
                 "tool_use_id": "t2",
                 "tool_input": {"command": "ls -la /tmp"},
-                "tool_response": "output"
+                "tool_response": "output",
             }
         )
         assert len(captured_spans) == 1
@@ -199,7 +199,7 @@ class TestPostToolUse:
                 "tool_name": "Grep",
                 "tool_use_id": "t3",
                 "tool_input": {"pattern": "TODO", "path": "/src"},
-                "tool_response": "matches"
+                "tool_response": "matches",
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -217,7 +217,7 @@ class TestPostToolUse:
                 "tool_name": "WebFetch",
                 "tool_use_id": "t4",
                 "tool_input": {"url": "https://example.com"},
-                "tool_response": "page"
+                "tool_response": "page",
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -229,12 +229,7 @@ class TestPostToolUse:
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "span-parent")
         _handle_post_tool_use(
-            {
-                "tool_name": "CustomTool",
-                "tool_use_id": "t5",
-                "tool_input": {"data": "hello"},
-                "tool_response": "result"
-            }
+            {"tool_name": "CustomTool", "tool_use_id": "t5", "tool_input": {"data": "hello"}, "tool_response": "result"}
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
@@ -249,12 +244,7 @@ class TestPostToolUse:
         state.set("current_trace_span_id", "span-parent")
         state.set("tool_t7_start", "1000000")
         _handle_post_tool_use(
-            {
-                "tool_name": "Read",
-                "tool_use_id": "t7",
-                "tool_input": {"file_path": "/a.py"},
-                "tool_response": "content"
-            }
+            {"tool_name": "Read", "tool_use_id": "t7", "tool_input": {"file_path": "/a.py"}, "tool_response": "content"}
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         assert span["startTimeUnixNano"] == "1000000000000"  # 1000000 ms -> ns
@@ -296,12 +286,7 @@ class TestUserPromptSubmit:
     def test_records_trace_start_line(self, mock_resolve, state, captured_spans, transcript_file):
         """Records trace_start_line from transcript file line count."""
         with mock.patch("tracing.claude_code.hooks.handlers.ensure_session_initialized"):
-            _handle_user_prompt_submit(
-                {
-                    "prompt": "test",
-                    "transcript_path": transcript_file
-                }
-            )
+            _handle_user_prompt_submit({"prompt": "test", "transcript_path": transcript_file})
         # sample_transcript.jsonl has 3 lines
         assert state.get("trace_start_line") == "3"
 
@@ -360,7 +345,7 @@ class TestStop:
                 "role": "assistant",
                 "content": "Hello from string format",
                 "model": "claude-test",
-                "usage": {"input_tokens": 10, "output_tokens": 5}
+                "usage": {"input_tokens": 10, "output_tokens": 5},
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -407,7 +392,7 @@ class TestStop:
                 "role": "assistant",
                 "content": "no caching here",
                 "model": "claude-test",
-                "usage": {"input_tokens": 42, "output_tokens": 7}
+                "usage": {"input_tokens": 42, "output_tokens": 7},
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -615,30 +600,35 @@ class TestScanTranscriptForUsage:
         cheaper rate.
         """
         t = tmp_path / "ttl.jsonl"
-        t.write_text(json.dumps({
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "id": "msg_ttl",
-                "model": "claude-haiku-4-5-20251001",
-                "content": [{"type": "text", "text": "ok"}],
-                "usage": {
-                    "input_tokens": 10,
-                    "cache_read_input_tokens": 200,
-                    "cache_creation_input_tokens": 100,
-                    "output_tokens": 5,
-                    "cache_creation": {
-                        "ephemeral_5m_input_tokens": 40,
-                        "ephemeral_1h_input_tokens": 60,
+        t.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "id": "msg_ttl",
+                        "model": "claude-haiku-4-5-20251001",
+                        "content": [{"type": "text", "text": "ok"}],
+                        "usage": {
+                            "input_tokens": 10,
+                            "cache_read_input_tokens": 200,
+                            "cache_creation_input_tokens": 100,
+                            "output_tokens": 5,
+                            "cache_creation": {
+                                "ephemeral_5m_input_tokens": 40,
+                                "ephemeral_1h_input_tokens": 60,
+                            },
+                        },
                     },
-                },
-            },
-        }) + "\n")
+                }
+            )
+            + "\n"
+        )
 
         _, usage, _ = _scan_transcript_for_usage(Path(t), 0)
         assert usage.cache_write == 100
-        assert usage.cache_write_1h == 60          # 40 remain at the 5-minute rate
-        assert usage.prompt == 310                 # 10 + 200 + 100
+        assert usage.cache_write_1h == 60  # 40 remain at the 5-minute rate
+        assert usage.prompt == 310  # 10 + 200 + 100
 
         attrs = usage.token_count_attrs()
         assert attrs["llm.token_count.prompt_details.cache_write"] == 100
@@ -673,7 +663,7 @@ class TestScanTranscriptForUsage:
                 "role": "assistant",
                 "content": "plain text",
                 "model": "m1",
-                "usage": {"input_tokens": 1, "output_tokens": 2}
+                "usage": {"input_tokens": 1, "output_tokens": 2},
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -692,7 +682,7 @@ class TestScanTranscriptForUsage:
                 {"message": {"role": "assistant", "content": "good", "model": "m", "usage": {"output_tokens": 5}}}
             ),
             "",
-            "{invalid json"
+            "{invalid json",
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -710,11 +700,11 @@ class TestScanTranscriptForUsage:
                         "role": "assistant",
                         "content": "assistant msg",
                         "model": "m",
-                        "usage": {"output_tokens": 3}
+                        "usage": {"output_tokens": 3},
                     }
                 }
             ),
-            json.dumps({"message": {"role": "system", "content": "system msg"}})
+            json.dumps({"message": {"role": "system", "content": "system msg"}}),
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -730,7 +720,7 @@ class TestScanTranscriptForUsage:
             ),
             json.dumps(
                 {"message": {"role": "assistant", "content": "second", "model": "m2", "usage": {"output_tokens": 2}}}
-            )
+            ),
         ]
         tf.write_text("\n".join(lines) + "\n")
         output, usage, model = _scan_transcript_for_usage(tf, 0)
@@ -749,7 +739,7 @@ class TestScanTranscriptForUsage:
                         "role": "assistant",
                         "content": [{"type": "text", "text": ""}],
                         "model": "m",
-                        "usage": {"output_tokens": 1}
+                        "usage": {"output_tokens": 1},
                     }
                 }
             )
@@ -771,8 +761,8 @@ class TestScanTranscriptForUsage:
                     "input_tokens": 10,
                     "cache_read_input_tokens": 20,
                     "cache_creation_input_tokens": 30,
-                    "output_tokens": 40
-                }
+                    "output_tokens": 40,
+                },
             }
         }
         tf.write_text(json.dumps(entry) + "\n")
@@ -810,11 +800,7 @@ class TestSubagentStop:
             "tracing.claude_code.hooks.handlers.resolve_transcript_path", return_value=Path(transcript_file)
         ):
             _handle_subagent_stop(
-                {
-                    "agent_type": "code-review",
-                    "agent_id": "agent-1",
-                    "agent_transcript_path": transcript_file
-                }
+                {"agent_type": "code-review", "agent_id": "agent-1", "agent_transcript_path": transcript_file}
             )
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -838,11 +824,7 @@ class TestSubagentStop:
         ):
             with mock.patch.object(Path, "stat", return_value=mock_stat):
                 _handle_subagent_stop(
-                    {
-                        "agent_type": "explorer",
-                        "agent_id": "a2",
-                        "agent_transcript_path": transcript_file
-                    }
+                    {"agent_type": "explorer", "agent_id": "a2", "agent_transcript_path": transcript_file}
                 )
 
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -867,11 +849,7 @@ class TestSubagentStop:
         ):
             with mock.patch.object(Path, "stat", return_value=FakeStat()):
                 _handle_subagent_stop(
-                    {
-                        "agent_type": "explorer",
-                        "agent_id": "a3",
-                        "agent_transcript_path": transcript_file
-                    }
+                    {"agent_type": "explorer", "agent_id": "a3", "agent_transcript_path": transcript_file}
                 )
 
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -887,13 +865,7 @@ class TestSubagentStop:
         state.set("current_trace_id", "t" * 32)
         state.set("current_trace_span_id", "s" * 16)
         with mock.patch("tracing.claude_code.hooks.handlers.resolve_transcript_path", return_value=None):
-            _handle_subagent_stop(
-                {
-                    "agent_type": "explorer",
-                    "agent_id": "a4",
-                    "last_assistant_message": ""
-                }
-            )
+            _handle_subagent_stop({"agent_type": "explorer", "agent_id": "a4", "last_assistant_message": ""})
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
@@ -909,7 +881,7 @@ class TestSubagentStop:
                 "role": "assistant",
                 "content": "main output",
                 "model": "claude-main",
-                "usage": {"input_tokens": 999, "output_tokens": 999}
+                "usage": {"input_tokens": 999, "output_tokens": 999},
             }
         }
         main_tf.write_text(json.dumps(main_entry) + "\n")
@@ -920,7 +892,7 @@ class TestSubagentStop:
                 "role": "assistant",
                 "content": "agent output",
                 "model": "claude-test",
-                "usage": {"input_tokens": 77, "output_tokens": 33}
+                "usage": {"input_tokens": 77, "output_tokens": 33},
             }
         }
         agent_tf.write_text(json.dumps(agent_entry) + "\n")
@@ -933,7 +905,7 @@ class TestSubagentStop:
                 "agent_type": "explorer",
                 "agent_id": "a5",
                 "agent_transcript_path": str(agent_tf),
-                "transcript_path": str(main_tf)
+                "transcript_path": str(main_tf),
             }
         )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -948,11 +920,7 @@ class TestSubagentStop:
         state.set("current_trace_span_id", "s" * 16)
         with mock.patch("tracing.claude_code.hooks.handlers.resolve_transcript_path", return_value=None):
             _handle_subagent_stop(
-                {
-                    "agent_type": "explorer",
-                    "agent_id": "a6",
-                    "last_assistant_message": "Found the file at line 42"
-                }
+                {"agent_type": "explorer", "agent_id": "a6", "last_assistant_message": "Found the file at line 42"}
             )
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -969,11 +937,7 @@ class TestSubagentStop:
             "tracing.claude_code.hooks.handlers.resolve_transcript_path", return_value=Path(transcript_file)
         ):
             _handle_subagent_stop(
-                {
-                    "agent_type": "explorer",
-                    "agent_id": "a7",
-                    "last_assistant_message": "overridden subagent text"
-                }
+                {"agent_type": "explorer", "agent_id": "a7", "last_assistant_message": "overridden subagent text"}
             )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
@@ -996,11 +960,7 @@ class TestStopFailure:
         state.set("current_trace_start_time", "1000")
         state.set("current_trace_prompt", "test")
         _handle_stop_failure(
-            {
-                "error": "rate_limit",
-                "error_details": "429",
-                "last_assistant_message": "API Error: Rate limit reached"
-            }
+            {"error": "rate_limit", "error_details": "429", "last_assistant_message": "API Error: Rate limit reached"}
         )
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
@@ -1012,13 +972,7 @@ class TestStopFailure:
 
     def test_stop_failure_returns_early_without_trace_state(self, mock_resolve, state, captured_spans):
         """No current_trace_id → returns without sending."""
-        _handle_stop_failure(
-            {
-                "error": "rate_limit",
-                "error_details": "429",
-                "last_assistant_message": "API Error"
-            }
-        )
+        _handle_stop_failure({"error": "rate_limit", "error_details": "429", "last_assistant_message": "API Error"})
         assert len(captured_spans) == 0
 
     def test_stop_failure_fallback_output(self, mock_resolve, state, captured_spans):
@@ -1058,13 +1012,7 @@ class TestNotification:
         """Builds CHAIN span with notification attributes."""
         state.set("current_trace_id", "t" * 32)
         state.set("current_trace_span_id", "s" * 16)
-        _handle_notification(
-            {
-                "message": "Build succeeded",
-                "title": "CI",
-                "type": "success"
-            }
-        )
+        _handle_notification({"message": "Build succeeded", "title": "CI", "type": "success"})
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
@@ -1098,13 +1046,7 @@ class TestPermissionRequest:
         """Builds CHAIN span with permission attributes."""
         state.set("current_trace_id", "t" * 32)
         state.set("current_trace_span_id", "s" * 16)
-        _handle_permission_request(
-            {
-                "permission": "allow",
-                "tool_name": "Bash",
-                "tool_input": {"command": "rm -rf /"}
-            }
-        )
+        _handle_permission_request({"permission": "allow", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}})
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
@@ -1226,7 +1168,7 @@ ENTRY_POINTS = [
     ("stop_failure", stop_failure, "_handle_stop_failure"),
     ("notification", notification, "_handle_notification"),
     ("permission_request", permission_request, "_handle_permission_request"),
-    ("session_end", session_end, "_handle_session_end")
+    ("session_end", session_end, "_handle_session_end"),
 ]
 
 
@@ -1296,7 +1238,7 @@ class TestContentRedaction:
                 "tool_name": "Read",
                 "tool_use_id": "t1",
                 "tool_input": {"file_path": "/secret/path.py"},
-                "tool_response": "secret content"
+                "tool_response": "secret content",
             }
         )
         attrs = _attrs(captured_spans[0])
@@ -1310,12 +1252,7 @@ class TestContentRedaction:
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "span-parent")
         _handle_post_tool_use(
-            {
-                "tool_name": "Read",
-                "tool_use_id": "t1",
-                "tool_input": {"file_path": "/foo.py"},
-                "tool_response": "x"
-            }
+            {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": "/foo.py"}, "tool_response": "x"}
         )
         attrs = _attrs(captured_spans[0])
         assert "tool.command" not in attrs
@@ -1371,8 +1308,10 @@ class TestSkipsSpanWhenNoActiveTrace:
     @pytest.mark.parametrize("handler", [_handle_post_tool_use, _handle_post_tool_use_failure])
     def test_emits_nothing_without_a_trace(self, tmp_path, handler):
         sm = self._state_without_trace(tmp_path)
-        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
-             mock.patch("tracing.claude_code.hooks.handlers.send_span") as send:
+        with (
+            mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm),
+            mock.patch("tracing.claude_code.hooks.handlers.send_span") as send,
+        ):
             handler({"tool_name": "Read", "tool_input": {"file_path": "/x"}, "tool_response": "ok"})
         assert send.call_count == 0
 
@@ -1380,15 +1319,19 @@ class TestSkipsSpanWhenNoActiveTrace:
     def test_still_counts_the_tool(self, tmp_path, handler):
         """The span is skipped, not the bookkeeping."""
         sm = self._state_without_trace(tmp_path)
-        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
-             mock.patch("tracing.claude_code.hooks.handlers.send_span"):
+        with (
+            mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm),
+            mock.patch("tracing.claude_code.hooks.handlers.send_span"),
+        ):
             handler({"tool_name": "Read", "tool_input": {}, "tool_response": "ok"})
         assert sm.get("tool_count") == "1"
 
     def test_emits_normally_once_a_trace_exists(self, tmp_path):
         sm = self._state_without_trace(tmp_path)
         sm.set("current_trace_id", "trace-abc")
-        with mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm), \
-             mock.patch("tracing.claude_code.hooks.handlers.send_span") as send:
+        with (
+            mock.patch("tracing.claude_code.hooks.handlers.resolve_session", return_value=sm),
+            mock.patch("tracing.claude_code.hooks.handlers.send_span") as send,
+        ):
             _handle_post_tool_use({"tool_name": "Read", "tool_input": {}, "tool_response": "ok"})
         assert send.call_count == 1
