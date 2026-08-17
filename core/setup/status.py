@@ -35,6 +35,7 @@ from core.setup import CONFIG_FILE, INSTALL_DIR, VENV_DIR
 # run from the repo it was installed into. Reported as not-registered elsewhere,
 # which matches how the harness itself behaves.
 _REGISTRATION = {
+    "antigravity": ("tracing.antigravity.constants", ("SETTINGS_FILE",)),
     "claude-code": ("tracing.claude_code.constants", ("SETTINGS_FILE",)),
     # A callable, not a constant: Codex honours CODEX_HOME, so its location is
     # resolved per call. It yields the home directory, which _references_install
@@ -42,6 +43,7 @@ _REGISTRATION = {
     "codex": ("tracing.codex.constants", ("get_codex_home",)),
     "copilot": ("tracing.copilot.constants", ("HOOKS_FILE",)),
     "cursor": ("tracing.cursor.constants", ("HOOKS_FILE",)),
+    "devin": ("tracing.devin.constants", ("CONFIG_FILE",)),
     "gemini": ("tracing.gemini.constants", ("SETTINGS_FILE",)),
     "kiro": ("tracing.kiro.constants", ("KIRO_AGENTS_DIR",)),
     "omp": ("tracing.omp.constants", ("SETTINGS_FILE", "PLUGIN_FILE")),

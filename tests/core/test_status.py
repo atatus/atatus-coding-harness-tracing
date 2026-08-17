@@ -244,21 +244,32 @@ class TestExitCodes:
 
 
 class TestRegistrationTableCoverage:
-    def test_every_shipped_harness_is_mapped(self):
-        """A new harness must be one line here, not a silent "unknown"."""
-        import core.constants  # noqa: F401  (import guard: package must load)
+    @staticmethod
+    def _shipped_config_keys() -> set:
+        """HARNESS_NAME from every tracing/*/constants.py — the keys that end up
+        in config.json, and therefore the keys `status` has to recognise."""
+        import pathlib
+        import re
 
-        shipped = {
-            "claude-code",
-            "codex",
-            "copilot",
-            "cursor",
-            "gemini",
-            "kiro",
-            "omp",
-            "opencode",
-        }
-        assert shipped <= set(status._REGISTRATION)
+        root = pathlib.Path(__file__).parents[2] / "tracing"
+        keys = set()
+        for constants in sorted(root.glob("*/constants.py")):
+            found = re.search(r'^HARNESS_NAME\s*=\s*"([^"]+)"', constants.read_text(), re.MULTILINE)
+            if found:
+                keys.add(found.group(1))
+        return keys
+
+    def test_every_shipped_harness_is_mapped(self):
+        """A new harness must be one line in _REGISTRATION, not a silent "unknown".
+
+        Discovered from the packages rather than hardcoded: the hardcoded version
+        of this test passed while Devin and Antigravity both reported
+        "registration unknown" from a real install.
+        """
+        shipped = self._shipped_config_keys()
+        assert len(shipped) >= 10, f"only discovered {sorted(shipped)}"
+        missing = shipped - set(status._REGISTRATION)
+        assert not missing, f"harnesses missing from _REGISTRATION: {sorted(missing)}"
 
     def test_each_mapping_resolves_to_at_least_one_path(self):
         for harness in status._REGISTRATION:

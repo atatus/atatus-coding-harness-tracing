@@ -68,6 +68,15 @@ HARNESSES: dict[str, HarnessMetadata] = {
         "state_subdir": "gemini",
         "default_log_file": LOG_DIR / "gemini.log",
     },
+    # Shares the ~/.gemini directory with Gemini CLI but reads a different file
+    # (config/hooks.json, not settings.json), so the two harnesses coexist.
+    "antigravity": {
+        "service_name": "antigravity",
+        "scope_name": "atatus-antigravity-tracing",
+        "default_project_name": "antigravity",
+        "state_subdir": "antigravity",
+        "default_log_file": LOG_DIR / "antigravity.log",
+    },
     "opencode": {
         "service_name": "opencode",
         "scope_name": "atatus-opencode-tracing",

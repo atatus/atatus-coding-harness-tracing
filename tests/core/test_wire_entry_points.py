@@ -70,6 +70,8 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     # omp hook
     "atatus-hook-omp": "tracing.omp.hooks.handlers:main",
     "atatus-hook-devin": "tracing.devin.hooks.handlers:main",
+    "atatus-hook-antigravity-pre-invocation": "tracing.antigravity.hooks.handlers:pre_invocation",
+    "atatus-hook-antigravity-stop": "tracing.antigravity.hooks.handlers:stop",
 }
 
 # Setup wizards stay on core.setup.*
@@ -83,6 +85,7 @@ EXPECTED_SETUP_ENTRY_POINTS = {
     "atatus-setup-opencode": "core.setup.opencode:main",
     "atatus-setup-omp": "core.setup.omp:main",
     "atatus-setup-devin": "core.setup.devin:main",
+    "atatus-setup-antigravity": "core.setup.antigravity:main",
 }
 
 

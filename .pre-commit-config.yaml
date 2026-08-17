@@ -58,3 +58,6 @@ repos:
       - id: mypy
         name: mypy (tracing/devin)
         files: ^tracing/devin/
+      - id: mypy
+        name: mypy (tracing/antigravity)
+        files: ^tracing/antigravity/

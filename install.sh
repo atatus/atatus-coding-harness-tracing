@@ -258,6 +258,7 @@ harness_dir() {
         opencode) echo "tracing/opencode" ;;
         omp)     echo "tracing/omp" ;;
         devin)   echo "tracing/devin" ;;
+        antigravity) echo "tracing/antigravity" ;;
         *)       return 1 ;;
     esac
 }
@@ -303,6 +304,7 @@ Commands:
   opencode    Install and configure tracing for opencode
   omp         Install and configure tracing for Oh My Pi (omp)
   devin       Install and configure tracing for Devin CLI
+  antigravity Install and configure tracing for Google Antigravity
   status      Report configured harnesses and whether their hooks are wired up
   update      Update the installed atatus-coding-harness-tracing and re-register all harnesses
   uninstall <harness>   Tear down one harness
@@ -362,7 +364,7 @@ main() {
     done
 
     case "$cmd" in
-        claude|codex|copilot|cursor|gemini|kiro|opencode|omp|devin)
+        claude|codex|copilot|cursor|gemini|kiro|opencode|omp|devin|antigravity)
             install_harness "$cmd" "$with_skills"
             ;;
         uninstall)

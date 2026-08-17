@@ -75,6 +75,9 @@ atatus-hook-opencode = "tracing.opencode.hooks.handlers:main"
 atatus-hook-omp = "tracing.omp.hooks.handlers:main"
 # Devin hook
 atatus-hook-devin = "tracing.devin.hooks.handlers:main"
+# Antigravity hooks
+atatus-hook-antigravity-pre-invocation = "tracing.antigravity.hooks.handlers:pre_invocation"
+atatus-hook-antigravity-stop = "tracing.antigravity.hooks.handlers:stop"
 # Setup wizards
 atatus-setup-claude = "core.setup.claude:main"
 atatus-setup-codex = "core.setup.codex:main"
@@ -85,6 +88,7 @@ atatus-setup-kiro = "core.setup.kiro:main"
 atatus-setup-opencode = "core.setup.opencode:main"
 atatus-setup-omp = "core.setup.omp:main"
 atatus-setup-devin = "core.setup.devin:main"
+atatus-setup-antigravity = "core.setup.antigravity:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

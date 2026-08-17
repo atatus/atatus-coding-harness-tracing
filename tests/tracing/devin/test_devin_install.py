@@ -240,14 +240,12 @@ class TestCommentedConfig:
         from tracing.devin.install import _register_hooks
 
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            """{
+        config_file.write_text("""{
   // pick the fast model
   "model": "swe-1.6",
   "theme_mode": "dark" // inline trailing comment
 }
-"""
-        )
+""")
 
         _register_hooks()
 
@@ -260,8 +258,7 @@ class TestCommentedConfig:
         from tracing.devin.install import _register_hooks
 
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            """{
+        config_file.write_text("""{
   /* multi
      line
      comment */
@@ -271,8 +268,7 @@ class TestCommentedConfig:
     "PreToolUse": [{"hooks": [{"type": "command", "command": "/usr/bin/other"}]}]
   }
 }
-"""
-        )
+""")
 
         _register_hooks()
 
@@ -313,9 +309,7 @@ class TestCommentedConfig:
     "SessionEnd": [{"hooks": [{"type": "command", "command": "%(cmd)s", "timeout": 30}]}]
   }
 }
-""" % {
-            "cmd": HOOK_CMD
-        }
+""" % {"cmd": HOOK_CMD}
         config_file.write_text(commented)
 
         _register_hooks()
@@ -326,17 +320,14 @@ class TestCommentedConfig:
         from tracing.devin.install import _unregister_hooks
 
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            """{
+        config_file.write_text("""{
   // keep me
   "model": "swe-1.6",
   "hooks": {
     "SessionEnd": [{"hooks": [{"type": "command", "command": "%(cmd)s"}]}]
   }
 }
-"""
-            % {"cmd": HOOK_CMD}
-        )
+""" % {"cmd": HOOK_CMD})
 
         _unregister_hooks()
 
