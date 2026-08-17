@@ -2006,3 +2006,191 @@ class TestStampAtatusIdentity:
             attrs = {a["key"]: a["value"]["stringValue"] for a in rs["resource"]["attributes"]}
             assert attrs["service.name"] == "proj"
             assert attrs["atatus.project.type"] == "llm"
+
+
+# ── Hook stdin is UTF-8, whatever the host locale says ────────────────────
+
+
+class TestReadStdinText:
+    """`sys.stdin.read()` decodes with the *host's* stdio encoding — cp1252 on a
+    stock Windows install, ASCII under a C locale. Harnesses send UTF-8.
+
+    The mismatch raises UnicodeDecodeError, which is not a JSONDecodeError, so
+    it escaped every reader's except clause and was swallowed by the entry-point
+    wrapper: the hook exited 0 and the whole turn was dropped with no span.
+    That is every prompt containing an emoji, or any Tamil, Hindi, Chinese,
+    Cyrillic or Arabic text, on any Windows machine.
+    """
+
+    NON_ASCII = "Привет 한글 العربية 🏴‍☠️ வணக்கம்"
+
+    @staticmethod
+    def _stdin(payload: bytes, encoding: str = "ascii"):
+        """stdin as the host would hand it to us: UTF-8 bytes behind a text
+        wrapper that cannot decode them."""
+        import io
+
+        return io.TextIOWrapper(io.BytesIO(payload), encoding=encoding)
+
+    def test_decodes_utf8_regardless_of_wrapper_encoding(self, monkeypatch):
+        from core.common import read_stdin_text
+
+        payload = json.dumps({"prompt": self.NON_ASCII}, ensure_ascii=False).encode("utf-8")
+        monkeypatch.setattr("sys.stdin", self._stdin(payload))
+
+        assert json.loads(read_stdin_text())["prompt"] == self.NON_ASCII
+
+    def test_raises_on_genuinely_malformed_utf8(self, monkeypatch):
+        """Invalid bytes are rejected, not silently replaced — a corrupted
+        payload should be dropped by the caller, not shipped as mojibake."""
+        from core.common import read_stdin_text
+
+        monkeypatch.setattr("sys.stdin", self._stdin(b'{"prompt": "\xff"}'))
+        with pytest.raises(UnicodeDecodeError):
+            read_stdin_text()
+
+    def test_falls_back_when_stdin_has_no_buffer(self, monkeypatch):
+        """A StringIO (what the rest of the suite injects) has no .buffer."""
+        import io
+
+        from core.common import read_stdin_text
+
+        monkeypatch.setattr("sys.stdin", io.StringIO('{"a": 1}'))
+        assert read_stdin_text() == '{"a": 1}'
+
+
+class TestEveryHarnessDecodesUtf8:
+    """Upstream fixed Claude Code only. All seven readers had the same bug.
+
+    Parametrized over the readers themselves so a new harness that hand-rolls
+    `sys.stdin.read()` instead of using the shared helper fails here.
+    """
+
+    NON_ASCII = "Привет 한글 العربية 🏴‍☠️ வணக்கம்"
+
+    @staticmethod
+    def _stdin(payload: dict):
+        import io
+
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return io.TextIOWrapper(io.BytesIO(raw), encoding="ascii")
+
+    @pytest.mark.parametrize("harness", ["claude_code", "gemini", "omp", "opencode"])
+    def test_read_stdin_decodes_utf8(self, monkeypatch, harness):
+        mod = __import__(f"tracing.{harness}.hooks.handlers", fromlist=["_read_stdin"])
+        monkeypatch.setattr("sys.stdin", self._stdin({"prompt": self.NON_ASCII}))
+
+        assert mod._read_stdin()["prompt"] == self.NON_ASCII
+
+    def test_copilot_read_stdin_decodes_utf8(self, monkeypatch):
+        """Copilot's reader takes an event name for its debug dump."""
+        from tracing.copilot.hooks import handlers
+
+        monkeypatch.setattr("sys.stdin", self._stdin({"prompt": self.NON_ASCII}))
+        assert handlers._read_stdin("session_start")["prompt"] == self.NON_ASCII
+
+    @pytest.mark.parametrize("harness", ["claude_code", "gemini", "omp", "opencode"])
+    def test_malformed_utf8_yields_empty_dict(self, monkeypatch, harness):
+        """Fail soft, as every reader already promised for malformed JSON."""
+        import io
+
+        mod = __import__(f"tracing.{harness}.hooks.handlers", fromlist=["_read_stdin"])
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b'{"p": "\xff"}'), encoding="ascii"))
+
+        assert mod._read_stdin() == {}
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tracing/claude_code/hooks/handlers.py",
+            "tracing/copilot/hooks/handlers.py",
+            "tracing/cursor/hooks/handlers.py",
+            "tracing/gemini/hooks/handlers.py",
+            "tracing/kiro/hooks/handlers.py",
+            "tracing/omp/hooks/handlers.py",
+            "tracing/opencode/hooks/handlers.py",
+        ],
+    )
+    def test_no_handler_reads_stdin_through_the_text_wrapper(self, path):
+        """The locale-dependent forms must not come back anywhere.
+
+        Cursor and Kiro read stdin inline rather than through a `_read_stdin`,
+        so a behavioural test would have to drive their whole main(); this
+        catches a regression in all seven the same way.
+        """
+        import pathlib
+
+        source = pathlib.Path(__file__).parents[2] / path
+        text = source.read_text()
+        assert "sys.stdin.read()" not in text, f"{path} decodes stdin with the host locale"
+        assert "json.load(sys.stdin)" not in text, f"{path} decodes stdin with the host locale"
+        assert "read_stdin_text" in text, f"{path} does not use the shared UTF-8 reader"
+
+
+class TestHookFileIoIsUtf8:
+    """Harness-produced files are UTF-8; `open()`/`read_text()` without an
+    explicit encoding decode with the host locale instead.
+
+    Same bug as the stdin one, on the path that carries model name and token
+    counts: a Claude Code transcript containing an emoji or any non-Latin script
+    raised UnicodeDecodeError on Windows, the entry-point wrapper swallowed it,
+    and the turn shipped with no model and no usage.
+    """
+
+    def test_transcript_read_survives_non_ascii(self, tmp_path, monkeypatch):
+        import json as _json
+
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text(
+            _json.dumps({"type": "assistant", "text": "வணக்கம் 🏴‍☠️ Привет"}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        # Simulate a non-UTF-8 host locale for open()'s default encoding.
+        import builtins
+
+        real_open = builtins.open
+
+        def ascii_open(file, mode="r", *args, **kwargs):
+            if "b" not in mode and "encoding" not in kwargs:
+                kwargs["encoding"] = "ascii"
+            return real_open(file, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", ascii_open)
+
+        from tracing.claude_code.hooks.handlers import _wait_for_transcript_flush
+
+        # Must not raise. Pre-fix this died with UnicodeDecodeError.
+        _wait_for_transcript_flush(transcript, 0)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tracing/claude_code/hooks/handlers.py",
+            "tracing/codex/hooks/adapter.py",
+            "tracing/cursor/hooks/adapter.py",
+            "tracing/kiro/hooks/adapter.py",
+        ],
+    )
+    def test_hook_file_io_declares_an_encoding(self, path):
+        """`/proc/<pid>/stat` reads are deliberately excluded: kernel-generated
+        ASCII, Linux-only, and used only for a liveness check."""
+        import pathlib
+        import re as _re
+
+        text = (pathlib.Path(__file__).parents[2] / path).read_text()
+        # `encoding=` anywhere on the line counts — an inner call such as
+        # json.dumps(...) puts a ')' between the opener and the kwarg, which a
+        # lookahead bounded by [^)]* cannot see past.
+        def _needs_encoding(line: str) -> bool:
+            if "encoding=" in line:
+                return False
+            if _re.search(r"\.(read_text|write_text)\(", line):
+                return True
+            return bool(_re.search(r"\bopen\([^)]*\)\s*as\b", line))
+
+        offenders = [
+            line.strip()
+            for line in text.splitlines()
+            if _needs_encoding(line) and "stat_path" not in line and "self.lock_path" not in line
+        ]
+        assert not offenders, f"{path} does file I/O without an explicit encoding:\n  " + "\n  ".join(offenders)

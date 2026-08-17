@@ -10,7 +10,7 @@ stderr: redirected to ATATUS_LOG_FILE before dispatch.
 import json
 import sys
 
-from core.common import build_span, env, error, get_timestamp_ms, log, redact_content, send_span
+from core.common import build_span, env, error, get_timestamp_ms, log, read_stdin_text, redact_content, send_span
 from tracing.cursor.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
@@ -1007,7 +1007,7 @@ def main():
         if not check_requirements():
             return
 
-        input_json = json.loads(sys.stdin.read() or "{}")
+        input_json = json.loads(read_stdin_text() or "{}")
         event = _event_name(input_json)
         _dispatch(event, input_json)
     except Exception as e:

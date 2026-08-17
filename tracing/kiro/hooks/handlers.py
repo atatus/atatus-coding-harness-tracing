@@ -24,6 +24,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    read_stdin_text,
     redact_content,
     send_span,
 )
@@ -231,8 +232,8 @@ def main() -> int:
         if not check_requirements():
             return 0
         try:
-            input_json = json.load(sys.stdin)
-        except (json.JSONDecodeError, ValueError) as exc:
+            input_json = json.loads(read_stdin_text() or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             log(f"Could not parse stdin JSON: {exc}")
             return 0
         if not isinstance(input_json, dict):

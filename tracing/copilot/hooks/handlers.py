@@ -5,7 +5,6 @@ Each entry point reads stdin JSON (snake_case schema), resolves session state,
 and delegates to the corresponding _handle_* implementation.
 """
 import json
-import sys
 
 from core.common import (
     build_span,
@@ -16,6 +15,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    read_stdin_text,
     redact_content,
     send_span,
 )
@@ -42,9 +42,9 @@ def _read_stdin(event: str) -> dict:
     inspect the actual field schema Copilot is sending.
     """
     try:
-        raw = sys.stdin.read()
+        raw = read_stdin_text()
         data = json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, OSError):
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         data = {}
     debug_dump(f"copilot_{event}", data)
     return data

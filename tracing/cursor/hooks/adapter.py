@@ -86,7 +86,7 @@ def state_push(key: str, value: dict) -> None:
     with FileLock(lock_path):
         if stack_file.exists():
             try:
-                data = json.loads(stack_file.read_text()) or []
+                data = json.loads(stack_file.read_text(encoding="utf-8")) or []
             except json.JSONDecodeError:
                 data = []
         else:
@@ -98,7 +98,7 @@ def state_push(key: str, value: dict) -> None:
         data.append(value)
 
         tmp = stack_file.with_suffix(f".tmp.{os.getpid()}")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(stack_file)
 
 
@@ -115,7 +115,7 @@ def state_pop(key: str) -> "dict | None":
             return None
 
         try:
-            data = json.loads(stack_file.read_text()) or []
+            data = json.loads(stack_file.read_text(encoding="utf-8")) or []
         except json.JSONDecodeError:
             return None
 
@@ -126,7 +126,7 @@ def state_pop(key: str) -> "dict | None":
         data = data[:-1]
 
         tmp = stack_file.with_suffix(f".tmp.{os.getpid()}")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(stack_file)
 
     return value if isinstance(value, dict) else None
@@ -145,7 +145,7 @@ def gen_root_span_save(gen_id: str, span_id: str) -> None:
     """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     safe = sanitize(gen_id)
-    (STATE_DIR / f"root_{safe}").write_text(span_id)
+    (STATE_DIR / f"root_{safe}").write_text(span_id, encoding="utf-8")
 
 
 def gen_root_span_get(gen_id: str) -> str:
@@ -155,7 +155,7 @@ def gen_root_span_get(gen_id: str) -> str:
     safe = sanitize(gen_id)
     root_file = STATE_DIR / f"root_{safe}"
     if root_file.exists():
-        return root_file.read_text().strip()
+        return root_file.read_text(encoding="utf-8").strip()
     return ""
 
 

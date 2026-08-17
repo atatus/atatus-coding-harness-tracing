@@ -30,7 +30,7 @@ def load_env_file(path: Path) -> None:
     them in ``os.environ``.
     """
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return
     for line in text.splitlines():

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from typing import Any, Optional
 
 from core.common import (
@@ -31,6 +30,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    read_stdin_text,
     redact_content,
     send_span,
 )
@@ -48,14 +48,14 @@ from tracing.opencode.hooks.adapter import (
 
 
 def _read_stdin() -> dict:
-    """Read JSON from stdin. Returns {} on empty/invalid input."""
+    """Read UTF-8 JSON from stdin. Returns {} on empty/invalid input."""
     try:
-        raw = sys.stdin.read()
+        raw = read_stdin_text()
         if not raw:
             return {}
         data = json.loads(raw)
         return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError, ValueError):
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError, ValueError):
         return {}
 
 

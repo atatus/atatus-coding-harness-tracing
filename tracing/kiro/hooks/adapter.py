@@ -143,7 +143,7 @@ def load_session_sidecar(session_id: str) -> dict | None:
 
     while True:
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 log(f"sidecar for {session_id} is not a JSON object")
                 return None

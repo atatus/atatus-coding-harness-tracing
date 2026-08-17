@@ -6,7 +6,6 @@ entry point registered in pyproject.toml [project.scripts].
 """
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    read_stdin_text,
     redact_content,
     send_span,
 )
@@ -38,11 +38,11 @@ from tracing.claude_code.hooks.adapter import (
 
 
 def _read_stdin() -> dict:
-    """Read JSON from stdin. Returns {} on empty/invalid input."""
+    """Read UTF-8 JSON from stdin. Returns {} on empty/invalid input."""
     try:
-        raw = sys.stdin.read()
+        raw = read_stdin_text()
         return json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, OSError):
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         return {}
 
 
@@ -360,7 +360,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     # Track transcript position
     transcript = input_json.get("transcript_path", "")
     if transcript and Path(transcript).is_file():
-        with open(transcript) as f:
+        with open(transcript, encoding="utf-8") as f:
             line_count = sum(1 for _ in f)
         state.set("trace_start_line", str(line_count))
     else:
@@ -448,7 +448,7 @@ def _wait_for_transcript_flush(transcript: Path, start_line: int) -> bool:
     deadline = time.monotonic() + (cap_ms / 1000.0)
     while True:
         try:
-            with open(transcript) as f:
+            with open(transcript, encoding="utf-8") as f:
                 for i, line in enumerate(f):
                     if i < start_line:
                         continue
@@ -483,7 +483,7 @@ def _scan_transcript_for_usage(
     # clean multiple. Count each API message exactly once.
     seen_message_ids: set = set()
 
-    with open(transcript) as f:
+    with open(transcript, encoding="utf-8") as f:
         for i, line in enumerate(f):
             if i < start_line:
                 continue

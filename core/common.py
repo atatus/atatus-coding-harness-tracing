@@ -264,6 +264,39 @@ def redact_content(allowed: bool, content: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hook stdin
+# ---------------------------------------------------------------------------
+
+
+def read_stdin_text() -> str:
+    """Read the hook payload from stdin and decode it as UTF-8.
+
+    Every harness sends hook JSON as UTF-8, but ``sys.stdin.read()`` decodes
+    using the *host's* stdio encoding — cp1252 on a stock Windows install, or
+    ASCII under a C locale. A prompt containing anything outside that encoding
+    then raises ``UnicodeDecodeError``, which is not a ``json.JSONDecodeError``
+    and so escapes the readers' except clauses; the entry-point wrapper catches
+    it and the whole turn is dropped with no span at all.
+
+    That is not an edge case: it is every prompt containing an emoji, or any
+    Tamil, Hindi, Chinese, Cyrillic or Arabic text, on any Windows machine.
+
+    Reading ``sys.stdin.buffer`` bypasses the text wrapper entirely so the
+    decode is UTF-8 regardless of locale. The ``buffer`` attribute is absent
+    when stdin has been replaced by a ``StringIO`` (which the test suite does),
+    so fall back to the text read in that case.
+
+    Raises ``UnicodeDecodeError`` on genuinely malformed input rather than
+    substituting replacement characters — a corrupted payload should be dropped
+    loudly by the caller, not silently turned into mojibake and shipped.
+    """
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # ID and timestamp generation
 # ---------------------------------------------------------------------------
 
