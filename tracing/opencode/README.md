@@ -4,13 +4,14 @@ Automatic OpenInference tracing for [opencode](https://opencode.ai) terminal cod
 
 ## What gets traced
 
-One trace per **turn** (one user prompt → the assistant's response → `session.idle`). Each trace is a three-level tree:
+One trace per **turn** (one user prompt → the assistant's response → `session.idle`). Each trace preserves the requesting message and subagent hierarchy:
 
 | Span | Kind | Notes |
 |------|------|-------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt; `output.value` is the assistant's final text. |
-| `LLM: <model>` | LLM | Child of `Turn`. Carries `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. One per assistant message. |
-| `<tool>` | TOOL | Child of `Turn`. One per completed `ToolPart`. Records `tool.name`, redacted input/output, and tool-specific attributes (`tool.command`, `tool.file_path`, `tool.query`, `tool.url`). |
+| `LLM: <model>` | LLM | Child of `Turn` (or of a child subagent's `AGENT`). Carries `llm.message_id`, `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. One per assistant message. |
+| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. One per completed `callID`. Records `tool.name`, redacted input/output, and tool-specific attributes (`tool.command`, `tool.file_path`, `tool.query`, `tool.url`). |
+| `Agent: <name>` | AGENT | Child of a `task` TOOL when the SDK child session reports a matching `Session.parentID`; that child session's LLM and TOOL spans nest beneath it. |
 
 Timestamps come from opencode's own millisecond clocks (`message.time.created` / `time.completed`, `toolPart.state.time.start` / `.end`) rather than wall-clock time on the tracing process.
 
@@ -106,7 +107,7 @@ Uninstall deletes the plugin file at `~/.config/opencode/plugin/atatus-tracing.t
 | Atatus endpoint | `https://otel-rx.atatus.com` |
 | Plugin file | `~/.config/opencode/plugin/atatus-tracing.ts` |
 | Lifecycle events forwarded | `message.updated` (assistant completed), `session.idle` |
-| Span tree | `Turn` (CHAIN) → `LLM` → `TOOL` |
+| Span tree | `Turn` (CHAIN) → `LLM` → `TOOL`; a `task` tool may contain `AGENT` → child `LLM`/`TOOL` |
 | Trace granularity | one trace per turn |
 | State directory | `~/.atatus/harness/state/opencode/` |
 | Log file | `~/.atatus/harness/logs/opencode.log` |

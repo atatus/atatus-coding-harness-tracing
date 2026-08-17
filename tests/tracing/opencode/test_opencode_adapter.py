@@ -125,6 +125,12 @@ class TestResolveSession:
         data = json.loads(sm.state_file.read_text())
         assert data == {}
 
+    def test_can_resolve_paths_without_initializing(self, opencode_state_dir, disable_env_vars):
+        sm = adapter.resolve_session({"sessionID": "ses_deferred"}, initialize=False)
+
+        assert sm.state_file == opencode_state_dir / "state_ses_deferred.json"
+        assert not sm.state_file.exists()
+
     def test_same_session_id_same_file(self, opencode_state_dir, disable_env_vars):
         """Calling resolve_session twice with same sessionID produces same file."""
         sm1 = adapter.resolve_session({"sessionID": "ses_stable"})
@@ -201,7 +207,10 @@ class TestEnsureSessionInitialized:
             "sessionID": "ses_e",
             "messages": [
                 {
-                    "info": {"role": "assistant", "path": {"cwd": "/home/user/other-project", "root": "/home/user"}},
+                    "info": {
+                        "role": "assistant",
+                        "path": {"cwd": "/home/user/other-project", "root": "/home/user"},
+                    },
                     "parts": [],
                 }
             ],
@@ -209,13 +218,25 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "my-env-project"
 
+    # Upstream also has test_project_name_from_config here, covering per-harness
+    # `project_name` in config.json. We do not resolve it: the installer bakes
+    # ATATUS_PROJECT_NAME into the harness settings and the env var is the source
+    # of truth, so the config key is never consulted. Removed rather than skipped
+    # so it does not read as a temporary gap.
+
     def test_project_name_from_snapshot_cwd(self, opencode_state_dir, disable_env_vars):
         """project_name uses basename of the snapshot message path.cwd."""
         sm = self._make_state(opencode_state_dir, "proj-cwd")
         payload = {
             "sessionID": "ses_c",
             "messages": [
-                {"info": {"role": "assistant", "path": {"cwd": "/some/path/myproj", "root": "/some/path"}}, "parts": []}
+                {
+                    "info": {
+                        "role": "assistant",
+                        "path": {"cwd": "/some/path/myproj", "root": "/some/path"},
+                    },
+                    "parts": [],
+                }
             ],
         }
         adapter.ensure_session_initialized(sm, payload)
@@ -226,7 +247,15 @@ class TestEnsureSessionInitialized:
         sm = self._make_state(opencode_state_dir, "proj-root")
         payload = {
             "sessionID": "ses_r",
-            "messages": [{"info": {"role": "assistant", "path": {"root": "/workspace/rootproj"}}, "parts": []}],
+            "messages": [
+                {
+                    "info": {
+                        "role": "assistant",
+                        "path": {"root": "/workspace/rootproj"},
+                    },
+                    "parts": [],
+                }
+            ],
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "rootproj"

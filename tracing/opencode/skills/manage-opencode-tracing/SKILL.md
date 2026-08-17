@@ -156,13 +156,14 @@ opencode is fundamentally different from every other harness in this repo: exten
 
 ## Span tree
 
-Each trace covers one **turn** (one user prompt → the assistant's response → `session.idle`). The tree is three levels deep:
+Each trace covers one **turn** (one user prompt → the assistant's response → `session.idle`) and preserves the requesting-message and subagent hierarchy:
 
 | Span | Kind | Description |
 |------|------|-------------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt; `output.value` is the assistant's final text. Timestamps come from `message.time.created` / `time.completed`. |
-| `LLM: <model>` | LLM | Child of `Turn`. The assistant message. Carries `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. |
-| `<tool>` | TOOL | Child of `Turn`. One per completed `ToolPart`. Records `tool.name`, redacted input/output, and `tool.command`/`tool.file_path`/`tool.query`/`tool.url` where applicable. Timestamps come from `toolPart.state.time.start` / `.end`. |
+| `LLM: <model>` | LLM | Child of `Turn`, or of a child session's `AGENT`. The assistant message. Carries the message ID, `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. |
+| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. Records `tool.name`, redacted input/output, and `tool.command`/`tool.file_path`/`tool.query`/`tool.url` where applicable. Timestamps come from `toolPart.state.time.start` / `.end`. |
+| `Agent: <name>` | AGENT | Child of a `task` TOOL when the SDK child session has the matching `Session.parentID`; child LLM/TOOL spans nest below it. |
 
 ## Troubleshoot
 
@@ -175,7 +176,7 @@ Common issues and fixes for opencode:
 | Reconciler entry point missing | The shim spawns the reconciler by absolute path; verify the binary exists at `~/.atatus/harness/venv/bin/atatus-hook-opencode` (or `~/.atatus/harness/venv/Scripts/atatus-hook-opencode.exe` on Windows). Rerun `./install.sh opencode` to reinstall the venv entry point. |
 | Spans appear partial / missing tool spans | Snapshots are pulled on `message.updated` (assistant complete) and `session.idle`. Pending or running tool parts won't emit a span until they reach `completed` or `error` state. Wait for the turn to finish. |
 | Duplicate spans | The reconciler dedupes by message id and tool `callID`. If you still see duplicates, set `ATATUS_VERBOSE=true` and check `~/.atatus/harness/logs/opencode.log` for dedup hits to confirm state tracking is working. |
-| Sub-agent (`task` tool) trace not linked to parent | Known v1 limitation: opencode's built-in `task` tool spawns sub-agents with their own `sessionID`, which produce their own independent traces. They are not linked back to the parent session's trace. |
+| Sub-agent (`task` tool) trace not linked to parent | Wait for the parent session to reach `session.idle`. Linking needs a completed `task` part carrying `state.metadata.sessionId` plus a child session whose `Session.parentID` matches the requesting session; mismatched or foreign snapshots are rejected. A session already running when the plugin was upgraded may need restarting. |
 | Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching opencode |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching opencode |

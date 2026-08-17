@@ -24,10 +24,9 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": "otlp.atatus.com:443", "api_key": "test-key"},
 )
 
 
@@ -41,7 +40,11 @@ def _fake_stdout():
     return type(
         "FakeOut",
         (),
-        {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
+        {
+            "isatty": lambda self: False,
+            "write": lambda self, s: None,
+            "flush": lambda self: None,
+        },
     )()
 
 
@@ -119,12 +122,8 @@ def plugin_source_text(cwd_tmp):
 class TestInstallFreshWritesFlatHarnessEntry:
     """Fresh install writes flat harness entry to config.json."""
 
-    @pytest.mark.parametrize(
-        "backend,expected_target",
-        [(ATATUS_BACKEND, "atatus"), (ATATUS_BACKEND, "atatus")],
-        ids=["atatus", "atatus"],
-    )
-    def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch, backend, expected_target):
+    def test_fresh_install_creates_config(self, cwd_tmp, monkeypatch):
+        backend, expected_target = ATATUS_BACKEND, "atatus"
         _mock_prompts(monkeypatch, backend=backend)
         install()
 
@@ -204,6 +203,24 @@ class TestPluginSourceResolution:
         assert src.name == "atatus-tracing.ts"
 
 
+class TestPluginChildSessionContract:
+    def test_fetches_task_child_session_with_exact_call_id(self, plugin_source_text):
+        assert "fetchChildSessions" in plugin_source_text
+        assert "parentCallID" in plugin_source_text
+        assert "metadata?.sessionId" in plugin_source_text
+        assert "client.session.get" in plugin_source_text
+        assert "client.session.messages" in plugin_source_text
+
+    def test_forwards_child_sessions_in_snapshot(self, plugin_source_text):
+        assert "childSessions" in plugin_source_text
+        assert "forward({ type, sessionID, messages, childSessions })" in plugin_source_text
+
+    def test_suppresses_independent_child_session_snapshots(self, plugin_source_text):
+        assert "const sessionInfoRes = await client.session.get" in plugin_source_text
+        assert "const sessionInfo = successfulSession(sessionInfoRes, sessionID)" in plugin_source_text
+        assert "if (!sessionInfo || sessionInfo.parentID) return" in plugin_source_text
+
+
 # ---------------------------------------------------------------------------
 # Install tests — second harness (copy-from)
 # ---------------------------------------------------------------------------
@@ -223,10 +240,10 @@ class TestInstallSecondHarnessOffersCopyFrom:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": "otlp.atatus.com:443",
                     "api_key": "ak-existing",
-                }
-            }
+                },
+            },
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -279,10 +296,10 @@ class TestInstallExistingOpencodeEntryOnlyUpdatesProjectName:
                 "opencode": {
                     "project_name": "opencode",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": "otlp.atatus.com:443",
                     "api_key": "ak-existing",
-                }
-            }
+                },
+            },
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
@@ -301,7 +318,7 @@ class TestInstallExistingOpencodeEntryOnlyUpdatesProjectName:
         entry = config["harnesses"]["opencode"]
         assert entry["project_name"] == "my-opencode"
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == "otlp.atatus.com:443"
         assert entry["api_key"] == "ak-existing"
 
 
@@ -311,10 +328,7 @@ class TestInstallExistingOpencodeEntryOnlyUpdatesProjectName:
 
 
 class TestInstallExistingLoggingBlockSkipsPrompt:
-    """When config.json already has a **current-version** logging block, skip the
-    prompt. A block without a matching `_v` is re-prompted instead — that is the
-    repair path for machines carrying the pre-2026-08-07 `tool_content: true`
-    override, covered in tests/core/test_setup.py::TestNeedsContentLoggingPrompt."""
+    """When config.json already has a logging block, skip the logging prompt."""
 
     def test_existing_logging_not_reprompted(self, cwd_tmp, monkeypatch):
         config_dir = cwd_tmp / ".atatus" / "harness"
@@ -322,7 +336,7 @@ class TestInstallExistingLoggingBlockSkipsPrompt:
         config_path = config_dir / "config.json"
 
         seed_config = {
-            "logging": {"_v": LOG_CONFIG_VERSION, "prompts": False, "tool_details": True, "tool_content": False}
+            "logging": {"_v": LOG_CONFIG_VERSION, "prompts": False, "tool_details": True, "tool_content": False},
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
