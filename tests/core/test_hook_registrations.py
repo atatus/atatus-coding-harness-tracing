@@ -117,22 +117,34 @@ class TestHooksJson:
         assert isinstance(hooks_data, dict)
         assert "hooks" in hooks_data
 
-    def test_all_claude_events_registered(self, hooks_data):
-        """All 10 Claude hook events must be present."""
-        expected_events = {
-            "SessionStart",
-            "UserPromptSubmit",
-            "PreToolUse",
-            "PostToolUse",
-            "Stop",
-            "SubagentStop",
-            "StopFailure",
-            "Notification",
-            "PermissionRequest",
-            "SessionEnd",
-        }
-        actual_events = set(hooks_data["hooks"].keys())
-        assert expected_events == actual_events
+    def test_matches_hook_events_exactly(self, hooks_data):
+        """hooks.json must register exactly what HOOK_EVENTS does.
+
+        There are two registration surfaces for Claude Code and they had
+        drifted: `install.py` writes ~/.claude/settings.json from
+        `constants.HOOK_EVENTS` (16 events), while this plugin manifest listed
+        only 10. Six events were implemented, wired into pyproject as entry
+        points, and reachable through the installer — but invisible to anyone
+        who loaded the directory as a Claude Code *plugin*.
+
+        Asserting equality against HOOK_EVENTS rather than a hardcoded list is
+        the point: the previous version of this test pinned the 10 and so
+        actively held the drift in place.
+        """
+        from tracing.claude_code.constants import HOOK_EVENTS
+
+        assert set(hooks_data["hooks"]) == set(HOOK_EVENTS)
+
+    def test_each_event_dispatches_its_own_entry_point(self, hooks_data):
+        """A copy-paste that points two events at one binary would otherwise
+        pass every other check in this class."""
+        from tracing.claude_code.constants import HOOK_EVENTS
+
+        for event, entry_point in HOOK_EVENTS.items():
+            commands = [h["command"] for group in hooks_data["hooks"][event] for h in group["hooks"]]
+            assert commands == [
+                f'"${{CLAUDE_PLUGIN_ROOT}}/scripts/run-hook" {entry_point}'
+            ], f"{event} does not dispatch {entry_point}"
 
     def test_hook_commands_use_run_hook(self, hooks_data):
         """Each hook command must use the run-hook dispatcher."""
