@@ -629,6 +629,7 @@ def send_span(span_dict: dict) -> bool:
         headers = {
             "Content-Type": "application/json",
             "api-key": api_key,
+            "User-Agent": "atatus-coding-harness-tracing/0.1.0",
         }
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
