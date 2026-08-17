@@ -1,0 +1,22 @@
+{
+  "name": "cursor-tracing",
+  "displayName": "Atatus Cursor Tracing",
+  "description": "Automatic tracing of Cursor sessions to Atatus with OpenInference spans.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Atatus",
+    "email": "hello@atatus.com",
+    "url": "https://www.atatus.com"
+  },
+  "repository": "https://github.com/atatus/atatus-coding-harness-tracing",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tracing",
+    "agents",
+    "openinference",
+    "atatus",
+    "cursor",
+    "observability"
+  ],
+  "hooks": "hooks/hooks.json"
+}

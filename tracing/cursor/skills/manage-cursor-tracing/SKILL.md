@@ -11,14 +11,25 @@ Configure OpenInference tracing for Cursor IDE sessions to Atatus. Spans are sen
 
 **This skill follows a decision tree workflow.** Start by asking the user where they are in the setup process:
 
-1. **Do they already have credentials?**
-   - Yes -> Jump to [Configure Settings](#configure-settings)
-   - No -> Continue to step 2
+1. **First, determine the install type.** Was tracing installed as a **Cursor plugin** (via
+   `/add-plugin` in Cursor 2.5+, which registers hooks automatically), or **manually** by running
+   `install.sh`?
+   - If unsure, ask directly: "Did you install Atatus tracing as a Cursor plugin (via /add-plugin),
+     or by running install.sh?"
+   - Heuristic 1: look for a `cursor-tracing` plugin directory in Cursor's installed-plugins location.
+   - Heuristic 2: check whether `.cursor/hooks.json` already contains `atatus-hook-cursor` entries —
+     if so it is a manual `install.sh` install; if absent, it is a plugin install (or a fresh setup).
+   - This only affects the [Activate Cursor hooks](#activate-cursor-hooks) step. Credentials are
+     identical for both.
 
-2. **Do they need to configure credentials?**
+2. **Do they already have credentials?**
+   - Yes -> Jump to [Configure Settings](#configure-settings)
+   - No -> Continue to step 3
+
+3. **Do they need to configure credentials?**
    - Yes -> Go to [Set Up Atatus](#set-up-atatus)
 
-3. **Are they troubleshooting?**
+4. **Are they troubleshooting?**
    - Yes -> Jump to [Troubleshoot](#troubleshoot)
 
 **Important:** Only follow the relevant path for the user's needs. Don't go through all sections.
@@ -100,6 +111,21 @@ If the user has a custom OTLP endpoint, set it in `harnesses.cursor.endpoint`.
 
 ### Activate Cursor hooks
 
+**This step depends on install type** (see [How to Use This Skill](#how-to-use-this-skill) step 1).
+
+#### Plugin install (Cursor `/add-plugin`)
+
+**Skip this step entirely.** The plugin's bundled `hooks/hooks.json` already registers every Cursor
+hook event. There is nothing to write to `.cursor/hooks.json`. After saving credentials, tell the
+user to start a new Cursor session — traces begin on the next interaction.
+
+> **Warning:** do NOT add `.cursor/hooks.json` entries on top of a plugin install. Cursor would then
+> route each event to the handler twice — once via the plugin, once via the project file — producing
+> duplicate spans for every hook. If the user has entries pointing at `atatus-hook-cursor` left over
+> from an earlier `install.sh` setup, remove them before relying on the plugin.
+
+#### Manual install (`install.sh`)
+
 Cursor uses a `.cursor/hooks.json` file in the project root to route hook events to the handler. All events route to a single `atatus-hook-cursor` CLI entry point, which dispatches based on `hook_event_name` in the JSON payload.
 
 Create `.cursor/hooks.json` in the user's project (or merge into it if it already exists):
@@ -133,7 +159,9 @@ If the user already has a `.cursor/hooks.json` with other hooks, merge the Atatu
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials.
 2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
-3. **Hooks active**: Verify `.cursor/hooks.json` exists in the project root and contains the Atatus hook entries.
+3. **Hooks active**:
+   - **Manual install**: verify `.cursor/hooks.json` exists in the project root and contains the Atatus hook entries.
+   - **Plugin install**: no project-level `.cursor/hooks.json` is needed — the plugin registers hooks itself. Confirm `cursor-tracing` is listed as installed in Cursor.
 
 ### Confirm
 
@@ -200,7 +228,12 @@ Every span includes `cursor.conversation.id` as a span attribute. Since `session
 
 ### Hooks JSON Example (IDE + CLI)
 
-When configuring `.cursor/hooks.json`, include both IDE and CLI events:
+> **Plugin users: do NOT hand-write `.cursor/hooks.json` from this example.** It is a reference for
+> the **manual `install.sh` path only**. Under a `/add-plugin` install the plugin already registers
+> every event, and adding these on top routes each hook twice — duplicate spans for everything. See
+> [Activate Cursor hooks > Plugin install](#plugin-install-cursor-add-plugin).
+
+When configuring `.cursor/hooks.json` on a manual `install.sh` install, include both IDE and CLI events:
 
 ```json
 {
@@ -234,7 +267,9 @@ Common issues and fixes:
 | Traces not appearing | Verify config exists: `cat ~/.atatus/harness/config.json`. Check hook log: `tail -20 ~/.atatus/harness/logs/cursor.log` |
 | Config missing | Run the installer or create `~/.atatus/harness/config.json` manually (include `harnesses.cursor` section) |
 | Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
-| Hooks not firing | Verify `.cursor/hooks.json` exists in the project root and paths are correct (use absolute paths) |
+| Hooks not firing (manual install) | Verify `.cursor/hooks.json` exists in the project root and paths are correct (use absolute paths) |
+| Hooks not firing (plugin install) | Verify `cursor-tracing` is enabled in Cursor, start a fresh Cursor session after installing, and check `~/.atatus/harness/logs/cursor.log` for errors |
+| Duplicate spans / every event traced twice | A plugin install *plus* manual `.cursor/hooks.json` entries pointing at `atatus-hook-cursor` fires each hook twice. Remove the manual entries and keep one install path. |
 | Shell/MCP spans missing input | State push failed -- check that `~/.atatus/harness/state/cursor/` is writable |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Cursor |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching Cursor |

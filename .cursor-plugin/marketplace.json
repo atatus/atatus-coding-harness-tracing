@@ -1,0 +1,30 @@
+{
+  "name": "atatus-coding-harness-tracing",
+  "owner": {
+    "name": "Atatus",
+    "email": "hello@atatus.com"
+  },
+  "metadata": {
+    "description": "Atatus plugins for Cursor observability and tracing"
+  },
+  "plugins": [
+    {
+      "name": "cursor-tracing",
+      "source": "./tracing/cursor",
+      "description": "Automatic tracing of Cursor IDE/CLI sessions to Atatus with OpenInference spans",
+      "version": "1.0.0",
+      "homepage": "https://www.atatus.com",
+      "repository": "https://github.com/atatus/atatus-coding-harness-tracing",
+      "license": "Apache-2.0",
+      "keywords": [
+        "tracing",
+        "agents",
+        "openinference",
+        "atatus",
+        "cursor",
+        "observability"
+      ],
+      "category": "observability"
+    }
+  ]
+}
