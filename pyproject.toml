@@ -73,6 +73,8 @@ atatus-hook-kiro = "tracing.kiro.hooks.handlers:main"
 atatus-hook-opencode = "tracing.opencode.hooks.handlers:main"
 # omp hook
 atatus-hook-omp = "tracing.omp.hooks.handlers:main"
+# Devin hook
+atatus-hook-devin = "tracing.devin.hooks.handlers:main"
 # Setup wizards
 atatus-setup-claude = "core.setup.claude:main"
 atatus-setup-codex = "core.setup.codex:main"
@@ -82,6 +84,7 @@ atatus-setup-gemini = "core.setup.gemini:main"
 atatus-setup-kiro = "core.setup.kiro:main"
 atatus-setup-opencode = "core.setup.opencode:main"
 atatus-setup-omp = "core.setup.omp:main"
+atatus-setup-devin = "core.setup.devin:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

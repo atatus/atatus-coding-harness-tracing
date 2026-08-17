@@ -55,3 +55,6 @@ repos:
       - id: mypy
         name: mypy (tracing/omp)
         files: ^tracing/omp/
+      - id: mypy
+        name: mypy (tracing/devin)
+        files: ^tracing/devin/

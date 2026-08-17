@@ -69,6 +69,7 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-opencode": "tracing.opencode.hooks.handlers:main",
     # omp hook
     "atatus-hook-omp": "tracing.omp.hooks.handlers:main",
+    "atatus-hook-devin": "tracing.devin.hooks.handlers:main",
 }
 
 # Setup wizards stay on core.setup.*
@@ -81,6 +82,7 @@ EXPECTED_SETUP_ENTRY_POINTS = {
     "atatus-setup-kiro": "core.setup.kiro:main",
     "atatus-setup-opencode": "core.setup.opencode:main",
     "atatus-setup-omp": "core.setup.omp:main",
+    "atatus-setup-devin": "core.setup.devin:main",
 }
 
 

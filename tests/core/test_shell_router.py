@@ -263,9 +263,21 @@ class TestDispatchLogic:
     def _load(self):
         self.text = _read_install_sh()
 
-    def test_dispatches_harness_commands(self):
-        """claude|codex|copilot|cursor|gemini|kiro|opencode|omp should be dispatched."""
-        assert "claude|codex|copilot|cursor|gemini|kiro|opencode|omp)" in self.text
+    @pytest.mark.parametrize(
+        "harness", ["claude", "codex", "copilot", "cursor", "gemini", "kiro", "opencode", "omp", "devin"]
+    )
+    def test_dispatches_harness_commands(self, harness):
+        """Every harness must appear in the install dispatch alternation.
+
+        Asserted per-harness rather than as one literal alternation string: the
+        literal broke on every harness added, which pushes people towards editing
+        the assertion instead of checking the router.
+        """
+        import re as _re
+
+        match = _re.search(r"^\s{8}(claude\|[a-z|]+)\)$", self.text, _re.M)
+        assert match, "install dispatch alternation not found"
+        assert harness in match.group(1).split("|")
 
     def test_install_harness_called(self):
         """install_harness function should be called for harness commands."""
