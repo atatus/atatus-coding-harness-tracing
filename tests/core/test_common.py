@@ -1936,8 +1936,7 @@ class TestStampAtatusIdentity:
 
     Atatus resolves (and auto-creates) a project from the OTLP resource's
     service.name, so service.name has to carry the user's project name while the
-    harness slug moves to atatus.agent.harness. This mirrors what the upstream
-    the project identity travels in the payload.
+    harness slug moves to atatus.agent.harness.
     """
 
     @staticmethod
@@ -2060,9 +2059,7 @@ class TestReadStdinText:
 
 
 class TestEveryHarnessDecodesUtf8:
-    """Upstream fixed Claude Code only. All seven readers had the same bug.
-
-    Parametrized over the readers themselves so a new harness that hand-rolls
+    """Parametrized over the readers themselves so a new harness that hand-rolls
     `sys.stdin.read()` instead of using the shared helper fails here.
     """
 

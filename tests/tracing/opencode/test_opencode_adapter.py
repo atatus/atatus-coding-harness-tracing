@@ -218,8 +218,7 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("project_name") == "my-env-project"
 
-    # Upstream also has test_project_name_from_config here, covering per-harness
-    # `project_name` in config.json. We do not resolve it: the installer bakes
+    # We do not resolve it: the installer bakes
     # ATATUS_PROJECT_NAME into the harness settings and the env var is the source
     # of truth, so the config key is never consulted. Removed rather than skipped
     # so it does not read as a temporary gap.
