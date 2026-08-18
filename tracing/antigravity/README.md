@@ -101,20 +101,27 @@ See the [main README's Environment variables section](../../README.md#environmen
 
 ## Trace shape
 
-One trace per user turn. Tool spans hang off the model step that requested them, not off the turn, so a
+One trace per user turn. Tool spans hang off the model call that requested them, not off the turn, so a
 trace reads as what the agent actually did:
 
 ```
-Turn 3                     CHAIN   input = the user's prompt, output = the final response
-├── LLM: gemini-3.7-flash  LLM     one per planner response
-│   ├── run_command        TOOL
-│   └── view_file          TOOL
-└── LLM: gemini-3.7-flash  LLM
-    └── grep_search        TOOL
+Turn 3                LLM     input = the user's prompt, output = the final response
+├── Model call 1      CHAIN   one per planner response
+│   ├── run_command   TOOL
+│   └── view_file     TOOL
+└── Model call 2      CHAIN
+    └── grep_search   TOOL
 ```
 
-An LLM span covers its whole step — the model call *and* the tools it ran — so its children sit inside it.
-The model's own response time is kept separately as `llm.latency_ms`.
+🔴 **The turn is the trace's only LLM-kind span, and it is the root.** Consumers count LLM-kind spans as
+turns — the LLM Traces list is a span list filtered on that kind, not a group-by-trace query — so a second
+LLM-kind span anywhere in the trace shows up as a second turn. Claude Code and Codex get this for free:
+their hooks fire once per turn, so a turn *is* a single model span. Antigravity's transcript exposes every
+model call, and those boundaries are kept as **CHAIN** steps precisely so the extra fidelity does not
+inflate turn counts. If you ever change a step back to `LLM`, a twelve-call turn becomes twelve rows again.
+
+A step span covers the model call *and* the tools it ran, so its children sit inside it. The model's own
+response time is kept separately as `llm.latency_ms`, and the turn reports `llm.call_count`.
 
 A planner response that issued tool calls but wrote no text is not an empty span: the calls are its output,
 reported as `llm.output_messages[].message.tool_calls`. A planner response with no text, no reasoning and no
@@ -131,7 +138,9 @@ it as a display label rather than an id. Three sources are combined so every spa
 2. The transcript's settings-change block, carried forward across turns.
 3. The CLI's `settings.json`, i.e. the currently selected model.
 
-`llm.model_name` gets the id; the human label is kept alongside as `antigravity.model_label`. The store has
+`llm.model_name` gets the id; the human label is kept alongside as `antigravity.model_label`. Both live on
+the turn span only — repeating the model on every step would multiply a single turn's contribution to every
+model-keyed count downstream. The store has
 no public schema, so a value that does not look like a model id is discarded and a label-derived id is used
 instead — a schema change degrades this to sources 2/3 rather than putting an arbitrary string in the model
 field.

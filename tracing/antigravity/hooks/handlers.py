@@ -16,12 +16,18 @@ Two hook events drive emission:
 
 Trace shape, one trace per turn::
 
-    Turn N (CHAIN)
-    ├── LLM: <model>            one per planner response
-    │   ├── run_command (TOOL)  nested under the planner that requested it
+    Turn N (LLM)                    the turn — the trace's only LLM-kind span
+    ├── Model call 1 (CHAIN)        one per planner response
+    │   ├── run_command (TOOL)      nested under the call that requested it
     │   └── view_file  (TOOL)
-    └── LLM: <model>
+    └── Model call 2 (CHAIN)
         └── grep_search (TOOL)
+
+🔴 **Exactly one LLM-kind span per trace, and it is the root.** Consumers count
+LLM-kind spans as turns, so a second one reads as a second turn. Claude Code and
+Codex get this for free — their hooks fire once per turn, so a turn *is* a single
+model span. Antigravity can see every model call, and those extra boundaries are
+kept as CHAIN steps so the fidelity does not inflate turn counts.
 
 Stdout discipline: each entry point prints exactly ``{}`` (never
 ``{"decision": "continue"}``, which would force Antigravity's agent loop to
@@ -353,27 +359,58 @@ def _build_turn_spans(
     model_label: str,
     common: dict,
 ) -> list[dict]:
-    """Build the CHAIN Turn span plus its LLM and TOOL children."""
+    """Build the LLM Turn span plus its per-call CHAIN and TOOL descendants.
+
+    🔴 **The turn is the only LLM-kind span in the trace, and it is the root.**
+    Consumers treat an LLM-kind span as one turn — the Traces list is a span list
+    keyed on that kind, not a grouped-by-trace query — so a second LLM-kind span
+    anywhere in the trace shows up as a second turn. Claude Code and Codex each
+    emit exactly one because their hooks only fire once per turn; Antigravity can
+    see every model call, and that extra fidelity must not arrive as extra turns.
+    The per-call steps are therefore CHAIN: they keep the boundaries and the tool
+    parentage without being counted as turns.
+    """
     trace_id = generate_trace_id()
     root_span_id = generate_span_id()
 
     user_input = turn.get("user_input", "") or ""
     final_response = turn.get("final_response", "") or ""
     redacted_input = redact_content(env.log_prompts, user_input)
+    redacted_output = redact_content(env.log_prompts, final_response)
 
     root_attrs: dict = dict(common)
     root_attrs.update(
         {
-            "openinference.span.kind": "CHAIN",
+            "openinference.span.kind": "LLM",
             "trace.number": str(trace_number),
             "input.value": redacted_input,
-            "output.value": redact_content(env.log_prompts, final_response),
+            "output.value": redacted_output,
         }
     )
+    if user_input:
+        root_attrs["llm.input_messages"] = redact_content(
+            env.log_prompts,
+            json.dumps([{"message.role": "user", "message.content": user_input}]),
+        )
+    if final_response:
+        root_attrs["llm.output_messages"] = redact_content(
+            env.log_prompts,
+            json.dumps([{"message.role": "assistant", "message.content": final_response}]),
+        )
+    # The model belongs to the turn span alone. Repeating it on every step would
+    # multiply this turn's contribution to every model-keyed count downstream.
     if model_id:
         root_attrs["llm.model_name"] = model_id
     if model_label and model_label != model_id:
         root_attrs["antigravity.model_label"] = model_label
+
+    steps = [
+        step
+        for step in (turn.get("llm_steps") or [])
+        if (step.get("content") or step.get("thinking") or step.get("tool_calls"))
+    ]
+    if steps:
+        root_attrs["llm.call_count"] = len(steps)
 
     turn_error = turn.get("error") or ""
     if turn_error:
@@ -385,7 +422,7 @@ def _build_turn_spans(
     spans = [
         build_span(
             f"Turn {trace_number}",
-            "CHAIN",
+            "LLM",
             root_span_id,
             trace_id,
             "",
@@ -399,10 +436,11 @@ def _build_turn_spans(
         )
     ]
 
-    # An LLM step is worth a span when it produced text, reasoning, or tool
-    # calls. A planner response with none of the three is a no-op the model
-    # emitted; a span for it says nothing and only lengthens the waterfall.
-    llm_span_ids: dict[int, str] = {}
+    # A step is worth a span when it produced text, reasoning, or tool calls. A
+    # planner response with none of the three is a no-op the model emitted; a
+    # span for it says nothing and only lengthens the waterfall.
+    step_span_ids: dict[int, str] = {}
+    step_number = 0
     for idx, llm in enumerate(turn.get("llm_steps") or []):
         content = llm.get("content", "") or ""
         thinking = llm.get("thinking", "") or ""
@@ -410,27 +448,20 @@ def _build_turn_spans(
         if not content and not thinking and not tool_calls:
             continue
 
+        step_number += 1
         span_id = generate_span_id()
-        llm_span_ids[idx] = span_id
+        step_span_ids[idx] = span_id
 
         attrs: dict = dict(common)
         attrs.update(
             {
-                "openinference.span.kind": "LLM",
+                "openinference.span.kind": "CHAIN",
                 "input.value": redacted_input,
                 "output.value": redact_content(env.log_prompts, content),
                 "llm.output_messages": redact_content(env.log_prompts, _output_messages(content, tool_calls)),
+                "antigravity.step": step_number,
             }
         )
-        if model_id:
-            attrs["llm.model_name"] = model_id
-        if model_label and model_label != model_id:
-            attrs["antigravity.model_label"] = model_label
-        if idx == 0 and user_input:
-            attrs["llm.input_messages"] = redact_content(
-                env.log_prompts,
-                json.dumps([{"message.role": "user", "message.content": user_input}]),
-            )
         if thinking:
             attrs["llm.reasoning"] = redact_content(env.log_prompts, thinking)
         # The span covers the step including the tools it ran, so the model's
@@ -448,8 +479,8 @@ def _build_turn_spans(
 
         spans.append(
             build_span(
-                f"LLM: {model_id}" if model_id else "LLM",
-                "LLM",
+                f"Model call {step_number}",
+                "CHAIN",
                 span_id,
                 trace_id,
                 root_span_id,
@@ -465,9 +496,9 @@ def _build_turn_spans(
 
     for tool in turn.get("tool_steps") or []:
         llm_index = tool.get("llm_index", -1)
-        parent_span_id = llm_span_ids.get(llm_index, "")
+        parent_span_id = step_span_ids.get(llm_index, "")
         if parent_span_id:
-            parentage = "planner_response"
+            parentage = "model_call"
         else:
             parent_span_id = root_span_id
             parentage = "turn_fallback"

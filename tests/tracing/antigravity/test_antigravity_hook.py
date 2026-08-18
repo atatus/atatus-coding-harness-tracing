@@ -256,17 +256,14 @@ class TestStopSingleTurnFixture:
             stop()
         return captured_spans
 
-    def test_emits_one_turn_span(self, stop_with_fixture):
-        chain_spans = [
-            p
-            for p in stop_with_fixture
-            if any(
-                a["key"] == "openinference.span.kind" and a["value"]["stringValue"] == "CHAIN"
-                for a in _get_span(p)["attributes"]
-            )
-        ]
-        assert len(chain_spans) == 1
-        assert _get_span(chain_spans[0])["name"] == "Turn 1"
+    def test_the_turn_is_the_only_llm_kind_span(self, stop_with_fixture):
+        """Consumers count LLM-kind spans as turns. A second one reads as a
+        second turn, which is what put 14 rows on the Traces page for one turn."""
+        llm_spans = _by_kind(stop_with_fixture, "LLM")
+        assert len(llm_spans) == 1
+        span = _get_span(llm_spans[0])
+        assert span["name"] == "Turn 1"
+        assert not span.get("parentSpanId")
 
     def test_emits_five_tool_spans(self, stop_with_fixture):
         tool_spans = [
@@ -287,17 +284,15 @@ class TestStopSingleTurnFixture:
             "run_command",
         ]
 
-    def test_emits_six_llm_spans(self, stop_with_fixture):
-        """One LLM span per PLANNER_RESPONSE record (fixture has 6)."""
-        llm_spans = [
-            p
-            for p in stop_with_fixture
-            if any(
-                a["key"] == "openinference.span.kind" and a["value"]["stringValue"] == "LLM"
-                for a in _get_span(p)["attributes"]
-            )
-        ]
-        assert len(llm_spans) == 6
+    def test_emits_one_step_span_per_planner_response(self, stop_with_fixture):
+        """The per-call boundaries survive as CHAIN steps (fixture has 6)."""
+        steps = _by_kind(stop_with_fixture, "CHAIN")
+        assert len(steps) == 6
+        assert [_get_span(p)["name"] for p in steps] == [f"Model call {i}" for i in range(1, 7)]
+
+    def test_turn_reports_how_many_calls_it_took(self, stop_with_fixture):
+        attrs = _get_span_attrs(_by_kind(stop_with_fixture, "LLM")[0])
+        assert attrs["llm.call_count"]["intValue"] == 6
 
     def test_one_trace_with_a_single_root(self, stop_with_fixture):
         spans = [_get_span(p) for p in stop_with_fixture]
@@ -306,26 +301,26 @@ class TestStopSingleTurnFixture:
         assert len(roots) == 1
         assert roots[0]["name"] == "Turn 1"
 
-    def test_llm_spans_hang_off_the_turn(self, stop_with_fixture):
+    def test_step_spans_hang_off_the_turn(self, stop_with_fixture):
         spans = [_get_span(p) for p in stop_with_fixture]
         root = next(s for s in spans if not s.get("parentSpanId"))
-        for span in _by_kind(stop_with_fixture, "LLM"):
+        for span in _by_kind(stop_with_fixture, "CHAIN"):
             assert _get_span(span)["parentSpanId"] == root["spanId"]
 
-    def test_tools_nest_under_the_planner_that_requested_them(self, stop_with_fixture):
+    def test_tools_nest_under_the_call_that_requested_them(self, stop_with_fixture):
         """A tool belongs to the model call that asked for it, not to the turn."""
         spans = [_get_span(p) for p in stop_with_fixture]
         root = next(s for s in spans if not s.get("parentSpanId"))
-        llm_ids = {_get_span(p)["spanId"] for p in _by_kind(stop_with_fixture, "LLM")}
+        step_ids = {_get_span(p)["spanId"] for p in _by_kind(stop_with_fixture, "CHAIN")}
 
         tools = _by_kind(stop_with_fixture, "TOOL")
         assert tools, "fixture should contain tool spans"
         for payload in tools:
             span = _get_span(payload)
-            assert span["parentSpanId"] in llm_ids
+            assert span["parentSpanId"] in step_ids
             assert span["parentSpanId"] != root["spanId"]
             attrs = {a["key"]: a["value"] for a in span["attributes"]}
-            assert attrs["tracing.parentage"]["stringValue"] == "planner_response"
+            assert attrs["tracing.parentage"]["stringValue"] == "model_call"
 
     def test_every_span_fits_inside_its_parent(self, stop_with_fixture):
         """A child that outlives its parent renders as a broken waterfall."""
@@ -356,10 +351,12 @@ class TestStopSingleTurnFixture:
         assert attrs["llm.model_name"]["stringValue"] == "gemini-3.5-flash"
         assert attrs["antigravity.model_label"]["stringValue"] == "Gemini 3.5 Flash (Medium)"
 
-    def test_every_llm_span_carries_the_model(self, stop_with_fixture):
-        for payload in _by_kind(stop_with_fixture, "LLM"):
-            attrs = _get_span_attrs(payload)
-            assert attrs["llm.model_name"]["stringValue"] == "gemini-3.5-flash"
+    def test_only_the_turn_carries_the_model(self, stop_with_fixture):
+        """Repeating it on every step would multiply this turn's contribution to
+        every model-keyed count downstream."""
+        carriers = [p for p in stop_with_fixture if "llm.model_name" in _get_span_attrs(p)]
+        assert len(carriers) == 1
+        assert _get_span(carriers[0])["name"] == "Turn 1"
 
     def test_no_token_count_attributes(self, stop_with_fixture):
         """Antigravity withholds tokens — we must not invent them."""
@@ -820,27 +817,27 @@ class TestMessyTranscript:
     def test_successful_command_reports_success(self, spans):
         assert _get_span(self._tool(spans, "list_dir"))["status"]["code"] == 1
 
-    def test_rate_limit_lands_on_the_planner_it_interrupted(self, spans):
+    def test_rate_limit_lands_on_the_call_it_interrupted(self, spans):
         """An ERROR_MESSAGE is the only place a 429 appears anywhere."""
-        failed = [p for p in _by_kind(spans, "LLM") if _get_span(p)["status"]["code"] == 2]
+        failed = [p for p in _by_kind(spans, "CHAIN") if _get_span(p)["status"]["code"] == 2]
         assert len(failed) == 1
         attrs = _get_span_attrs(failed[0])
         assert attrs["error.code"]["stringValue"] == "429"
         assert "Resource exhausted" in attrs["error.message"]["stringValue"]
 
     def test_turn_carries_the_error_too(self, spans):
-        attrs = _get_span_attrs(_by_kind(spans, "CHAIN")[0])
+        attrs = _get_span_attrs(_by_kind(spans, "LLM")[0])
         assert attrs["error.code"]["stringValue"] == "429"
 
     def test_planner_that_produced_nothing_gets_no_span(self, spans):
-        """Four planner responses, but one had no text, no reasoning, no calls."""
-        assert len(_by_kind(spans, "LLM")) == 4
+        """Five planner responses, but one had no text, no reasoning, no calls."""
+        assert len(_by_kind(spans, "CHAIN")) == 4
 
     def test_tool_only_planner_reports_its_calls_as_output(self, spans):
         """A planner with no text is not an empty span — the calls are its output."""
         payload = next(
             p
-            for p in _by_kind(spans, "LLM")
+            for p in _by_kind(spans, "CHAIN")
             if "manage_task" in _get_span_attrs(p)["llm.output_messages"]["stringValue"]
         )
         messages = json.loads(_get_span_attrs(payload)["llm.output_messages"]["stringValue"])
@@ -856,7 +853,7 @@ class TestMessyTranscript:
         assert attrs["antigravity.model_label"]["stringValue"] == "Claude Sonnet 4.6 (Thinking)"
 
     def test_thinking_is_captured(self, spans):
-        payload = next(p for p in _by_kind(spans, "LLM") if "llm.reasoning" in _get_span_attrs(p))
+        payload = next(p for p in _by_kind(spans, "CHAIN") if "llm.reasoning" in _get_span_attrs(p))
         assert "Two things to check" in _get_span_attrs(payload)["llm.reasoning"]["stringValue"]
 
     def test_promoted_tool_arguments(self, spans):
@@ -1031,3 +1028,80 @@ class TestPayloadBatching:
             assert len(json.dumps(payload)) < 1_000_000
         total = sum(len(_get_spans(p)) for p in payloads)
         assert total == 81  # 1 turn + 40 planners + 40 tools
+
+
+# ---------------------------------------------------------------------------
+# The invariant the Traces page depends on
+# ---------------------------------------------------------------------------
+
+
+class TestOneTurnSpanPerTrace:
+    """Consumers key "a turn" on the LLM span kind, not on being a root.
+
+    `getSpanTypeFilter('parent')` in the LLM tracing controller resolves to
+    `subtype IN ('chat','completion')` and the traces list has no GROUP BY, so
+    every LLM-kind span in a trace becomes its own row. Claude Code and Codex
+    emit one per turn and so look correct; any harness emitting one per model
+    call does not. These tests fail if that ever regresses here.
+    """
+
+    @pytest.fixture
+    def multi_call_spans(self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans):
+        records = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-06-09T16:00:00Z",
+                "content": "<USER_REQUEST>do a lot of things</USER_REQUEST>",
+            }
+        ]
+        for i in range(12):
+            records.append(
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": f"2026-06-09T16:00:{i * 2 + 1:02d}Z",
+                    "content": f"step {i}",
+                    "tool_calls": [{"name": "run_command", "args": {"CommandLine": f"echo {i}"}}],
+                }
+            )
+            records.append(
+                {
+                    "type": "RUN_COMMAND",
+                    "source": "MODEL",
+                    "created_at": f"2026-06-09T16:00:{i * 2 + 2:02d}Z",
+                    "exit_code": 0,
+                    "content": "ok",
+                }
+            )
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(transcript, records)
+        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+        return captured_spans
+
+    def test_twelve_model_calls_are_still_one_turn(self, multi_call_spans):
+        assert len(_by_kind(multi_call_spans, "LLM")) == 1
+        assert len(_by_kind(multi_call_spans, "CHAIN")) == 12
+        assert len(_by_kind(multi_call_spans, "TOOL")) == 12
+
+    def test_the_single_llm_span_is_the_root(self, multi_call_spans):
+        span = _get_span(_by_kind(multi_call_spans, "LLM")[0])
+        assert not span.get("parentSpanId")
+        assert span["name"] == "Turn 1"
+
+    def test_no_descendant_is_llm_kind(self, multi_call_spans):
+        """An LLM-kind span anywhere below the root would read as another turn."""
+        for payload in multi_call_spans:
+            span = _get_span(payload)
+            if not span.get("parentSpanId"):
+                continue
+            attrs = {a["key"]: a["value"] for a in span["attributes"]}
+            assert attrs["openinference.span.kind"]["stringValue"] != "LLM"
+
+    def test_the_turn_carries_the_prompt_and_the_final_response(self, multi_call_spans, monkeypatch):
+        """The row on the Traces page is the turn, so it must read as one."""
+        attrs = _get_span_attrs(_by_kind(multi_call_spans, "LLM")[0])
+        assert "do a lot of things" in attrs["input.value"]["stringValue"]
+        assert attrs["output.value"]["stringValue"] == "step 11"
