@@ -24,7 +24,7 @@ def main() -> None:
 
 def _run() -> None:
     """Delegate to the install module in tracing/antigravity/."""
-    _install_mod.install()
+    _install_mod.install(with_skills=False)
 
 
 if __name__ == "__main__":

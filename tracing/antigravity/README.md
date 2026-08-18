@@ -99,6 +99,51 @@ Run any Antigravity CLI/IDE session as you normally would. The installed hooks f
 
 See the [main README's Environment variables section](../../README.md#environment-variables) for the full list of runtime overrides (`ATATUS_TRACE_ENABLED`, `ATATUS_DRY_RUN`, `ATATUS_USER_ID`, etc.).
 
+## Trace shape
+
+One trace per user turn. Tool spans hang off the model step that requested them, not off the turn, so a
+trace reads as what the agent actually did:
+
+```
+Turn 3                     CHAIN   input = the user's prompt, output = the final response
+├── LLM: gemini-3.7-flash  LLM     one per planner response
+│   ├── run_command        TOOL
+│   └── view_file          TOOL
+└── LLM: gemini-3.7-flash  LLM
+    └── grep_search        TOOL
+```
+
+An LLM span covers its whole step — the model call *and* the tools it ran — so its children sit inside it.
+The model's own response time is kept separately as `llm.latency_ms`.
+
+A planner response that issued tool calls but wrote no text is not an empty span: the calls are its output,
+reported as `llm.output_messages[].message.tool_calls`. A planner response with no text, no reasoning and no
+tool calls produces no span at all.
+
+## Model identification
+
+Antigravity names the model in the transcript only on the turn where the user *switched* models, and names
+it as a display label rather than an id. Three sources are combined so every span carries one:
+
+1. `conversations/<conversationId>.db` → `gen_metadata`, which records the id the request actually ran
+   against (`claude-sonnet-4-6`). This is the only per-request source and the only one shaped like something
+   a pricing table can match.
+2. The transcript's settings-change block, carried forward across turns.
+3. The CLI's `settings.json`, i.e. the currently selected model.
+
+`llm.model_name` gets the id; the human label is kept alongside as `antigravity.model_label`. The store has
+no public schema, so a value that does not look like a model id is discarded and a label-derived id is used
+instead — a schema change degrades this to sources 2/3 rather than putting an arbitrary string in the model
+field.
+
 ## Limitations
 
-- **Token counts are not captured.** Antigravity does not expose per-turn token usage on any local surface (neither the hook payload nor the transcript). `llm.token_count.*` attributes are intentionally absent on Antigravity spans rather than reported as 0.
+- **Token counts are not captured.** Antigravity does not expose per-turn token usage on any local surface
+  (neither the hook payload nor the transcript, and the conversation store records none either).
+  `llm.token_count.*` attributes are intentionally absent on Antigravity spans rather than reported as 0.
+  Cost is therefore always absent, for a different reason than a model simply having no published price.
+- **Durations are second-granular.** Every timestamp the transcript offers — its own `created_at` and the
+  `Created At:` / `Completed At:` lines inside tool results — is whole seconds, so a sub-second tool
+  legitimately reports a zero duration.
+- **A tool result that never arrives** (the session ended, or the call was rejected) is still reported, with
+  its arguments and no output, rather than dropped.

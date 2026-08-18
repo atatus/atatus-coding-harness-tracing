@@ -32,6 +32,7 @@ from core.setup import (
     prompt_project_name,
     prompt_user_id,
     remove_harness_entry,
+    symlink_skills,
     unlink_skills,
     venv_bin,
     write_config,
@@ -145,7 +146,7 @@ def _uninstall_hooks() -> None:
 # ---------------------------------------------------------------------------
 
 
-def install() -> None:
+def install(with_skills: bool = False) -> None:
     """Install Antigravity tracing hooks and register in config.json."""
     ensure_shared_runtime()
 
@@ -174,6 +175,9 @@ def install() -> None:
 
     _install_hooks()
 
+    if with_skills and not dry_run():
+        symlink_skills(_c.HARNESS_NAME)
+
     info("Antigravity tracing installed")
 
 
@@ -194,13 +198,13 @@ def uninstall() -> None:
 def main() -> None:
     """Dispatch install / uninstall from the command line."""
     if len(sys.argv) < 2 or sys.argv[1] not in ("install", "uninstall"):
-        print(f"usage: {sys.argv[0]} {{install|uninstall}}", file=sys.stderr)
+        print(f"usage: {sys.argv[0]} {{install|uninstall}} [--with-skills]", file=sys.stderr)
         sys.exit(1)
 
     action = sys.argv[1]
 
     if action == "install":
-        install()
+        install(with_skills="--with-skills" in set(sys.argv[2:]))
     else:
         uninstall()
 

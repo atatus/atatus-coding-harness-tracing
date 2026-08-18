@@ -445,7 +445,7 @@ class TestMainDispatch:
         _mock_prompts(monkeypatch)
         monkeypatch.setattr("sys.argv", ["tracing.antigravity.install", "install"])
         called = []
-        monkeypatch.setattr(_install, "install", lambda: called.append("install"))
+        monkeypatch.setattr(_install, "install", lambda **kw: called.append("install"))
         _install.main()
         assert called == ["install"]
 

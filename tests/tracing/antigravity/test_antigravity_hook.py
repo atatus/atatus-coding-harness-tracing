@@ -36,6 +36,18 @@ def _get_span_attrs(payload):
     return {a["key"]: a["value"] for a in span["attributes"]}
 
 
+def _by_kind(payloads, kind: str) -> list:
+    """Every payload whose span is of OpenInference *kind*."""
+    return [
+        p
+        for p in payloads
+        if any(
+            a["key"] == "openinference.span.kind" and a["value"]["stringValue"] == kind
+            for a in _get_span(p)["attributes"]
+        )
+    ]
+
+
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
 
@@ -79,22 +91,42 @@ def mock_gc():
 
 @pytest.fixture
 def captured_spans():
-    """Mock _send_span_async and collect all payloads emitted by handlers.
+    """Mock _send_payload_async and collect every span the handlers emitted.
 
-    Patching _send_span_async (rather than send_span) lets tests run
+    Patching _send_payload_async (rather than send_span) lets tests run
     synchronously without forking, regardless of the ATATUS_DISABLE_FORK env.
+    Handlers batch many spans into one payload, so each is exploded back into a
+    single-span payload here: a test asserting on one span should not have to
+    know how many other spans shared its POST.
     """
     sent = []
-    with mock.patch(
-        "tracing.antigravity.hooks.handlers._send_span_async",
-        side_effect=lambda s: sent.append(s),
-    ):
+
+    def collect(payload):
+        for span in _get_spans(payload):
+            envelope = json.loads(json.dumps(payload))
+            envelope["resourceSpans"][0]["scopeSpans"][0]["spans"] = [span]
+            sent.append(envelope)
+
+    with mock.patch("tracing.antigravity.hooks.handlers._send_payload_async", side_effect=collect):
         yield sent
 
 
 @pytest.fixture
 def trace_enabled(monkeypatch):
     monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+
+
+@pytest.fixture(autouse=True)
+def isolated_cli_data_dir(tmp_path, monkeypatch):
+    """Point the CLI data dir at an empty temp dir for every test.
+
+    Model resolution reads the conversation store and settings.json from it. Left
+    alone the suite would read the developer's own Antigravity install and pass or
+    fail depending on which model they last selected.
+    """
+    from tracing.antigravity import constants as _c
+
+    monkeypatch.setattr(_c, "CLI_DATA_DIR", tmp_path / "cli-data")
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +266,7 @@ class TestStopSingleTurnFixture:
             )
         ]
         assert len(chain_spans) == 1
-        assert _get_span(chain_spans[0])["name"] == "Turn"
+        assert _get_span(chain_spans[0])["name"] == "Turn 1"
 
     def test_emits_five_tool_spans(self, stop_with_fixture):
         tool_spans = [
@@ -267,25 +299,44 @@ class TestStopSingleTurnFixture:
         ]
         assert len(llm_spans) == 6
 
-    def test_children_share_turn_trace_and_parent(self, stop_with_fixture):
-        chain_payload = next(
-            p
-            for p in stop_with_fixture
-            if any(
-                a["key"] == "openinference.span.kind" and a["value"]["stringValue"] == "CHAIN"
-                for a in _get_span(p)["attributes"]
-            )
-        )
-        chain_span = _get_span(chain_payload)
-        trace_id = chain_span["traceId"]
-        root_id = chain_span["spanId"]
+    def test_one_trace_with_a_single_root(self, stop_with_fixture):
+        spans = [_get_span(p) for p in stop_with_fixture]
+        assert len({s["traceId"] for s in spans}) == 1
+        roots = [s for s in spans if not s.get("parentSpanId")]
+        assert len(roots) == 1
+        assert roots[0]["name"] == "Turn 1"
 
-        for payload in stop_with_fixture:
+    def test_llm_spans_hang_off_the_turn(self, stop_with_fixture):
+        spans = [_get_span(p) for p in stop_with_fixture]
+        root = next(s for s in spans if not s.get("parentSpanId"))
+        for span in _by_kind(stop_with_fixture, "LLM"):
+            assert _get_span(span)["parentSpanId"] == root["spanId"]
+
+    def test_tools_nest_under_the_planner_that_requested_them(self, stop_with_fixture):
+        """A tool belongs to the model call that asked for it, not to the turn."""
+        spans = [_get_span(p) for p in stop_with_fixture]
+        root = next(s for s in spans if not s.get("parentSpanId"))
+        llm_ids = {_get_span(p)["spanId"] for p in _by_kind(stop_with_fixture, "LLM")}
+
+        tools = _by_kind(stop_with_fixture, "TOOL")
+        assert tools, "fixture should contain tool spans"
+        for payload in tools:
             span = _get_span(payload)
-            if span is chain_span or span["name"] == "Turn":
+            assert span["parentSpanId"] in llm_ids
+            assert span["parentSpanId"] != root["spanId"]
+            attrs = {a["key"]: a["value"] for a in span["attributes"]}
+            assert attrs["tracing.parentage"]["stringValue"] == "planner_response"
+
+    def test_every_span_fits_inside_its_parent(self, stop_with_fixture):
+        """A child that outlives its parent renders as a broken waterfall."""
+        spans = {_get_span(p)["spanId"]: _get_span(p) for p in stop_with_fixture}
+        for span in spans.values():
+            parent_id = span.get("parentSpanId")
+            if not parent_id:
                 continue
-            assert span["traceId"] == trace_id
-            assert span["parentSpanId"] == root_id
+            parent = spans[parent_id]
+            assert int(span["startTimeUnixNano"]) >= int(parent["startTimeUnixNano"])
+            assert int(span["endTimeUnixNano"]) <= int(parent["endTimeUnixNano"])
 
     def test_turn_input_mentions_codecov(self, stop_with_fixture):
         chain_payload = next(
@@ -299,17 +350,16 @@ class TestStopSingleTurnFixture:
         attrs = _get_span_attrs(chain_payload)
         assert "codecov" in attrs["input.value"]["stringValue"]
 
-    def test_llm_model_name_set(self, stop_with_fixture):
-        llm_payload = next(
-            p
-            for p in stop_with_fixture
-            if any(
-                a["key"] == "openinference.span.kind" and a["value"]["stringValue"] == "LLM"
-                for a in _get_span(p)["attributes"]
-            )
-        )
-        attrs = _get_span_attrs(llm_payload)
-        assert attrs["llm.model_name"]["stringValue"] == "Gemini 3.5 Flash (Medium)"
+    def test_llm_model_name_is_an_id_not_a_display_label(self, stop_with_fixture):
+        """The label is what the transcript carries; the column wants an id."""
+        attrs = _get_span_attrs(_by_kind(stop_with_fixture, "LLM")[0])
+        assert attrs["llm.model_name"]["stringValue"] == "gemini-3.5-flash"
+        assert attrs["antigravity.model_label"]["stringValue"] == "Gemini 3.5 Flash (Medium)"
+
+    def test_every_llm_span_carries_the_model(self, stop_with_fixture):
+        for payload in _by_kind(stop_with_fixture, "LLM"):
+            attrs = _get_span_attrs(payload)
+            assert attrs["llm.model_name"]["stringValue"] == "gemini-3.5-flash"
 
     def test_no_token_count_attributes(self, stop_with_fixture):
         """Antigravity withholds tokens — we must not invent them."""
@@ -484,18 +534,21 @@ class TestTurnWatermark:
         outputs = [_get_span_attrs(p)["output.value"]["stringValue"] for p in chains]
         assert outputs == ["first answer", "second answer"]
 
-    def test_legacy_step_watermark_still_honored(self, tmp_path, trace_enabled, mock_ensure, mock_gc, captured_spans):
-        """A pre-existing state file carrying only ``last_emitted_step`` must not
-        re-emit turns it already covers."""
-        sf = tmp_path / "state_legacy.json"
-        lp = tmp_path / ".lock_legacy"
+    def test_state_without_a_watermark_emits_everything(
+        self, tmp_path, trace_enabled, mock_ensure, mock_gc, captured_spans
+    ):
+        """A state file missing ``last_emitted_turn`` starts from the beginning.
+
+        There has never been another watermark key to fall back to, so the only
+        safe reading of "no watermark" is "nothing emitted yet".
+        """
+        sf = tmp_path / "state_fresh.json"
+        lp = tmp_path / ".lock_fresh"
         sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
         sm.init_state()
-        sm.set("session_id", "legacy-session")
-        sm.set("project_name", "legacy-project")
-        sm.set("user_id", "legacy-user")
-        # Fixture max_step_index is 13; the legacy watermark covers it.
-        sm.set("last_emitted_step", "13")
+        sm.set("session_id", "fresh-session")
+        sm.set("project_name", "fresh-project")
+        sm.set("user_id", "fresh-user")
 
         stdin_payload = {
             "conversationId": "c1",
@@ -508,7 +561,7 @@ class TestTurnWatermark:
         ):
             stop()
 
-        assert captured_spans == []
+        assert captured_spans
         assert sm.get("last_emitted_turn") == "0"
 
 
@@ -707,3 +760,274 @@ class TestMainDispatcher:
         with mock.patch.object(handlers_mod, "stop") as m:
             handlers_mod.main()
         m.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# The messy fixture: system records, a failing command, a rate limit, and a
+# planner that produced nothing. Every one of these occurs in real transcripts.
+# ---------------------------------------------------------------------------
+
+MESSY_TRANSCRIPT = FIXTURE_DIR / "messy" / "transcript.jsonl"
+
+
+class TestMessyTranscript:
+    @pytest.fixture
+    def spans(self, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_PROMPTS", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        stdin_payload = {"conversationId": "c-messy", "transcriptPath": str(MESSY_TRANSCRIPT)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+        return captured_spans
+
+    def _tool(self, spans, name):
+        return next(p for p in _by_kind(spans, "TOOL") if _get_span(p)["name"] == name)
+
+    def test_system_records_do_not_become_tool_output(self, spans):
+        """A CHECKPOINT landing between a call and its result must not be paired.
+
+        This is the defect that put a conversation-truncation summary in a
+        list_dir span: any record outside the three known types used to consume
+        a pending call and shift every pairing after it.
+        """
+        for payload in _by_kind(spans, "TOOL"):
+            output = _get_span_attrs(payload)["output.value"]["stringValue"]
+            assert "CHECKPOINT" not in output
+            assert "updated their workspace rules" not in output
+
+    def test_calls_pair_with_their_own_results(self, spans):
+        run = _get_span_attrs(self._tool(spans, "run_command"))
+        assert "No rule to make target" in run["output.value"]["stringValue"]
+        listing = _get_span_attrs(self._tool(spans, "list_dir"))
+        assert '"name":"out"' in listing["output.value"]["stringValue"]
+
+    def test_generic_is_a_tool_result_not_scaffolding(self, spans):
+        """GENERIC is MODEL-sourced and carries manage_task/schedule results.
+
+        Filtering scaffolding by type name rather than by ``source`` drops it.
+        """
+        attrs = _get_span_attrs(self._tool(spans, "manage_task"))
+        assert "Task created." in attrs["output.value"]["stringValue"]
+
+    def test_failed_command_reports_a_failed_status(self, spans):
+        span = _get_span(self._tool(spans, "run_command"))
+        assert span["status"]["code"] == 2
+        assert "exit code 2" in span["status"]["message"]
+        attrs = {a["key"]: a["value"] for a in span["attributes"]}
+        assert attrs["tool.exit_code"]["intValue"] == 2
+
+    def test_successful_command_reports_success(self, spans):
+        assert _get_span(self._tool(spans, "list_dir"))["status"]["code"] == 1
+
+    def test_rate_limit_lands_on_the_planner_it_interrupted(self, spans):
+        """An ERROR_MESSAGE is the only place a 429 appears anywhere."""
+        failed = [p for p in _by_kind(spans, "LLM") if _get_span(p)["status"]["code"] == 2]
+        assert len(failed) == 1
+        attrs = _get_span_attrs(failed[0])
+        assert attrs["error.code"]["stringValue"] == "429"
+        assert "Resource exhausted" in attrs["error.message"]["stringValue"]
+
+    def test_turn_carries_the_error_too(self, spans):
+        attrs = _get_span_attrs(_by_kind(spans, "CHAIN")[0])
+        assert attrs["error.code"]["stringValue"] == "429"
+
+    def test_planner_that_produced_nothing_gets_no_span(self, spans):
+        """Four planner responses, but one had no text, no reasoning, no calls."""
+        assert len(_by_kind(spans, "LLM")) == 4
+
+    def test_tool_only_planner_reports_its_calls_as_output(self, spans):
+        """A planner with no text is not an empty span — the calls are its output."""
+        payload = next(
+            p
+            for p in _by_kind(spans, "LLM")
+            if "manage_task" in _get_span_attrs(p)["llm.output_messages"]["stringValue"]
+        )
+        messages = json.loads(_get_span_attrs(payload)["llm.output_messages"]["stringValue"])
+        assert messages[0]["message.role"] == "assistant"
+        assert "message.content" not in messages[0]
+        call = messages[0]["message.tool_calls"][0]["tool_call.function"]
+        assert call["name"] == "manage_task"
+        assert json.loads(call["arguments"])["Action"] == "create"
+
+    def test_model_comes_from_the_settings_change_block(self, spans):
+        attrs = _get_span_attrs(_by_kind(spans, "LLM")[0])
+        assert attrs["llm.model_name"]["stringValue"] == "claude-sonnet-4.6"
+        assert attrs["antigravity.model_label"]["stringValue"] == "Claude Sonnet 4.6 (Thinking)"
+
+    def test_thinking_is_captured(self, spans):
+        payload = next(p for p in _by_kind(spans, "LLM") if "llm.reasoning" in _get_span_attrs(p))
+        assert "Two things to check" in _get_span_attrs(payload)["llm.reasoning"]["stringValue"]
+
+    def test_promoted_tool_arguments(self, spans):
+        assert _get_span_attrs(self._tool(spans, "run_command"))["tool.command"]["stringValue"] == "make clean"
+        assert _get_span_attrs(self._tool(spans, "view_file"))["tool.file_path"]["stringValue"] == "/w/Makefile"
+
+
+# ---------------------------------------------------------------------------
+# The model must survive turns that never mention it
+# ---------------------------------------------------------------------------
+
+
+class TestModelCarryForward:
+    def test_model_persists_into_a_turn_that_never_names_it(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, state
+    ):
+        """The settings block appears only on the turn the user switched models.
+
+        Without carry-forward three quarters of turns report no model at all.
+        """
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(
+            transcript,
+            [
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-06-09T16:00:00Z",
+                    "content": (
+                        "<USER_SETTINGS_CHANGE>The user changed setting `Model Selection` from None to "
+                        "Gemini 3.7 Flash (High). No need to comment.</USER_SETTINGS_CHANGE>"
+                        "<USER_REQUEST>first</USER_REQUEST>"
+                    ),
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:01Z",
+                    "content": "first answer",
+                },
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-06-09T16:00:10Z",
+                    "content": "<USER_REQUEST>second</USER_REQUEST>",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:11Z",
+                    "content": "second answer",
+                },
+            ],
+        )
+        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+
+        llm = _by_kind(captured_spans, "LLM")
+        assert len(llm) == 2
+        for payload in llm:
+            assert _get_span_attrs(payload)["llm.model_name"]["stringValue"] == "gemini-3.7-flash"
+        assert state.get("model_label") == "Gemini 3.7 Flash (High)"
+
+    def test_settings_file_is_the_last_resort(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        """A session that never switched models still reports the selected one."""
+        from tracing.antigravity import constants as _c
+
+        data_dir = tmp_path / "cli-data"
+        data_dir.mkdir()
+        (data_dir / "settings.json").write_text(json.dumps({"model": "Gemini 3.6 Flash (Low)"}), encoding="utf-8")
+        monkeypatch.setattr(_c, "CLI_DATA_DIR", data_dir)
+
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(
+            transcript,
+            [
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-06-09T16:00:00Z",
+                    "content": "<USER_REQUEST>hi</USER_REQUEST>",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:01Z",
+                    "content": "hello",
+                },
+            ],
+        )
+        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+
+        attrs = _get_span_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["llm.model_name"]["stringValue"] == "gemini-3.6-flash"
+
+
+# ---------------------------------------------------------------------------
+# Batching: the receiver's JSON body limit is 1 MB
+# ---------------------------------------------------------------------------
+
+
+class TestPayloadBatching:
+    def test_a_turn_ships_in_one_payload_when_it_fits(self, trace_enabled, mock_resolve, mock_ensure, mock_gc):
+        payloads = []
+        stdin_payload = {
+            "conversationId": "c1",
+            "transcriptPath": str(FIXTURE_DIR / "transcript_full.jsonl"),
+        }
+        with (
+            mock.patch(
+                "tracing.antigravity.hooks.handlers._send_payload_async",
+                side_effect=payloads.append,
+            ),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))),
+        ):
+            stop()
+        assert len(payloads) == 1
+        assert len(_get_spans(payloads[0])) == 12
+
+    def test_oversized_turns_split_below_the_body_limit(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, monkeypatch
+    ):
+        """One POST over the limit loses the whole turn; two POSTs lose nothing."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        records = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-06-09T16:00:00Z",
+                "content": "<USER_REQUEST>big</USER_REQUEST>",
+            }
+        ]
+        for i in range(40):
+            records.append(
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:01Z",
+                    "tool_calls": [{"name": "run_command", "args": {"CommandLine": f"echo {i}"}}],
+                }
+            )
+            records.append(
+                {
+                    "type": "RUN_COMMAND",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "exit_code": 0,
+                    "content": "x" * 40_000,
+                }
+            )
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(transcript, records)
+
+        payloads = []
+        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+        with (
+            mock.patch(
+                "tracing.antigravity.hooks.handlers._send_payload_async",
+                side_effect=payloads.append,
+            ),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))),
+        ):
+            stop()
+
+        assert len(payloads) > 1
+        for payload in payloads:
+            assert len(json.dumps(payload)) < 1_000_000
+        total = sum(len(_get_spans(p)) for p in payloads)
+        assert total == 81  # 1 turn + 40 planners + 40 tools

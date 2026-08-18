@@ -18,6 +18,10 @@ HARNESS_NAME = "antigravity"
 SETTINGS_DIR = Path.home() / ".gemini" / "config"
 SETTINGS_FILE = SETTINGS_DIR / "hooks.json"
 
+# The CLI's own data directory: per-conversation stores, transcripts and the
+# selected-model setting. Read-only for us — it belongs to a running process.
+CLI_DATA_DIR = Path.home() / ".gemini" / "antigravity-cli"
+
 # The top-level key we own inside hooks.json. Used by both install() (to write)
 # and uninstall() (to identify entries to remove).
 HOOK_NAME = "atatus-tracing"

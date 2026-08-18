@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tracing.antigravity.hooks.transcript import parse_transcript
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -25,9 +27,9 @@ class TestParseTranscriptRealFixture:
         assert "codecov.yml" in user_input
         assert "<" not in user_input
 
-    def test_extracts_model_name(self):
+    def test_extracts_model_label(self):
         turns = parse_transcript(FIXTURE_DIR / "transcript_full.jsonl")
-        assert turns[0]["model_name"] == "Gemini 3.5 Flash (Medium)"
+        assert turns[0]["model_label"] == "Gemini 3.5 Flash (Medium)"
 
     def test_tool_steps_match_fixture_calls(self):
         turns = parse_transcript(FIXTURE_DIR / "transcript_full.jsonl")
@@ -270,7 +272,7 @@ class TestParseTranscriptMetadataExtraction:
         )
         turns = parse_transcript(f)
         assert turns[0]["user_input"] == "hi"
-        assert turns[0]["model_name"] == "Gemini 3.5 Flash (Medium)"
+        assert turns[0]["model_label"] == "Gemini 3.5 Flash (Medium)"
 
     def test_metadata_blocks_stripped_when_no_user_request_wrapper(self, tmp_path):
         f = tmp_path / "transcript.jsonl"
@@ -302,7 +304,7 @@ class TestParseTranscriptMetadataExtraction:
             ],
         )
         turns = parse_transcript(f)
-        assert turns[0]["model_name"] == ""
+        assert turns[0]["model_label"] == ""
 
 
 class TestParseTranscriptToolPairing:
@@ -555,3 +557,235 @@ class TestParseTranscriptToolPairing:
         assert len(steps) == 1
         assert steps[0]["name"] == "tool_a"
         assert steps[0]["output"].endswith("a result")
+
+
+# ---------------------------------------------------------------------------
+# Tool call / result pairing — the rules that decide which output lands on
+# which span. Every case below was taken from a real transcript.
+# ---------------------------------------------------------------------------
+
+
+class TestToolResultPairing:
+    def _turn(self, tmp_path, records):
+        path = tmp_path / "transcript.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        turns = parse_transcript(path)
+        assert len(turns) == 1
+        return turns[0]
+
+    def _user(self, text="go"):
+        return {
+            "type": "USER_INPUT",
+            "source": "USER_EXPLICIT",
+            "created_at": "2026-06-09T16:00:00Z",
+            "content": f"<USER_REQUEST>{text}</USER_REQUEST>",
+        }
+
+    def _planner(self, ts, calls=None, **extra):
+        rec = {"type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": ts}
+        if calls:
+            rec["tool_calls"] = calls
+        rec.update(extra)
+        return rec
+
+    def test_system_record_does_not_consume_a_pending_call(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "list_dir", "args": {"DirectoryPath": "/w"}}]),
+                {
+                    "type": "CHECKPOINT",
+                    "source": "SYSTEM",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "content": "{{ CHECKPOINT 0 }} truncated",
+                },
+                {
+                    "type": "LIST_DIRECTORY",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:03Z",
+                    "content": "the real listing",
+                },
+            ],
+        )
+        assert len(turn["tool_steps"]) == 1
+        assert turn["tool_steps"][0]["output"] == "the real listing"
+
+    @pytest.mark.parametrize("system_type", ["CHECKPOINT", "SYSTEM_MESSAGE", "ERROR_MESSAGE", "DIRECTORY_RULES"])
+    def test_every_system_type_is_scaffolding(self, tmp_path, system_type):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "view_file", "args": {}}]),
+                {
+                    "type": system_type,
+                    "source": "SYSTEM",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "content": "scaffolding",
+                },
+            ],
+        )
+        assert len(turn["tool_steps"]) == 1
+        assert turn["tool_steps"][0]["output"] == ""
+
+    def test_generic_is_a_tool_result(self, tmp_path):
+        """GENERIC carries manage_task/schedule/list_permissions results and is
+        MODEL-sourced, so it is not scaffolding despite the name."""
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "manage_task", "args": {}}]),
+                {
+                    "type": "GENERIC",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "content": "Task created.",
+                },
+            ],
+        )
+        assert turn["tool_steps"][0]["output"] == "Task created."
+
+    def test_each_tool_links_to_the_planner_that_asked_for_it(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "view_file", "args": {}}]),
+                {"type": "VIEW_FILE", "source": "MODEL", "created_at": "2026-06-09T16:00:02Z", "content": "a"},
+                self._planner("2026-06-09T16:00:03Z", [{"name": "grep_search", "args": {}}]),
+                {"type": "GREP_SEARCH", "source": "MODEL", "created_at": "2026-06-09T16:00:04Z", "content": "b"},
+            ],
+        )
+        assert [t["llm_index"] for t in turn["tool_steps"]] == [0, 1]
+
+    def test_unresolved_call_is_reported_with_no_output(self, tmp_path):
+        """A call whose result never arrived still shows what was asked."""
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "run_command", "args": {"CommandLine": "sleep"}}]),
+                self._planner("2026-06-09T16:00:05Z", content="gave up"),
+            ],
+        )
+        assert len(turn["tool_steps"]) == 1
+        assert turn["tool_steps"][0]["output"] == ""
+        assert turn["tool_steps"][0]["llm_index"] == 0
+
+    def test_exit_code_marks_failure(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "run_command", "args": {}}]),
+                {
+                    "type": "RUN_COMMAND",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "exit_code": 127,
+                    "content": "command not found",
+                },
+            ],
+        )
+        step = turn["tool_steps"][0]
+        assert step["failed"] is True
+        assert step["exit_code"] == 127
+
+    def test_zero_exit_code_is_success(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "run_command", "args": {}}]),
+                {
+                    "type": "RUN_COMMAND",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "exit_code": 0,
+                    "content": "ok",
+                },
+            ],
+        )
+        assert turn["tool_steps"][0]["failed"] is False
+
+    def test_running_status_is_not_a_failure(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", [{"name": "run_command", "args": {}}]),
+                {
+                    "type": "RUN_COMMAND",
+                    "source": "MODEL",
+                    "status": "RUNNING",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "content": "still going",
+                },
+            ],
+        )
+        step = turn["tool_steps"][0]
+        assert step["running"] is True
+        assert step["failed"] is False
+
+    def test_error_message_attaches_to_the_current_planner(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            [
+                self._user(),
+                self._planner("2026-06-09T16:00:01Z", content="thinking"),
+                {
+                    "type": "ERROR_MESSAGE",
+                    "source": "SYSTEM",
+                    "created_at": "2026-06-09T16:00:02Z",
+                    "error": "Resource exhausted",
+                    "error_code": "429",
+                },
+            ],
+        )
+        assert turn["llm_steps"][0]["error"] == "Resource exhausted"
+        assert turn["llm_steps"][0]["error_code"] == "429"
+        assert turn["error_code"] == "429"
+
+
+class TestStepTiming:
+    def test_a_step_encloses_the_tools_it_ran(self, tmp_path):
+        """The step ends when the model is invoked again, so its tool children
+        sit inside it instead of hanging past it in the waterfall."""
+        path = tmp_path / "transcript.jsonl"
+        records = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-06-09T16:00:00Z",
+                "content": "<USER_REQUEST>go</USER_REQUEST>",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-06-09T16:00:01Z",
+                "tool_calls": [{"name": "run_command", "args": {}}],
+            },
+            {
+                "type": "RUN_COMMAND",
+                "source": "MODEL",
+                "created_at": "2026-06-09T16:00:09Z",
+                "content": "Created At: 2026-06-09T16:00:02Z\nCompleted At: 2026-06-09T16:00:09Z\ndone",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-06-09T16:00:10Z",
+                "content": "finished",
+            },
+        ]
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        turn = parse_transcript(path)[0]
+
+        step = turn["llm_steps"][0]
+        tool = turn["tool_steps"][0]
+        assert step["start_ms"] <= tool["start_ms"]
+        assert step["end_ms"] >= tool["end_ms"]
+        # ...and the model's own response time survives as its own number.
+        assert step["latency_ms"] == 8000

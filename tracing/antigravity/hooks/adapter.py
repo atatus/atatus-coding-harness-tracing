@@ -21,7 +21,7 @@ from core.constants import HARNESSES, STATE_BASE_DIR
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["antigravity"]
 SERVICE_NAME = _HARNESS["service_name"]  # "antigravity"
-SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-antigravity-plugin"
+SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-antigravity-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/antigravity
 
 # Route hook stderr to a per-harness log file unless the user already set one.
@@ -81,6 +81,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     state.set("project_name", project_name)
     state.set("user_id", env.user_id)
     state.set("last_emitted_turn", "-1")
+    state.set("trace_count", "0")
 
     log(f"Session initialized: {session_id}")
 
