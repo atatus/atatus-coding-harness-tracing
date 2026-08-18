@@ -230,14 +230,22 @@ def test_install_sh_help_output_lists_antigravity() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Cross-task invariant: no token attributes are introduced in handlers
+# Cross-task invariant: token counts belong to the turn span alone
 # ---------------------------------------------------------------------------
 
 
-def test_handlers_do_not_set_token_count_attributes() -> None:
-    """Sanity check tied to the project memory: tokens are deliberately withheld."""
-    handlers_path = REPO_ROOT / "tracing" / "antigravity" / "hooks" / "handlers.py"
-    source = handlers_path.read_text()
-    assert (
-        "llm.token_count" not in source
-    ), "handlers.py must not set llm.token_count.* attributes (tokens are deliberately withheld)"
+def test_only_the_turn_span_carries_token_counts() -> None:
+    """Tokens are recorded once per turn, never per step.
+
+    This replaces an assertion that no token attribute existed at all, which was
+    wrong: the counts are in the conversation store, they are just not in the
+    transcript or the hook payload. The live constraint is different — the
+    summary queries sum the token columns over every span in the range, so the
+    same counts on a step would be added to the turn's again.
+    """
+    source = (REPO_ROOT / "tracing" / "antigravity" / "hooks" / "handlers.py").read_text()
+    assert "_token_attrs" in source, "handlers.py must build token attributes"
+    # The only place they are attached is the turn's own attribute dict.
+    attachments = [line for line in source.splitlines() if "_token_attrs(" in line and "def " not in line]
+    assert len(attachments) == 1, f"token attributes attached in {len(attachments)} places, expected 1"
+    assert "root_attrs.update" in attachments[0], attachments[0]

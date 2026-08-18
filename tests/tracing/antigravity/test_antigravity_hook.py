@@ -1105,3 +1105,122 @@ class TestOneTurnSpanPerTrace:
         attrs = _get_span_attrs(_by_kind(multi_call_spans, "LLM")[0])
         assert "do a lot of things" in attrs["input.value"]["stringValue"]
         assert attrs["output.value"]["stringValue"] == "step 11"
+
+
+# ---------------------------------------------------------------------------
+# Token counts land on the turn, and only on the turn
+# ---------------------------------------------------------------------------
+
+
+class TestTokenCounts:
+    def _store(self, tmp_path, monkeypatch, conversation_id, blobs):
+        import sqlite3
+
+        from tracing.antigravity import constants as _c
+
+        data_dir = tmp_path / "cli-data"
+        monkeypatch.setattr(_c, "CLI_DATA_DIR", data_dir)
+        path = data_dir / "conversations" / f"{conversation_id}.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE gen_metadata (idx integer PRIMARY KEY, data blob)")
+        for idx, blob in enumerate(blobs):
+            conn.execute("INSERT INTO gen_metadata (idx, data) VALUES (?, ?)", (idx, blob))
+        conn.commit()
+        conn.close()
+
+    @pytest.fixture
+    def two_turn_spans(self, tmp_path, monkeypatch, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans):
+        from tests.tracing.antigravity.test_antigravity_usage import _usage_blob
+
+        # Four model calls across two turns: 2 then 2.
+        self._store(
+            tmp_path,
+            monkeypatch,
+            "c-tok",
+            [
+                _usage_blob(1000, 10, 0),
+                _usage_blob(2000, 20, 500),
+                _usage_blob(3000, 30, 0),
+                _usage_blob(4000, 40, 700),
+            ],
+        )
+        records = []
+        for turn in range(2):
+            records.append(
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": f"2026-06-09T16:0{turn}:00Z",
+                    "content": f"<USER_REQUEST>turn {turn}</USER_REQUEST>",
+                }
+            )
+            for call in range(2):
+                records.append(
+                    {
+                        "type": "PLANNER_RESPONSE",
+                        "source": "MODEL",
+                        "created_at": f"2026-06-09T16:0{turn}:0{call + 1}Z",
+                        "content": f"turn {turn} call {call}",
+                    }
+                )
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(transcript, records)
+        stdin_payload = {"conversationId": "c-tok", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+        return captured_spans
+
+    def test_each_turn_sums_only_its_own_calls(self, two_turn_spans):
+        turns = _by_kind(two_turn_spans, "LLM")
+        assert len(turns) == 2
+        first, second = (_get_span_attrs(t) for t in turns)
+        # turn 0 = calls 0+1, turn 1 = calls 2+3
+        assert first["llm.token_count.prompt"]["intValue"] == 1000 + 2000 + 500
+        assert first["llm.token_count.completion"]["intValue"] == 30
+        assert first["llm.token_count.prompt_details.cache_read"]["intValue"] == 500
+        assert second["llm.token_count.prompt"]["intValue"] == 3000 + 4000 + 700
+        assert second["llm.token_count.completion"]["intValue"] == 70
+        assert second["llm.token_count.prompt_details.cache_read"]["intValue"] == 700
+
+    def test_total_is_prompt_plus_completion(self, two_turn_spans):
+        attrs = _get_span_attrs(_by_kind(two_turn_spans, "LLM")[0])
+        assert attrs["llm.token_count.total"]["intValue"] == 3500 + 30
+
+    def test_no_step_or_tool_span_repeats_the_counts(self, two_turn_spans):
+        """The summary queries sum these columns over every span in the range."""
+        for payload in two_turn_spans:
+            span = _get_span(payload)
+            if not span.get("parentSpanId"):
+                continue
+            for attr in span["attributes"]:
+                assert not attr["key"].startswith("llm.token_count"), attr["key"]
+
+    def test_absent_usage_emits_no_token_attributes_at_all(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        """A zero would read downstream as a turn that was priced and free."""
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(
+            transcript,
+            [
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-06-09T16:00:00Z",
+                    "content": "<USER_REQUEST>hi</USER_REQUEST>",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-06-09T16:00:01Z",
+                    "content": "hello",
+                },
+            ],
+        )
+        stdin_payload = {"conversationId": "no-store", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+        for payload in captured_spans:
+            for attr in _get_span(payload)["attributes"]:
+                assert not attr["key"].startswith("llm.token_count"), attr["key"]

@@ -50,6 +50,11 @@ _NON_TOOL_MODEL_TYPES = {"PLANNER_RESPONSE", "CONVERSATION_HISTORY"}
 
 _ERROR_MESSAGE_TYPE = "ERROR_MESSAGE"
 
+#: Stamped on each ``PLANNER_RESPONSE`` while reading the file: its ordinal among
+#: all model calls in the conversation. The usage store records one row per call
+#: in the same order, and that ordinal is the only thing joining the two.
+_CALL_INDEX_KEY = "_call_index"
+
 
 def _iso_to_ms(value: str) -> int:
     """Parse an ISO-8601 timestamp (e.g. ``2026-06-09T16:00:11Z``) to epoch ms.
@@ -262,6 +267,7 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
                     "start_ms": start_ms,
                     "end_ms": end_ms,
                     "latency_ms": latency_ms,
+                    "model_call_index": rec.get(_CALL_INDEX_KEY, -1),
                     "tool_calls": normalized_calls,
                     "error": "",
                     "error_code": "",
@@ -334,6 +340,9 @@ def parse_transcript(path: str | Path) -> list[dict[str, Any]]:
         return []
 
     records: list[dict[str, Any]] = []
+    # Counted over the whole file, including any call before the first user input,
+    # because the usage store counts every model call the conversation made.
+    call_index = 0
     try:
         with target.open("r", encoding="utf-8") as f:
             for line in f:
@@ -348,6 +357,9 @@ def parse_transcript(path: str | Path) -> list[dict[str, Any]]:
                     continue
                 if rec.get("type") == "CONVERSATION_HISTORY":
                     continue
+                if rec.get("type") == "PLANNER_RESPONSE":
+                    rec[_CALL_INDEX_KEY] = call_index
+                    call_index += 1
                 records.append(rec)
     except OSError:
         return []

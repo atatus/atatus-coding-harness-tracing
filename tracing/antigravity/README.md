@@ -147,10 +147,21 @@ field.
 
 ## Limitations
 
-- **Token counts are not captured.** Antigravity does not expose per-turn token usage on any local surface
-  (neither the hook payload nor the transcript, and the conversation store records none either).
-  `llm.token_count.*` attributes are intentionally absent on Antigravity spans rather than reported as 0.
-  Cost is therefore always absent, for a different reason than a model simply having no published price.
+- **Token counts come from the conversation store, not the transcript.** Neither the hook payload nor the
+  transcript carries usage; `conversations/<conversationId>.db` does, one `gen_metadata` row per model call.
+  Rows are joined to calls **by ordinal** — the i-th row is the i-th planner response — which is the only
+  link between the two. A call with no row contributes nothing rather than borrowing its neighbour's
+  numbers, and a turn with no usable rows emits **no `llm.token_count.*` attributes at all**: a zero would
+  read downstream as a turn that was priced and cost nothing.
+
+  The counts live on the turn span only, alongside the model, because the summary queries sum those columns
+  across every span in range. `prompt` is the whole prompt with `prompt_details.cache_read` as a subset of
+  it, matching the convention the consumer reads. No cache-*write* field has been found, so that column
+  stays 0.
+
+  ⚠️ The store's protobuf has **no public schema**. The field layout is documented in `hooks/usage.py` and
+  is guarded: an implausible value or an unreadable row degrades to "no usage" rather than to a wrong
+  number. If Antigravity renumbers those fields, token counts silently stop — they do not go wrong.
 - **Durations are second-granular.** Every timestamp the transcript offers — its own `created_at` and the
   `Created At:` / `Completed At:` lines inside tool results — is whole seconds, so a sub-second tool
   legitimately reports a zero duration.

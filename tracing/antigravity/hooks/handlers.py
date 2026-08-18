@@ -66,6 +66,7 @@ from tracing.antigravity.hooks.model import (
     model_label_from_settings,
 )
 from tracing.antigravity.hooks.transcript import parse_transcript
+from tracing.antigravity.hooks.usage import CallUsage, sum_usage, usage_by_call
 
 #: The receiver's JSON body limit is 1 MB. Batched payloads are split well under
 #: it: one oversized POST loses the whole turn, where two POSTs lose nothing.
@@ -352,12 +353,50 @@ def _build_tool_span(
     )
 
 
+def _turn_usage(turn: dict, call_usage: list) -> "CallUsage | None":
+    """Total the usage of every model call this turn made.
+
+    Joined by the call's ordinal in the conversation, which is the only link
+    between the transcript and the usage store. A call with no row contributes
+    nothing — the alternative is borrowing a neighbour's numbers.
+    """
+    if not call_usage:
+        return None
+    picked = []
+    for step in turn.get("llm_steps") or []:
+        idx = step.get("model_call_index", -1)
+        if isinstance(idx, int) and 0 <= idx < len(call_usage):
+            picked.append(call_usage[idx])
+    return sum_usage(picked)
+
+
+def _token_attrs(usage: "CallUsage | None") -> dict:
+    """OpenInference token attributes, omitting anything not recorded.
+
+    Never emit a zero: downstream a zero token count is a priced turn that cost
+    nothing, where absence is "we do not know". ``prompt`` is the whole prompt
+    and the cache bucket is a subset of it, which is the convention the consumer
+    reads.
+    """
+    if usage is None or usage.is_empty():
+        return {}
+    attrs: dict = {
+        "llm.token_count.prompt": usage.prompt_tokens,
+        "llm.token_count.completion": usage.output_tokens,
+        "llm.token_count.total": usage.total_tokens,
+    }
+    if usage.cache_read_tokens:
+        attrs["llm.token_count.prompt_details.cache_read"] = usage.cache_read_tokens
+    return {k: v for k, v in attrs.items() if v}
+
+
 def _build_turn_spans(
     turn: dict,
     trace_number: int,
     model_id: str,
     model_label: str,
     common: dict,
+    call_usage: list | None = None,
 ) -> list[dict]:
     """Build the LLM Turn span plus its per-call CHAIN and TOOL descendants.
 
@@ -411,6 +450,11 @@ def _build_turn_spans(
     ]
     if steps:
         root_attrs["llm.call_count"] = len(steps)
+
+    # Tokens go on the turn alone, for the same reason the model does: the
+    # summary queries sum these columns across every span in the range, so a
+    # copy on each step would count this turn's usage once per model call.
+    root_attrs.update(_token_attrs(_turn_usage(turn, call_usage or [])))
 
     turn_error = turn.get("error") or ""
     if turn_error:
@@ -507,9 +551,16 @@ def _build_turn_spans(
     return spans
 
 
-def _emit_turn_spans(turn: dict, trace_number: int, model_id: str, model_label: str, common: dict) -> None:
+def _emit_turn_spans(
+    turn: dict,
+    trace_number: int,
+    model_id: str,
+    model_label: str,
+    common: dict,
+    call_usage: list,
+) -> None:
     """Emit one turn's spans as one or more batched OTLP payloads."""
-    _dispatch_spans(_build_turn_spans(turn, trace_number, model_id, model_label, common))
+    _dispatch_spans(_build_turn_spans(turn, trace_number, model_id, model_label, common, call_usage))
 
 
 def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversation_id: str) -> None:
@@ -541,6 +592,10 @@ def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversa
     if user_id:
         common["user.id"] = user_id
 
+    # Read once per hook invocation rather than once per turn: the store is owned
+    # by a running process and a backstop run can emit several turns at once.
+    call_usage = usage_by_call(conversation_id)
+
     final_idx = len(turns) - 1
     for i, turn in enumerate(turns):
         if i == final_idx and not include_last:
@@ -549,7 +604,7 @@ def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversa
             continue
         trace_count += 1
         model_id, model_label = _resolve_model(state, turn, conversation_id)
-        _emit_turn_spans(turn, trace_count, model_id, model_label, common)
+        _emit_turn_spans(turn, trace_count, model_id, model_label, common, call_usage)
         last_turn = i
 
     state.set("last_emitted_turn", str(last_turn))
