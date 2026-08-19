@@ -789,3 +789,117 @@ class TestStepTiming:
         assert step["end_ms"] >= tool["end_ms"]
         # ...and the model's own response time survives as its own number.
         assert step["latency_ms"] == 8000
+
+
+# ---------------------------------------------------------------------------
+# A backgrounded tool reports its outcome through a later wake-up
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundTaskResults:
+    """The tool's own result record only says the task *started*, and is never
+    updated. Output and exit code arrive later in a ``SYSTEM_MESSAGE`` keyed by
+    task id — which is the only link, since up to five run concurrently."""
+
+    def _turn(self, tmp_path, wake_up: str | None):
+        records = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-08-19T03:26:24Z",
+                "content": "<USER_REQUEST>build</USER_REQUEST>",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T03:26:30Z",
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "npm run build"}}],
+            },
+            {
+                "type": "GENERIC",
+                "source": "MODEL",
+                "status": "RUNNING",
+                "created_at": "2026-08-19T03:26:34Z",
+                "content": (
+                    "Created At: 2026-08-19T03:26:34Z\n"
+                    "Tool is running as a background task with task id: conv/task-112\n"
+                    "Task Description: npm run build"
+                ),
+            },
+        ]
+        if wake_up is not None:
+            records.append(
+                {
+                    "type": "SYSTEM_MESSAGE",
+                    "source": "SYSTEM",
+                    "created_at": "2026-08-19T03:27:04Z",
+                    "content": (
+                        "The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n"
+                        '[Message] sender=conv/task-112 content=Task id "conv/task-112" '
+                        f"finished with result:\n\n{wake_up}"
+                    ),
+                }
+            )
+        path = tmp_path / "transcript.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        return parse_transcript(path)[0]["tool_steps"][0]
+
+    def test_real_output_replaces_the_started_notice(self, tmp_path):
+        step = self._turn(tmp_path, "The command exited with code 0.\nOutput:\nBuilt in 29.24s")
+        assert "Built in 29.24s" in step["output"]
+        assert "running as a background task" not in step["output"]
+        assert step["running"] is False
+
+    def test_a_failed_background_command_is_reported_as_failed(self, tmp_path):
+        """Without this a failing build reads as a successful tool call."""
+        step = self._turn(tmp_path, "The command exited with code 2.\nOutput:\nbuild failed")
+        assert step["exit_code"] == 2
+        assert step["failed"] is True
+
+    def test_a_successful_background_command_is_not_failed(self, tmp_path):
+        step = self._turn(tmp_path, "The command exited with code 0.\nOutput:\nok")
+        assert step["exit_code"] == 0
+        assert step["failed"] is False
+
+    def test_a_task_that_never_reports_back_stays_running(self, tmp_path):
+        """The agent can start a task and finish the turn without waiting."""
+        step = self._turn(tmp_path, None)
+        assert step["running"] is True
+        assert "running as a background task" in step["output"]
+        assert step["failed"] is False
+
+    def test_a_wake_up_for_a_different_task_is_not_applied(self, tmp_path):
+        """Up to five tasks run at once, so the id must actually match."""
+        records = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-08-19T03:26:24Z",
+                "content": "<USER_REQUEST>build</USER_REQUEST>",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T03:26:30Z",
+                "tool_calls": [{"name": "run_command", "args": {}}],
+            },
+            {
+                "type": "GENERIC",
+                "source": "MODEL",
+                "status": "RUNNING",
+                "created_at": "2026-08-19T03:26:34Z",
+                "content": "Tool is running as a background task with task id: conv/task-1",
+            },
+            {
+                "type": "SYSTEM_MESSAGE",
+                "source": "SYSTEM",
+                "created_at": "2026-08-19T03:27:04Z",
+                "content": 'Task id "conv/task-99" finished with result:\n\nThe command exited with code 1.',
+            },
+        ]
+        path = tmp_path / "transcript.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        step = parse_transcript(path)[0]["tool_steps"][0]
+        assert step["running"] is True
+        assert step["failed"] is False
+        assert step["exit_code"] is None

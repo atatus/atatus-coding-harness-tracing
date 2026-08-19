@@ -175,5 +175,11 @@ field.
   longer the last one is emitted regardless, since it will never settle — so interrupting a wait with a new
   message emits the interrupted turn as it stands, rather than stranding it. The only losing sequence is
   backgrounding a task and then abandoning the session without typing again; that turn is never traced.
+- **A backgrounded tool gets its result from the wake-up, matched by task id.** The tool's own result record
+  only says the task *started* and is never updated; output and exit code arrive later in a
+  `SYSTEM_MESSAGE`. Up to five tasks run concurrently, so they are matched by the `task id` both records
+  carry, never by position. ⚠️ Do not reuse that matching to decide whether the turn is still waiting — an
+  outstanding task does not mean a waiting agent, and most outstanding tasks belong to turns that finished
+  without waiting for them.
 - **A tool result that never arrives** (the session ended, or the call was rejected) is still reported, with
   its arguments and no output, rather than dropped.

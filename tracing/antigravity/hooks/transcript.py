@@ -37,6 +37,12 @@ _MODEL_SELECTION_RE = re.compile(
     re.DOTALL,
 )
 _CREATED_AT_RE = re.compile(r"^Created At:\s*(\S+)", re.MULTILINE)
+#: A backgrounded tool's result names the task it became; the wake-up that later
+#: reports the outcome names the same id. That id is the only thing tying the two
+#: together — up to five tasks run concurrently, so position cannot.
+_BACKGROUND_TASK_ID_RE = re.compile(r"task id:\s*(\S+)")
+_TASK_FINISHED_RE = re.compile(r'Task id "([^"]+)" finished with result:\s*(.*)', re.DOTALL)
+_TASK_EXIT_CODE_RE = re.compile(r"The command exited with code (-?\d+)")
 _COMPLETED_AT_RE = re.compile(r"^Completed At:\s*(\S+)", re.MULTILINE)
 
 #: Records the model itself did not produce. None of these is a tool result, so
@@ -140,6 +146,28 @@ def _result_timing(rec: dict[str, Any]) -> tuple[int, int]:
     return start_ms, end_ms
 
 
+def _background_results(records: list[dict[str, Any]]) -> dict[str, tuple[str, "int | None"]]:
+    """Map background task id -> (result text, exit code) from the wake-up records.
+
+    A backgrounded tool's own result record only ever says that it *started*, and
+    is never updated. The outcome — output and exit code — arrives later in a
+    ``SYSTEM_MESSAGE``. Without this the tool span reports "running as a
+    background task" as its output forever, and a failed build reads as a success.
+    """
+    out: dict[str, tuple[str, int | None]] = {}
+    for rec in records:
+        if rec.get("source") != _SYSTEM_SOURCE or rec.get("type") != _SYSTEM_MESSAGE_TYPE:
+            continue
+        match = _TASK_FINISHED_RE.search(rec.get("content", "") or "")
+        if not match:
+            continue
+        result = match.group(2).strip()
+        exit_match = _TASK_EXIT_CODE_RE.search(result)
+        exit_code = int(exit_match.group(1)) if exit_match else None
+        out[match.group(1)] = (result, exit_code)
+    return out
+
+
 def _next_planner_ms(records: list[dict[str, Any]], idx: int) -> int:
     """Epoch-ms of the next ``PLANNER_RESPONSE`` after *idx*, or 0 if it is the last."""
     for rec in records[idx + 1 :]:
@@ -152,6 +180,7 @@ def _new_tool_step(
     call: dict[str, Any],
     rec: dict[str, Any] | None,
     llm_index: int,
+    background_results: dict[str, tuple[str, "int | None"]] | None = None,
 ) -> dict[str, Any]:
     """Build a tool step from a pending call and the result record that closed it.
 
@@ -180,16 +209,31 @@ def _new_tool_step(
     if not isinstance(exit_code, int):
         exit_code = None
 
+    output = rec.get("content", "") or ""
+    running = rec.get("status") == _RUNNING_STATUS
+
+    # A backgrounded tool reports its outcome through a later wake-up, keyed by
+    # task id. Where that wake-up exists, it is the real result.
+    if running and background_results:
+        task_match = _BACKGROUND_TASK_ID_RE.search(output)
+        if task_match:
+            finished = background_results.get(task_match.group(1))
+            if finished is not None:
+                output, task_exit = finished
+                running = False
+                if task_exit is not None:
+                    exit_code = task_exit
+
     return {
         "name": call["name"],
         "args": call["args"],
-        "output": rec.get("content", "") or "",
+        "output": output,
         "step_index": rec.get("step_index", 0),
         "start_ms": start_ms,
         "end_ms": end_ms,
         "exit_code": exit_code,
         "failed": exit_code is not None and exit_code != 0,
-        "running": rec.get("status") == "RUNNING",
+        "running": running,
         "result_type": rec.get("type", "") or "",
         "llm_index": llm_index,
         "call_index": call["call_index"],
@@ -229,6 +273,8 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
     if timestamps:
         turn["start_ms"] = timestamps[0]
         turn["end_ms"] = timestamps[-1]
+
+    background_results = _background_results(records)
 
     # A missing record should only affect its own planner's calls
     pending_calls: list[dict[str, Any]] = []
@@ -331,7 +377,7 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
                 # a slot and shift every pairing after it.
                 continue
             call = pending_calls.pop(0)
-            turn["tool_steps"].append(_new_tool_step(call, rec, pending_owner))
+            turn["tool_steps"].append(_new_tool_step(call, rec, pending_owner, background_results))
 
     _flush_pending_calls()
     turn["final_response"] = last_planner_content
