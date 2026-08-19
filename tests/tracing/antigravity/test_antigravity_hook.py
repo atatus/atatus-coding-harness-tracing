@@ -1224,3 +1224,202 @@ class TestTokenCounts:
         for payload in captured_spans:
             for attr in _get_span(payload)["attributes"]:
                 assert not attr["key"].startswith("llm.token_count"), attr["key"]
+
+
+# ---------------------------------------------------------------------------
+# A turn interrupted by a background task
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundTaskPause:
+    """Stop fires when the agent yields, and backgrounding a tool makes it yield.
+
+    Treating that stop as "turn over" froze the turn at the pause: the watermark
+    marked it emitted and every step after the resume was lost. Reproduced from a
+    real session where 14 of 34 steps went missing from one turn.
+    """
+
+    def _records(self, *, resumed: bool):
+        recs = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-08-19T01:30:35Z",
+                "content": "<USER_REQUEST>build it</USER_REQUEST>",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T01:30:39Z",
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "npx vite build"}}],
+            },
+            # The backgrounded tool. This record is never updated.
+            {
+                "type": "GENERIC",
+                "source": "MODEL",
+                "status": "RUNNING",
+                "created_at": "2026-08-19T01:32:07Z",
+                "content": "Created At: 2026-08-19T01:32:07Z\nTool is running as a background task with task id 37",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T01:32:21Z",
+                "content": "I have triggered the build. I will wait for it to complete.",
+            },
+        ]
+        if resumed:
+            recs += [
+                # The wake-up, which is how the agent learns the task finished.
+                {
+                    "type": "SYSTEM_MESSAGE",
+                    "source": "SYSTEM",
+                    "created_at": "2026-08-19T01:33:29Z",
+                    "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user.",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-08-19T01:33:33Z",
+                    "tool_calls": [{"name": "view_file", "args": {"AbsolutePath": "/w/out.txt"}}],
+                },
+                {
+                    "type": "GENERIC",
+                    "source": "MODEL",
+                    "created_at": "2026-08-19T01:33:40Z",
+                    "content": "Created At: 2026-08-19T01:33:40Z\nCompleted At: 2026-08-19T01:33:40Z\nbuild ok",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-08-19T01:33:45Z",
+                    "content": "The build succeeded.",
+                },
+            ]
+        return recs
+
+    def _stop(self, transcript):
+        stdin_payload = {"conversationId": "c-bg", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+
+    def test_stop_during_a_background_task_emits_nothing(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, state
+    ):
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(transcript, self._records(resumed=False))
+        self._stop(transcript)
+
+        assert captured_spans == []
+        # Crucially the watermark must not move, or the turn can never be emitted.
+        assert state.get("last_emitted_turn") == "-1"
+
+    def test_the_whole_turn_lands_once_the_task_reports_back(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, state
+    ):
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(transcript, self._records(resumed=False))
+        self._stop(transcript)
+        assert captured_spans == []
+
+        _write_jsonl(transcript, self._records(resumed=True))
+        self._stop(transcript)
+
+        assert len(_by_kind(captured_spans, "LLM")) == 1, "one turn, not two"
+        # Every step, both sides of the pause.
+        assert len(_by_kind(captured_spans, "CHAIN")) == 4
+        names = sorted(_get_span(p)["name"] for p in _by_kind(captured_spans, "TOOL"))
+        assert names == ["run_command", "view_file"]
+        attrs = _get_span_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["output.value"]["stringValue"] == "The build succeeded."
+        assert state.get("last_emitted_turn") == "0"
+
+    def test_a_superseded_turn_is_emitted_even_though_it_never_settled(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        """If the user moves on, the turn will never report back — take it as is."""
+        transcript = tmp_path / "transcript.jsonl"
+        records = self._records(resumed=False) + [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-08-19T01:35:55Z",
+                "content": "<USER_REQUEST>never mind</USER_REQUEST>",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T01:35:59Z",
+                "content": "Stopping.",
+            },
+        ]
+        _write_jsonl(transcript, records)
+        self._stop(transcript)
+
+        assert len(_by_kind(captured_spans, "LLM")) == 2
+
+    def test_a_turn_with_no_background_task_still_emits_immediately(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        """The deferral must not delay the 79% of turns that never background anything."""
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(
+            transcript,
+            [
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-08-19T01:30:35Z",
+                    "content": "<USER_REQUEST>hi</USER_REQUEST>",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-08-19T01:30:39Z",
+                    "content": "hello",
+                },
+            ],
+        )
+        self._stop(transcript)
+        assert len(_by_kind(captured_spans, "LLM")) == 1
+
+    def test_user_interrupting_a_waiting_turn_rescues_it_on_the_next_invocation(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, state
+    ):
+        """Interrupting mid-wait must not strand the turn.
+
+        The user typing again is what un-strands it: the waiting turn stops being
+        the last one, so it is emitted as it stands rather than waiting for a
+        settle that will never come. The realistic trigger is PreInvocation —
+        it fires before the first model call of the new turn.
+        """
+        transcript = tmp_path / "transcript.jsonl"
+
+        # The agent backgrounds a build, yields, and stops. Nothing is emitted.
+        _write_jsonl(transcript, self._records(resumed=False))
+        self._stop(transcript)
+        assert captured_spans == []
+        assert state.get("last_emitted_turn") == "-1"
+
+        # The user interrupts with a new message instead of letting it finish.
+        _write_jsonl(
+            transcript,
+            self._records(resumed=False)
+            + [
+                {
+                    "type": "USER_INPUT",
+                    "source": "USER_EXPLICIT",
+                    "created_at": "2026-08-19T01:34:00Z",
+                    "content": "<USER_REQUEST>stop, do it differently</USER_REQUEST>",
+                }
+            ],
+        )
+        stdin_payload = {"conversationId": "c-bg", "transcriptPath": str(transcript)}
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            pre_invocation()
+
+        turns = _by_kind(captured_spans, "LLM")
+        assert len(turns) == 1, "the abandoned turn is emitted, the new one is not"
+        attrs = _get_span_attrs(turns[0])
+        assert "build it" in attrs["input.value"]["stringValue"]
+        assert state.get("last_emitted_turn") == "0"

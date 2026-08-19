@@ -65,7 +65,7 @@ from tracing.antigravity.hooks.model import (
     model_id_from_store,
     model_label_from_settings,
 )
-from tracing.antigravity.hooks.transcript import parse_transcript
+from tracing.antigravity.hooks.transcript import parse_transcript, turn_is_waiting
 from tracing.antigravity.hooks.usage import CallUsage, sum_usage, usage_by_call
 
 #: The receiver's JSON body limit is 1 MB. Batched payloads are split well under
@@ -602,6 +602,16 @@ def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversa
             continue
         if i <= last_turn:
             continue
+        if i == final_idx and turn_is_waiting(turn):
+            # The agent yielded because it put a tool in the background, not
+            # because the turn ended. Emitting now would freeze the turn at this
+            # point: the watermark below would mark it done and everything after
+            # the pause would never be emitted. A later stop, once the task has
+            # reported back, emits the whole turn. A turn that is no longer the
+            # last one is emitted regardless — the user moved on, so it will
+            # never settle.
+            log(f"antigravity: turn {i} is waiting on a background task; deferring")
+            break
         trace_count += 1
         model_id, model_label = _resolve_model(state, turn, conversation_id)
         _emit_turn_spans(turn, trace_count, model_id, model_label, common, call_usage)

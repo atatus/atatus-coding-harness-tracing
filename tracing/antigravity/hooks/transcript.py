@@ -49,6 +49,13 @@ _SYSTEM_SOURCE = "SYSTEM"
 _NON_TOOL_MODEL_TYPES = {"PLANNER_RESPONSE", "CONVERSATION_HISTORY"}
 
 _ERROR_MESSAGE_TYPE = "ERROR_MESSAGE"
+_SYSTEM_MESSAGE_TYPE = "SYSTEM_MESSAGE"
+
+#: A tool sent to the background records a result with this status, saying so in
+#: its content. The record is never updated — when the task finishes, the agent is
+#: woken by a separate ``SYSTEM_MESSAGE``. So a turn is still waiting on a
+#: background task when it has started more of them than it has been woken for.
+_RUNNING_STATUS = "RUNNING"
 
 #: Stamped on each ``PLANNER_RESPONSE`` while reading the file: its ordinal among
 #: all model calls in the conversation. The usage store records one row per call
@@ -206,6 +213,8 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
         "tool_steps": [],
         "error": "",
         "error_code": "",
+        "background_started": 0,
+        "background_finished": 0,
     }
 
     step_indices = [r.get("step_index", 0) for r in records if "step_index" in r]
@@ -292,7 +301,12 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
         if rec_type == "USER_INPUT":
             continue
 
+        if rec.get("status") == _RUNNING_STATUS:
+            turn["background_started"] += 1
+
         if rec.get("source") == _SYSTEM_SOURCE:
+            if rec_type == _SYSTEM_MESSAGE_TYPE:
+                turn["background_finished"] += 1
             # Scaffolding, not a tool result. An error record is the one piece
             # worth keeping: it is how a rate limit or a rejected tool call
             # shows up at all, and it belongs to the planner it interrupted.
@@ -320,6 +334,21 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
     turn["final_response"] = last_planner_content
 
     return turn
+
+
+def turn_is_waiting(turn: dict[str, Any]) -> bool:
+    """True if *turn* has a background task that has not reported back yet.
+
+    The stop hook fires when the agent yields, and backgrounding a tool makes it
+    yield — so a stop is not proof that the turn is over. The only in-band
+    difference is that a backgrounded tool leaves a ``RUNNING`` record and the
+    agent is later woken by a ``SYSTEM_MESSAGE``; while more have been started
+    than finished, the turn will resume.
+
+    ``SYSTEM_MESSAGE`` carries other notices too, so this counts *unmatched*
+    starts rather than requiring the two to be equal.
+    """
+    return int(turn.get("background_started", 0)) > int(turn.get("background_finished", 0))
 
 
 def parse_transcript(path: str | Path) -> list[dict[str, Any]]:

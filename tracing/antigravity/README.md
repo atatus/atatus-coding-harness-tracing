@@ -165,5 +165,13 @@ field.
 - **Durations are second-granular.** Every timestamp the transcript offers — its own `created_at` and the
   `Created At:` / `Completed At:` lines inside tool results — is whole seconds, so a sub-second tool
   legitimately reports a zero duration.
+- **A turn waiting on a background task is not emitted until it resumes and finishes.** Antigravity's `Stop`
+  hook means "the agent yielded", and backgrounding a tool makes it yield — so a stop is not proof the turn
+  ended. Emitting there would freeze the turn at the pause and lose everything after it, tokens included.
+  A turn counts as waiting when it has more `RUNNING` tool records than `SYSTEM_MESSAGE` wake-ups; note the
+  `RUNNING` record is never updated, so "has a running tool" is not the same question. A turn that is no
+  longer the last one is emitted regardless, since it will never settle — so interrupting a wait with a new
+  message emits the interrupted turn as it stands, rather than stranding it. The only losing sequence is
+  backgrounding a task and then abandoning the session without typing again; that turn is never traced.
 - **A tool result that never arrives** (the session ended, or the call was rejected) is still reported, with
   its arguments and no output, rather than dropped.
