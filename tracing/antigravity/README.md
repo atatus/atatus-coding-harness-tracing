@@ -168,8 +168,10 @@ field.
 - **A turn waiting on a background task is not emitted until it resumes and finishes.** Antigravity's `Stop`
   hook means "the agent yielded", and backgrounding a tool makes it yield — so a stop is not proof the turn
   ended. Emitting there would freeze the turn at the pause and lose everything after it, tokens included.
-  A turn counts as waiting when it has more `RUNNING` tool records than `SYSTEM_MESSAGE` wake-ups; note the
-  `RUNNING` record is never updated, so "has a running tool" is not the same question. A turn that is no
+  A turn counts as waiting when some `RUNNING` tool record has no `SYSTEM_MESSAGE` wake-up **after** it.
+  Two traps live in that sentence: the `RUNNING` record is never updated, so "has a running tool" is not the
+  same question; and wake-ups must be matched to starts **in order**, never counted, because a turn commonly
+  opens with an unrelated `SYSTEM_MESSAGE` that would otherwise cancel out a task started later. A turn that is no
   longer the last one is emitted regardless, since it will never settle — so interrupting a wait with a new
   message emits the interrupted turn as it stands, rather than stranding it. The only losing sequence is
   backgrounding a task and then abandoning the session without typing again; that turn is never traced.

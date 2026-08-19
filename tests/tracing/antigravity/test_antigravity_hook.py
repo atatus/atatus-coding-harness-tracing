@@ -1423,3 +1423,77 @@ class TestBackgroundTaskPause:
         attrs = _get_span_attrs(turns[0])
         assert "build it" in attrs["input.value"]["stringValue"]
         assert state.get("last_emitted_turn") == "0"
+
+    def test_a_wake_up_before_any_background_task_does_not_cancel_a_later_one(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, state
+    ):
+        """Wake-ups must be matched to starts in order, not counted.
+
+        A turn commonly opens with an unrelated SYSTEM_MESSAGE. Counting starts
+        against wake-ups let that leading one cancel the background task that
+        began after it, so the turn was emitted while the build was still
+        running and its final answer was lost. Taken from a real session.
+        """
+        transcript = tmp_path / "transcript.jsonl"
+        prefix = [
+            {
+                "type": "USER_INPUT",
+                "source": "USER_EXPLICIT",
+                "created_at": "2026-08-19T03:26:24Z",
+                "content": "<USER_REQUEST>do a build again</USER_REQUEST>",
+            },
+            # Arrives before anything is backgrounded, and belongs to nothing.
+            {
+                "type": "SYSTEM_MESSAGE",
+                "source": "SYSTEM",
+                "created_at": "2026-08-19T03:26:25Z",
+                "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user.",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T03:26:30Z",
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "npm run build"}}],
+            },
+            {
+                "type": "GENERIC",
+                "source": "MODEL",
+                "status": "RUNNING",
+                "created_at": "2026-08-19T03:26:34Z",
+                "content": "Created At: 2026-08-19T03:26:34Z\nTool is running as a background task",
+            },
+            {
+                "type": "PLANNER_RESPONSE",
+                "source": "MODEL",
+                "created_at": "2026-08-19T03:26:44Z",
+                "content": "I have started `npm run build`. I will wait for it to finish.",
+            },
+        ]
+        _write_jsonl(transcript, prefix)
+        self._stop(transcript)
+        assert captured_spans == [], "the build is still running"
+        assert state.get("last_emitted_turn") == "-1"
+
+        _write_jsonl(
+            transcript,
+            prefix
+            + [
+                {
+                    "type": "SYSTEM_MESSAGE",
+                    "source": "SYSTEM",
+                    "created_at": "2026-08-19T03:27:04Z",
+                    "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user.",
+                },
+                {
+                    "type": "PLANNER_RESPONSE",
+                    "source": "MODEL",
+                    "created_at": "2026-08-19T03:27:04Z",
+                    "content": "The build has completed successfully with zero errors.",
+                },
+            ],
+        )
+        self._stop(transcript)
+
+        assert len(_by_kind(captured_spans, "LLM")) == 1
+        attrs = _get_span_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["output.value"]["stringValue"] == "The build has completed successfully with zero errors."
