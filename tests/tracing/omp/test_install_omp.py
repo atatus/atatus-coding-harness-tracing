@@ -21,6 +21,7 @@ import json
 
 import pytest
 
+import core.setup as _setup
 import tracing.omp.constants as _omp
 import tracing.omp.install as _install
 from core.common import LOG_CONFIG_VERSION
@@ -38,6 +39,18 @@ ATATUS_BACKEND = (
     "atatus",
     {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
+
+
+@pytest.fixture(autouse=True)
+def _always_reconfigure(monkeypatch):
+    """Take the reconfigure branch of configure_harness.
+
+    These tests predate the "use this existing configuration?" gate and assert
+    on what the prompts do with a pre-seeded config, so they need the prompts to
+    actually run. The gate itself is covered in tests/core/test_configure_harness.py.
+    """
+    monkeypatch.setattr(_setup, "_reuse_existing", lambda *a, **k: False)
+
 
 _HEADER_MARKER = "// Atatus omp tracing hook (shim)."
 
@@ -62,18 +75,18 @@ def _mock_prompts(monkeypatch, backend=None):
         backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
-        _install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: backend,
+        lambda existing_harnesses=None, current=None: backend,
     )
-    monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
-    monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "omp")
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        _install,
+        _setup,
         "prompt_content_logging",
         lambda: {"prompts": True, "tool_details": True, "tool_content": True},
     )
-    monkeypatch.setattr(_install, "write_logging_config", lambda block, config_path=None: None)
+    monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
     monkeypatch.setattr("sys.stdout", _fake_stdout())
 
 
@@ -384,19 +397,19 @@ class TestInstallSecondHarnessOffersCopyFrom:
 
         captured = {}
 
-        def fake_prompt_backend(existing_harnesses=None):
+        def fake_prompt_backend(existing_harnesses=None, current=None):
             captured["existing_harnesses"] = existing_harnesses
             return ATATUS_BACKEND
 
-        monkeypatch.setattr(_install, "prompt_backend", fake_prompt_backend)
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
-        monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
+        monkeypatch.setattr(_setup, "prompt_backend", fake_prompt_backend)
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "omp")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
         monkeypatch.setattr(
-            _install,
+            _setup,
             "prompt_content_logging",
             lambda: {"prompts": True, "tool_details": True, "tool_content": True},
         )
-        monkeypatch.setattr(_install, "write_logging_config", lambda block, config_path=None: None)
+        monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         install()
@@ -433,13 +446,17 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
         }
         config_path.write_text(json.dumps(seed_config, indent=2))
 
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": "my-omp")
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": "my-omp")
+        # A blank line at the credential prompts keeps what is already stored,
+        # which is what makes a reconfigure able to change only the name.
+        monkeypatch.setattr(_setup, "getpass", lambda prompt="": "")
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
         monkeypatch.setattr(
-            _install,
+            _setup,
             "prompt_content_logging",
             lambda: {"prompts": True, "tool_details": True, "tool_content": True},
         )
-        monkeypatch.setattr(_install, "write_logging_config", lambda block, config_path=None: None)
+        monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         install()
@@ -472,7 +489,7 @@ class TestInstallExistingLoggingBlockSkipsPrompt:
 
         prompt_logging_called = []
         monkeypatch.setattr(
-            _install,
+            _setup,
             "prompt_content_logging",
             lambda: prompt_logging_called.append(True) or {"prompts": True, "tool_details": True, "tool_content": True},
         )
@@ -492,11 +509,11 @@ class TestInstallPromptsForLogging:
         mock_prompt_logging = MagicMock(return_value=logging_result)
         mock_write_logging = MagicMock()
 
-        monkeypatch.setattr(_install, "prompt_backend", lambda existing_harnesses=None: ATATUS_BACKEND)
-        monkeypatch.setattr(_install, "prompt_project_name", lambda default="": default or "omp")
-        monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
-        monkeypatch.setattr(_install, "prompt_content_logging", mock_prompt_logging)
-        monkeypatch.setattr(_install, "write_logging_config", mock_write_logging)
+        monkeypatch.setattr(_setup, "prompt_backend", lambda existing_harnesses=None, current=None: ATATUS_BACKEND)
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "omp")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
+        monkeypatch.setattr(_setup, "prompt_content_logging", mock_prompt_logging)
+        monkeypatch.setattr(_setup, "write_logging_config", mock_write_logging)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         install()

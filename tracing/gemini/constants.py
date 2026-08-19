@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 HARNESS_NAME = "gemini"
+DISPLAY_NAME = "Gemini CLI"
+
+# Signals for the "is this harness actually installed?" pre-check.
+HARNESS_HOME = ".gemini"
+HARNESS_BIN = "gemini"
 
 # Gemini settings.json lives at ~/.gemini/settings.json (user) or
 # .gemini/settings.json (project). We install user-level by default.

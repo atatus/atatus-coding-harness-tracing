@@ -13,7 +13,6 @@ import json
 import sys
 from pathlib import Path
 
-from core.setup import print_color
 from tracing.claude_code import install as _install_mod
 
 # ---------------------------------------------------------------------------
@@ -41,31 +40,6 @@ def _load_settings(settings_path: Path) -> dict:
 def _save_settings(settings_path: Path, settings: dict) -> None:
     """Write settings dict as formatted JSON."""
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-
-
-def _check_existing_configuration(settings_path: Path) -> bool:
-    """Check for existing config, prompt to overwrite. Returns True if should proceed."""
-    settings = _load_settings(settings_path)
-    env_block = settings.get("env", {})
-
-    # Either key is evidence of a prior install: the endpoint is written for every
-    # install, the license key only when credentials were supplied inline.
-    existing_endpoint = env_block.get("ATATUS_OTLP_ENDPOINT", "")
-    existing_key = env_block.get("ATATUS_API_KEY", "")
-
-    if existing_endpoint or existing_key:
-        where = f" at {existing_endpoint}" if existing_endpoint else ""
-        print_color(
-            f"Existing config found in {settings_path}: Atatus{where}",
-            "yellow",
-        )
-        overwrite = input("Overwrite? [y/N]: ").strip()
-        if overwrite.lower() != "y":
-            print("Setup cancelled.")
-            return False
-        print("")
-
-    return True
 
 
 # ---------------------------------------------------------------------------

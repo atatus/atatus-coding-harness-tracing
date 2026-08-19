@@ -47,22 +47,52 @@ The installer asks for your Atatus license key and a project name, then register
 
 ### Setup walkthrough
 
-The installer involves a brief interactive setup. The steps below run in order:
+The installer involves a brief interactive setup. Every harness asks the same
+questions in the same order, so the flow below is the whole of it.
 
-#### 1. Credentials
+#### 0. Already configured?
+
+If this harness already has an entry in `~/.atatus/harness/config.json`, the
+installer prints what is stored and offers to keep it:
+
+```
+[atatus] Existing 'codex' configuration found:
+         Project name : ashif-codex
+         Endpoint     : https://otel-rx.atatus.com
+         License key  : ****...a91f
+         User ID      : ashif
+
+Use this existing configuration? [Y/n]:
+```
+
+Press Enter (or answer `y`) and the remaining steps are skipped entirely — the
+hooks are re-registered and nothing in your config changes. Answer `n` to walk
+the steps below with every stored value offered as the default, which is how you
+rotate a license key, repoint the endpoint, or rename the project.
+
+The license key is only ever shown as its last four characters.
+
+#### 1. Project name
+
+The Atatus project that spans for this harness are grouped under. On a fresh
+install it defaults to the harness name (e.g. `claude-code`, `codex`); on a
+re-configure it defaults to the name you chose last time.
+
+This name becomes the OTLP `service.name`, and Atatus auto-creates one project
+per distinct value — so if several people install the same harness and all
+accept the default, their sessions land in one shared project. Give it a name of
+your own if you want them separated.
+
+#### 2. Credentials
 
 - **Atatus license key** — required. Create one under **Settings → Account Settings → API Keys**, choosing the type **Ingest License Key**.
 - **OTLP endpoint** — optional. Defaults to `https://otel-rx.atatus.com`; set it only if you have been given a different collector URL.
 
-If you've already configured another harness, the installer offers a **copy-from** menu so you can reuse those credentials instead of re-entering them.
-
-#### 2. Project name
-
-The Atatus project that spans for this harness are grouped under. Defaults to the harness name (e.g. `claude-code`, `codex` etc).
+If you've already configured *another* harness, the installer offers a **copy-from** menu so you can reuse those credentials instead of re-entering them. When this harness has its own stored credentials, both prompts default to keeping them — a blank line at each is what leaves them untouched.
 
 #### 3. User ID (optional)
 
-A free-form identifier attached to every span as `user.id`. Useful when multiple teammates report into the same project. Leave blank to skip.
+A free-form identifier attached to every span as `user.id`. Useful when multiple teammates report into the same project. Leave blank to skip; on a re-configure, blank keeps the stored value and `-` clears it.
 
 #### 4. Content logging
 
@@ -84,14 +114,28 @@ All three take the same form as the install command, on either OS:
 
 | Action | Command argument | Notes |
 |---|---|---|
-| Add another harness | `bash -s -- codex` | Reuses the license key and project name you already entered. |
-| Update | `bash -s -- update` | Updates the package and re-registers every installed harness. |
+| Add another harness | `bash -s -- codex` | Offers to copy the license key from a harness you already set up. Each harness gets its own project name. |
+| Update | `bash -s -- update` | Updates the package and re-registers every installed harness. On a terminal you are asked once per harness whether to keep its stored config; with no terminal it keeps them all. |
 | Remove one harness | `bash -s -- uninstall codex` | Removes that harness's hooks. Everything else is left alone. |
 | Remove everything | `bash -s -- uninstall` | Full wipe: venv, package and `~/.atatus/harness/config.json`. |
 
 Pass `--with-skills` on install to also symlink that harness's `manage-*-tracing` skill into the current directory's `.agents/skills/`, so a coding agent in that workspace can help manage the configuration.
 
 To stop sending traces without uninstalling anything, set `ATATUS_TRACE_ENABLED=false`.
+
+#### Unattended installs
+
+With `--non-interactive` (or no terminal at all, which is what `update` gets from
+cron or CI) nothing is asked. A fresh install reads every value from the file
+named by `ATATUS_ENV_FILE` and errors if a required one is missing. Over an
+already-configured harness the stored values are reused, and only values named in
+that file override them.
+
+Ambient `ATATUS_*` variables are deliberately *not* consulted for a harness that
+is already configured: every installed harness exports `ATATUS_API_KEY`,
+`ATATUS_OTLP_ENDPOINT` and `ATATUS_PROJECT_NAME` into the sessions it spawns, so
+honouring them would let an update run from inside a traced terminal silently
+repoint a harness at whatever that session carried.
 
 ### Environment variables
 

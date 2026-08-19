@@ -12,6 +12,13 @@ from __future__ import annotations
 from pathlib import Path
 
 HARNESS_NAME = "antigravity"
+DISPLAY_NAME = "Antigravity"
+
+# Signal for the "is this harness actually installed?" pre-check. Deliberately
+# the CLI's own data dir and not ~/.gemini: that one belongs to Gemini CLI, so
+# using it would report Antigravity as installed on any machine running Gemini.
+# No binary name — Antigravity ships as an IDE, not a command on PATH.
+HARNESS_HOME = ".gemini/antigravity-cli"
 
 # Antigravity's global customization dir. The hooks file lives here, NOT at
 # ~/.gemini/settings.json (which is Gemini's territory).

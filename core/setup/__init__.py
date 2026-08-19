@@ -7,12 +7,14 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
 from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION, LOG_FLAG_DEFAULTS
 from core.config import delete_value, load_config, save_config, set_value
+from core.constants import HARNESSES
 
 # ---------------------------------------------------------------------------
 # Shared path constants
@@ -129,6 +131,7 @@ def ensure_harness_installed(
 
 def prompt_backend(
     existing_harnesses: dict | None = None,
+    current: dict | None = None,
 ) -> tuple[str, dict]:
     """Interactive credential setup with optional copy-from.
 
@@ -136,35 +139,51 @@ def prompt_backend(
     entry already holds usable Atatus credentials, offer a menu to copy from
     one instead of retyping the license key.
 
+    `current` is *this* harness's stored entry when the user chose to
+    reconfigure it. Its key and endpoint become the prompt defaults, so a blank
+    line keeps them; the copy-from menu is skipped, because offering to copy
+    from another harness makes no sense when this one already has its own
+    credentials to keep.
+
     Returns (target, credentials).  credentials keys:
       {"endpoint", "api_key"}
     """
     target = "atatus"
 
+    stored_key = (current or {}).get("api_key") or ""
+    stored_endpoint = (current or {}).get("endpoint") or ""
+
     if non_interactive():
-        return _backend_from_env(target)
+        return _backend_from_env(target, current)
 
     # --- copy-from logic ---
-    copied = _try_copy_from(target, existing_harnesses)
-    if copied is not None:
-        return (target, copied)
+    if not stored_key:
+        copied = _try_copy_from(target, existing_harnesses)
+        if copied is not None:
+            return (target, copied)
 
-    # --- fresh credential prompts ---
+    # --- credential prompts ---
     print("")
-    api_key = getpass("Atatus License Key: ").strip()
+    if stored_key:
+        api_key = getpass(f"Atatus License Key [keep existing {_mask_secret(stored_key)}]: ").strip()
+        api_key = api_key or stored_key
+    else:
+        api_key = getpass("Atatus License Key: ").strip()
 
     if not api_key:
         err("A license key is required.")
         sys.exit(1)
+
+    endpoint_default = stored_endpoint or DEFAULT_OTLP_ENDPOINT
 
     print("")
     if sys.stdout.isatty() and os.name != "nt":
         print("\033[1;33mOTLP Endpoint\033[0m (leave blank for the default collector):")
     else:
         print("OTLP Endpoint (leave blank for the default collector):")
-    otlp_endpoint = input(f"OTLP Endpoint [{DEFAULT_OTLP_ENDPOINT}]: ").strip()
+    otlp_endpoint = input(f"OTLP Endpoint [{endpoint_default}]: ").strip()
     if not otlp_endpoint:
-        otlp_endpoint = DEFAULT_OTLP_ENDPOINT
+        otlp_endpoint = endpoint_default
 
     return (
         target,
@@ -175,19 +194,49 @@ def prompt_backend(
     )
 
 
-def _backend_from_env(target: str) -> tuple[str, dict]:
+def _backend_from_env(target: str, current: dict | None = None) -> tuple[str, dict]:
     """Resolve credentials from the environment, for non-interactive installs.
 
     There is only one backend, so nothing has to be inferred — the licence key is
     required and the endpoint falls back to the default collector. Exits with an
     actionable message when the key is missing; this path must never fall back to
     a prompt, because there is nobody to answer it.
-    """
-    api_key = _require_env("ATATUS_API_KEY", "An Atatus licence key")
-    endpoint = _env("ATATUS_OTLP_ENDPOINT") or DEFAULT_OTLP_ENDPOINT
 
-    info(f"Licence key: found (from {_source_of('ATATUS_API_KEY')})")
-    info(f"OTLP endpoint: {endpoint} (from {_source_of('ATATUS_OTLP_ENDPOINT', fallback='default')})")
+    `current` is this harness's already-stored entry, if any. Stored values are
+    the fallback rather than an error, so a re-install with nothing in the
+    environment keeps working — that is what makes `install.sh update` safe to
+    run unattended.
+
+    Over a stored entry the override is read from the dotenv file **only**, for
+    the same reason `prompt_project_name` ignores the ambient environment: every
+    installed harness exports ``ATATUS_API_KEY`` and ``ATATUS_OTLP_ENDPOINT``
+    into the sessions it spawns, so an `update` run from inside a traced
+    terminal would otherwise silently repoint this harness at whatever that
+    session happens to carry — including sending its spans to a different
+    endpoint. Naming a value in the dotenv file is an explicit act; inheriting
+    one is not. Rotating a key is therefore still a matter of putting it in the
+    file named by ``ATATUS_ENV_FILE`` and re-running.
+    """
+    stored_key = (current or {}).get("api_key") or ""
+    stored_endpoint = (current or {}).get("endpoint") or ""
+
+    if stored_key:
+        api_key = _dotenv_only("ATATUS_API_KEY") or stored_key
+        source = _source_of("ATATUS_API_KEY", fallback="stored config", include_env=False)
+        endpoint = _dotenv_only("ATATUS_OTLP_ENDPOINT") or stored_endpoint or DEFAULT_OTLP_ENDPOINT
+        endpoint_source = _source_of(
+            "ATATUS_OTLP_ENDPOINT",
+            fallback="stored config" if stored_endpoint else "default",
+            include_env=False,
+        )
+    else:
+        api_key = _require_env("ATATUS_API_KEY", "An Atatus licence key")
+        source = _source_of("ATATUS_API_KEY")
+        endpoint = _env("ATATUS_OTLP_ENDPOINT") or DEFAULT_OTLP_ENDPOINT
+        endpoint_source = _source_of("ATATUS_OTLP_ENDPOINT", fallback="default")
+
+    info(f"Licence key: found (from {source})")
+    info(f"OTLP endpoint: {endpoint} (from {endpoint_source})")
 
     return (target, {"endpoint": endpoint, "api_key": api_key})
 
@@ -295,7 +344,7 @@ def prompt_project_name(default: str = "") -> str:
     sys.exit(1)
 
 
-def _prompt_bool(question: str, default: bool) -> bool:
+def _prompt_bool(question: str, default: bool, indent: str = "  ") -> bool:
     """Ask a yes/no question whose hint and blank-line answer follow `default`.
 
     A blank line means "accept the default", so the parse has to be asymmetric:
@@ -303,9 +352,12 @@ def _prompt_bool(question: str, default: bool) -> bool:
     only an explicit yes does. Getting this backwards is how the tool-content
     default was silently defeated before — see the note in
     `prompt_content_logging`.
+
+    `indent` is presentation only: the content-logging questions are a sub-list
+    under a heading, a top-level question passes "".
     """
     hint = "[Y/n]" if default else "[y/N]"
-    answer = input(f"  {question} {hint}: ").strip().lower()
+    answer = input(f"{indent}{question} {hint}: ").strip().lower()
     if default:
         return answer not in ("n", "no")
     return answer in ("y", "yes")
@@ -395,7 +447,9 @@ def needs_content_logging_prompt(config: Optional[dict]) -> bool:
         return True
     if logging_block.get("_v") == LOG_CONFIG_VERSION:
         return False
-    info("Content-logging settings need re-confirming — the defaults changed (tool output is now off unless you opt in).")
+    info(
+        "Content-logging settings need re-confirming — the defaults changed (tool output is now off unless you opt in)."
+    )
     return True
 
 
@@ -418,9 +472,20 @@ def write_logging_config(logging_block: dict, config_path: str | None = None) ->
     save_config(config, config_path)
 
 
-def prompt_user_id() -> str:
-    """Optional user ID prompt. Returns "" if skipped."""
+def prompt_user_id(default: str = "") -> str:
+    """Optional user ID prompt. Returns "" if skipped.
+
+    With a `default` (a re-configure over a stored value) a blank line keeps it,
+    matching every other prompt here. That costs the usual way of clearing a
+    value, so `-` is accepted as an explicit "no user ID" — otherwise a user who
+    set one by accident could never take it back off.
+
+    Non-interactively, a stored value is overridden from the dotenv file only —
+    see `_backend_from_env` for why the ambient environment does not count.
+    """
     if non_interactive():
+        if default:
+            return _dotenv_only("ATATUS_USER_ID") or default
         return _env("ATATUS_USER_ID")
 
     print("")
@@ -428,6 +493,13 @@ def prompt_user_id() -> str:
         print("\033[0;34mOptional:\033[0m Set a user ID to identify your spans (useful for teams).")
     else:
         print("Optional: Set a user ID to identify your spans (useful for teams).")
+
+    if default:
+        user_id = input(f"User ID [{default}] (- to clear): ").strip()
+        if user_id == "-":
+            return ""
+        return user_id or default
+
     user_id = input("User ID (leave blank to skip): ").strip()
     return user_id
 
@@ -918,3 +990,186 @@ def unlink_skills(harness: str, target_dir: Path | None = None) -> None:
                 info(f"would unlink {link}")
             else:
                 link.unlink()
+
+
+# ---------------------------------------------------------------------------
+# The shared install conversation
+# ---------------------------------------------------------------------------
+#
+# Everything below exists so that all ten harness installers ask the same
+# questions in the same order. Before this, each `tracing/<h>/install.py` wired
+# the prompts above together itself, and they had drifted into three different
+# project-name defaults, three different "is it already configured" tests and
+# two different content-logging gates. `configure_harness` is now the only
+# caller of those prompts, so a harness cannot drift again without editing it.
+
+
+@dataclass
+class HarnessSetup:
+    """What the shared conversation resolved, for the caller to write out."""
+
+    project_name: str
+    user_id: str
+    target: str
+    credentials: dict  # {"endpoint", "api_key"}
+    reused: bool  # the user kept the stored config untouched
+
+
+def _mask_secret(value: str) -> str:
+    """Render a licence key for display: last 4 characters only.
+
+    The summary block exists to let someone recognise their own config, which
+    the tail alone does. Printing the key in full would put it in terminal
+    scrollback and in any transcript a coding agent is keeping of the install.
+    """
+    if not value:
+        return "(unset)"
+    return f"****...{value[-4:]}" if len(value) > 4 else "****"
+
+
+def _stored_entry(config: Optional[dict], harness_name: str) -> Optional[dict]:
+    """This harness's config.json entry, or None when it isn't usable.
+
+    A `target` has to be present: an entry holding only `project_name` is what
+    `merge_harness_entry` leaves behind, and treating that as configured would
+    skip the credential prompts and install a harness that can never send.
+    """
+    harnesses = (config or {}).get("harnesses")
+    if not isinstance(harnesses, dict):
+        return None
+    entry = harnesses.get(harness_name)
+    if not isinstance(entry, dict) or not entry.get("target"):
+        return None
+    return entry
+
+
+def _fresh_project_default(harness_name: str) -> str:
+    """The project-name default offered on a *fresh* install.
+
+    Interactively this is the harness name, which is what the README and the
+    manage-*-tracing skills have always documented.
+
+    Non-interactively it is deliberately empty, so `prompt_project_name` keeps
+    exiting rather than inventing one. The name becomes the OTLP `service.name`
+    and the receiver auto-creates a project per distinct value, so a default
+    applied with nobody watching would file every unattended install on every
+    machine into one shared bucket — and that is not separable after ingest.
+    A human accepting a shown default has at least seen it.
+    """
+    if non_interactive():
+        return ""
+    meta = HARNESSES.get(harness_name)
+    if meta is None:
+        return harness_name
+    return meta.get("default_project_name") or harness_name
+
+
+def _reuse_existing(harness_name: str, entry: dict, user_id: str) -> bool:
+    """Show the stored config and ask whether to keep it as-is.
+
+    Returns False non-interactively *by design*, even though that is the path
+    that re-runs the prompts. In that mode every prompt resolves from the
+    environment falling back to the stored value, so falling through gives both
+    halves of what an unattended re-install needs: it succeeds against a stored
+    entry (which is what `install.sh update` does), and a value named in the
+    dotenv file still overrides the stored one, so a key can be rotated.
+    """
+    if non_interactive():
+        return False
+
+    print("")
+    info(f"Existing '{harness_name}' configuration found:")
+    print(f"         Project name : {entry.get('project_name') or '(unset)'}")
+    print(f"         Endpoint     : {entry.get('endpoint') or DEFAULT_OTLP_ENDPOINT}")
+    print(f"         License key  : {_mask_secret(entry.get('api_key') or '')}")
+    print(f"         User ID      : {user_id or '(unset)'}")
+    print("")
+
+    return _prompt_bool("Use this existing configuration?", True, indent="")
+
+
+def _clear_user_id() -> None:
+    """Drop the top-level user_id. For when a reconfigure answered `-`."""
+    config = load_config()
+    if not config or not config.get("user_id"):
+        return
+    delete_value(config, "user_id")
+    save_config(config)
+
+
+def configure_harness(
+    harness_name: str,
+    *,
+    display_name: str = "",
+    home_subdir: Optional[str] = None,
+    bin_name: Optional[str] = None,
+    collector: Optional[dict] = None,
+) -> Optional[HarnessSetup]:
+    """Run the shared install conversation and persist the result.
+
+    Every harness installer calls this and nothing else for its configuration;
+    what it returns is only needed by the ones that also bake values into a
+    harness-native file (codex's env file, claude's settings.json).
+
+    Returns None when the user declined at the "harness doesn't look installed"
+    check, which the caller should treat as an abort.
+    """
+    if display_name and (home_subdir or bin_name):
+        if not ensure_harness_installed(display_name, home_subdir=home_subdir, bin_name=bin_name):
+            return None
+
+    ensure_shared_runtime()
+
+    config = load_config()
+    existing = _stored_entry(config, harness_name)
+    stored_user_id = (config or {}).get("user_id") or ""
+
+    if existing is not None and _reuse_existing(harness_name, existing, stored_user_id):
+        info(f"Keeping the stored '{harness_name}' configuration.")
+        setup = HarnessSetup(
+            project_name=existing.get("project_name") or harness_name,
+            user_id=stored_user_id,
+            target=existing.get("target") or "atatus",
+            credentials={
+                "endpoint": existing.get("endpoint") or DEFAULT_OTLP_ENDPOINT,
+                "api_key": existing.get("api_key") or "",
+            },
+            reused=True,
+        )
+    else:
+        stored_name = (existing or {}).get("project_name") or ""
+        project_name = prompt_project_name(stored_name or _fresh_project_default(harness_name))
+        target, credentials = prompt_backend((config or {}).get("harnesses"), current=existing)
+        user_id = prompt_user_id(stored_user_id)
+
+        setup = HarnessSetup(
+            project_name=project_name,
+            user_id=user_id,
+            target=target,
+            credentials=credentials,
+            reused=False,
+        )
+
+        if dry_run():
+            info("would write config.json with the harness entry")
+        else:
+            write_config(
+                target,
+                credentials,
+                harness_name,
+                project_name,
+                user_id=user_id,
+                collector=collector,
+            )
+            if not user_id and stored_user_id:
+                _clear_user_id()
+
+    # Logging settings are global, so this is gated on the config as a whole
+    # rather than on this harness: asked once on a fresh machine, and once more
+    # when the stored block predates LOG_CONFIG_VERSION.
+    if needs_content_logging_prompt(config):
+        write_logging_config(prompt_content_logging())
+    else:
+        info("Using existing logging settings from config.json")
+
+    return setup

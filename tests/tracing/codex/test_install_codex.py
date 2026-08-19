@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import core.setup as _setup
 import tracing.codex._toml as codex_toml
 import tracing.codex.install as codex_install
 from tracing.codex.constants import NOTIFY_BIN_NAME, get_codex_home
@@ -24,6 +25,17 @@ ATATUS_BACKEND = (
     "atatus",
     {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-xxx"},
 )
+
+
+@pytest.fixture(autouse=True)
+def _always_reconfigure(monkeypatch):
+    """Take the reconfigure branch of configure_harness.
+
+    These tests predate the "use this existing configuration?" gate and assert
+    on what the prompts do with a pre-seeded config, so they need the prompts to
+    actually run. The gate itself is covered in tests/core/test_configure_harness.py.
+    """
+    monkeypatch.setattr(_setup, "_reuse_existing", lambda *a, **k: False)
 
 
 @pytest.fixture()
@@ -49,8 +61,6 @@ def fake_home(tmp_path, monkeypatch):
     monkeypatch.setattr("core.constants.CONFIG_FILE", config_file)
     monkeypatch.setattr("core.config.CONFIG_FILE", config_file)
 
-    monkeypatch.setattr(codex_install, "CONFIG_FILE", config_file)
-
     # No CODEX_HOME override: get_codex_home() then derives `codex_dir` from the
     # patched Path.home() above, so the installer writes inside tmp_path.
     monkeypatch.delenv("CODEX_HOME", raising=False)
@@ -63,33 +73,33 @@ def fake_home(tmp_path, monkeypatch):
 def _stub_logging_prompts(monkeypatch):
     """Auto-stub the content-logging wizard so tests don't block on stdin."""
     monkeypatch.setattr(
-        codex_install,
+        _setup,
         "prompt_content_logging",
         lambda: {"prompts": True, "tool_details": True, "tool_content": True},
     )
-    monkeypatch.setattr(codex_install, "write_logging_config", lambda block, config_path=None: None)
+    monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
 
 
 @pytest.fixture()
 def mock_prompts(monkeypatch):
     """Mock interactive prompts to return atatus defaults."""
-    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
-    monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        codex_install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: ATATUS_BACKEND,
+        lambda existing_harnesses=None, current=None: ATATUS_BACKEND,
     )
 
 
 def _mock_prompts_atatus(monkeypatch):
     """Mock interactive prompts to return atatus defaults."""
-    monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
-    monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        codex_install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: ATATUS_BACKEND,
+        lambda existing_harnesses=None, current=None: ATATUS_BACKEND,
     )
 
 
@@ -119,10 +129,7 @@ class TestTomlHelpers:
     """Tests for the TOML read/write helpers."""
 
     def test_roundtrip_simple(self, tmp_path):
-        data = {
-            "notify": ["/usr/bin/hook"],
-            "model": {"name": "gpt-4"}
-        }
+        data = {"notify": ["/usr/bin/hook"], "model": {"name": "gpt-4"}}
         p = tmp_path / "config.toml"
         codex_toml._toml_write(data, p)
         parsed = codex_toml._toml_line_parse(p.read_text())
@@ -169,7 +176,6 @@ class TestTomlHelpers:
 
 class TestInstall:
     """Tests for install() under the v2 hooks layout."""
-
 
     def test_install_fresh_writes_flat_atatus_entry(self, fake_home, monkeypatch):
         _mock_prompts_atatus(monkeypatch)
@@ -230,7 +236,7 @@ class TestInstall:
                             "project_name": "old-name",
                             "target": "atatus",
                             "endpoint": "https://otel-rx.atatus.com",
-                            "api_key": "ak-existing"
+                            "api_key": "ak-existing",
                         }
                     }
                 },
@@ -238,8 +244,12 @@ class TestInstall:
             )
         )
 
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": "new-name")
-        monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": "new-name")
+        # A blank line at the credential prompts keeps what is already stored,
+        # which is what makes a reconfigure able to change only the name.
+        monkeypatch.setattr(_setup, "getpass", lambda prompt="": "")
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
 
         codex_install.install()
 
@@ -259,7 +269,7 @@ class TestInstall:
                             "project_name": "claude-code",
                             "target": "atatus",
                             "endpoint": "https://otel-rx.atatus.com",
-                            "api_key": "ak-shared"
+                            "api_key": "ak-shared",
                         }
                     }
                 },
@@ -269,19 +279,16 @@ class TestInstall:
 
         captured_kwargs = {}
 
-        def fake_prompt_backend(existing_harnesses=None):
+        def fake_prompt_backend(existing_harnesses=None, current=None):
             captured_kwargs["existing_harnesses"] = existing_harnesses
             return (
                 "atatus",
-                {
-                    "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "ak-shared"
-                },
+                {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-shared"},
             )
 
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
-        monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "")
-        monkeypatch.setattr(codex_install, "prompt_backend", fake_prompt_backend)
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
+        monkeypatch.setattr(_setup, "prompt_backend", fake_prompt_backend)
 
         codex_install.install()
 
@@ -308,12 +315,12 @@ class TestInstall:
         assert "hooks" not in data
 
     def test_install_with_user_id(self, fake_home, monkeypatch):
-        monkeypatch.setattr(codex_install, "prompt_project_name", lambda default="": default or "codex")
-        monkeypatch.setattr(codex_install, "prompt_user_id", lambda: "test-user")
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "test-user")
         monkeypatch.setattr(
-            codex_install,
+            _setup,
             "prompt_backend",
-            lambda existing_harnesses=None: ATATUS_BACKEND,
+            lambda existing_harnesses=None, current=None: ATATUS_BACKEND,
         )
 
         codex_install.install()
@@ -732,15 +739,7 @@ class TestTomlFallbackQuoting:
     """Tests for quote-aware TOML fallback parser/writer."""
 
     def test_unkey_roundtrips_through_key(self):
-        inputs = [
-            "plain",
-            "with.dot",
-            "with@at",
-            "with/slash",
-            'with"quote',
-            "with\\backslash",
-            "@scope/server"
-        ]
+        inputs = ["plain", "with.dot", "with@at", "with/slash", 'with"quote', "with\\backslash", "@scope/server"]
         for s in inputs:
             assert codex_toml._toml_unkey(codex_toml._toml_key(s)) == s, f"roundtrip failed for {s!r}"
 
@@ -750,32 +749,23 @@ class TestTomlFallbackQuoting:
             ('mcp_servers."@scope/server"', ["mcp_servers", "@scope/server"]),
             ('plugins."browser-use@openai-bundled"', ["plugins", "browser-use@openai-bundled"]),
             ('mcp_servers."a.b.c"', ["mcp_servers", "a.b.c"]),
-            ('  outer . "inner.path"  ', ["outer", "inner.path"])
+            ('  outer . "inner.path"  ', ["outer", "inner.path"]),
         ]
         for path, expected in cases:
             assert codex_toml._toml_split_key_path(path) == expected, f"split failed for {path!r}"
 
     def test_fallback_roundtrips_quoted_section_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent(
-            """\
+        toml_text = textwrap.dedent("""\
             [mcp_servers."@scope/server"]
             command = "npx"
             args = ["-y", "@scope/server"]
-        """
-        )
+        """)
         p = tmp_path / "config.toml"
         p.write_text(toml_text)
 
         data = codex_toml._toml_load(p)
-        assert data == {
-            "mcp_servers": {
-                "@scope/server": {
-                    "command": "npx",
-                    "args": ["-y", "@scope/server"]
-                }
-            }
-        }
+        assert data == {"mcp_servers": {"@scope/server": {"command": "npx", "args": ["-y", "@scope/server"]}}}
 
         p2 = tmp_path / "config2.toml"
         codex_toml._toml_write(data, p2)
@@ -784,12 +774,10 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_repairs_malformed_unquoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent(
-            """\
+        toml_text = textwrap.dedent("""\
             [plugins.@scope/server]
             enabled = true
-        """
-        )
+        """)
         p = tmp_path / "config.toml"
         p.write_text(toml_text)
 
@@ -828,12 +816,10 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_deeply_nested_quoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent(
-            """\
+        toml_text = textwrap.dedent("""\
             [a."b.c"."d/e"]
             x = 1
-        """
-        )
+        """)
         p = tmp_path / "deep.toml"
         p.write_text(toml_text)
 
@@ -847,25 +833,18 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_multiple_sections_with_quoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent(
-            """\
+        toml_text = textwrap.dedent("""\
             [servers."@org/alpha"]
             port = 8080
 
             [servers."@org/beta"]
             port = 9090
-        """
-        )
+        """)
         p = tmp_path / "multi.toml"
         p.write_text(toml_text)
 
         data = codex_toml._toml_load(p)
-        assert data == {
-            "servers": {
-                "@org/alpha": {"port": 8080},
-                "@org/beta": {"port": 9090}
-            }
-        }
+        assert data == {"servers": {"@org/alpha": {"port": 8080}, "@org/beta": {"port": 9090}}}
 
         p2 = tmp_path / "multi2.toml"
         codex_toml._toml_write(data, p2)
@@ -887,11 +866,9 @@ class TestTomlFallbackQuoting:
         data = {
             "mcp_servers": {
                 "@anthropic/server": {"command": "run", "args": ["--flag"]},
-                "normal-server": {"command": "exec"}
+                "normal-server": {"command": "exec"},
             },
-            "projects": {
-                "/Users/someone/proj": {"enabled": True}
-            }
+            "projects": {"/Users/someone/proj": {"enabled": True}},
         }
         p = tmp_path / "out.toml"
         codex_toml._toml_write(data, p)

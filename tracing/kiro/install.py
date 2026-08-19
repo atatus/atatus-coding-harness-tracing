@@ -9,28 +9,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-from core.config import get_value, load_config
 from core.setup import (
     INSTALL_DIR,
+    configure_harness,
     dry_run,
-    ensure_harness_installed,
-    ensure_shared_runtime,
     env_flag,
     env_value,
     info,
-    merge_harness_entry,
     non_interactive,
-    prompt_backend,
-    needs_content_logging_prompt,
-    prompt_content_logging,
-    prompt_project_name,
-    prompt_user_id,
     remove_harness_entry,
     symlink_skills,
     unlink_skills,
     venv_bin,
-    write_config,
-    write_logging_config,
 )
 from tracing.kiro.constants import (
     AGENT_SKELETON,
@@ -47,11 +37,15 @@ from tracing.kiro.constants import (
 
 def install(with_skills: bool = False, agent_name: str | None = None) -> None:
     """Install Kiro tracing: configure backend, write hooks into an agent config."""
-    if not ensure_harness_installed(DISPLAY_NAME, home_subdir=HARNESS_HOME, bin_name=HARNESS_BIN):
+    setup = configure_harness(
+        HARNESS_NAME,
+        display_name=DISPLAY_NAME,
+        home_subdir=HARNESS_HOME,
+        bin_name=HARNESS_BIN,
+    )
+    if setup is None:
         info("Aborted.")
         return
-
-    ensure_shared_runtime()
 
     # Per-harness state dir
     state_dir = INSTALL_DIR / "state" / HARNESS_NAME
@@ -59,27 +53,6 @@ def install(with_skills: bool = False, agent_name: str | None = None) -> None:
         info(f"would create {state_dir}")
     else:
         state_dir.mkdir(parents=True, exist_ok=True)
-
-    config = load_config()
-    existing_entry = get_value(config, f"harnesses.{HARNESS_NAME}")
-    if not existing_entry:
-        existing_harnesses = config.get("harnesses") if config else None
-        target, credentials = prompt_backend(existing_harnesses)
-        project_name = prompt_project_name()
-        user_id = prompt_user_id()
-        if not dry_run():
-            write_config(target, credentials, HARNESS_NAME, project_name, user_id=user_id)
-        else:
-            info("would write config.json with backend credentials")
-    else:
-        project_name = prompt_project_name(get_value(config, f"harnesses.{HARNESS_NAME}.project_name") or "")
-        merge_harness_entry(HARNESS_NAME, project_name)
-
-    if needs_content_logging_prompt(config):
-        logging_block = prompt_content_logging()
-        write_logging_config(logging_block)
-    else:
-        info("Using existing logging settings from config.json")
 
     chosen = agent_name or _prompt_agent_name()
     agent_path = _resolve_agent_path(chosen)

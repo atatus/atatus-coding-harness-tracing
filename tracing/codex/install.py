@@ -16,25 +16,14 @@ import re
 import sys
 from pathlib import Path
 
-from core.config import get_value, load_config
 from core.setup import (
-    CONFIG_FILE,
+    configure_harness,
     dry_run,
-    ensure_harness_installed,
-    ensure_shared_runtime,
     info,
-    merge_harness_entry,
-    prompt_backend,
-    needs_content_logging_prompt,
-    prompt_content_logging,
-    prompt_project_name,
-    prompt_user_id,
     remove_harness_entry,
     symlink_skills,
     unlink_skills,
     venv_bin,
-    write_config,
-    write_logging_config,
 )
 from tracing.codex._toml import _toml_load_strict, _toml_write
 from tracing.codex.constants import (
@@ -216,51 +205,29 @@ def install(with_skills: bool = False) -> None:
     # a partial parse here would be written back over their file in step 4.
     _toml_load_strict(codex_config_file)
 
-    if not ensure_harness_installed(DISPLAY_NAME, home_subdir=HARNESS_HOME, bin_name=HARNESS_BIN):
+    # 1. Shared runtime + harness entry. This also runs the "is Codex actually
+    #    installed?" check, so nothing below it happens on an aborted install.
+    setup = configure_harness(
+        HARNESS_NAME,
+        display_name=DISPLAY_NAME,
+        home_subdir=HARNESS_HOME,
+        bin_name=HARNESS_BIN,
+    )
+    if setup is None:
         info("Aborted.")
         return
 
-    # 1. Migrate any v1 artifacts (idempotent; no-op on fresh installs).
+    # 2. Migrate any v1 artifacts (idempotent; no-op on fresh installs). Only
+    #    touches Codex-side artifacts, never our config.json, so it is safe
+    #    either side of the harness entry being written.
     cleanup_legacy_install(codex_config_file)
-
-    # 2. Shared runtime + harness entry.
-    ensure_shared_runtime()
-    config = load_config(str(CONFIG_FILE))
-    existing_entry = get_value(config, f"harnesses.{HARNESS_NAME}")
-    project_name = prompt_project_name()
-
-    if existing_entry:
-        info(f"Reusing existing backend: {existing_entry.get('target')}")
-        merge_harness_entry(HARNESS_NAME, project_name)
-        user_id = get_value(config, "user_id") or ""
-    else:
-        existing_harnesses = config.get("harnesses", {}) if config else {}
-        target, credentials = prompt_backend(existing_harnesses=existing_harnesses)
-        user_id = prompt_user_id()
-        if not dry_run():
-            write_config(
-                target=target,
-                credentials=credentials,
-                harness_name=HARNESS_NAME,
-                project_name=project_name,
-                user_id=user_id,
-            )
-        else:
-            info("would write config.json with backend credentials")
-
-    # Logging settings are global. Prompt on a fresh install, or once more when
-    # the stored block predates LOG_CONFIG_VERSION (see needs_content_logging_prompt).
-    if needs_content_logging_prompt(config):
-        write_logging_config(prompt_content_logging())
-    else:
-        info("Using existing logging settings from config.json")
 
     # 3. Codex config dir + env file.
     if not dry_run():
         codex_home.mkdir(parents=True, exist_ok=True)
     else:
         info(f"would create {codex_home}")
-    _write_env_file(codex_env_file, user_id=user_id)
+    _write_env_file(codex_env_file, user_id=setup.user_id)
 
     # 4. Write the notify-only TOML layout.
     notify_cmd = str(venv_bin(NOTIFY_BIN_NAME))

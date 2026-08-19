@@ -25,7 +25,7 @@ opencode is fundamentally different from every other harness in this repo: exten
 Snapshots repeat across firings — that's what dedup is for. There is no streaming-chunk forwarding.
 
 ## Setup
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and copies the plugin shim into `~/.config/opencode/plugin/atatus-tracing.ts`. opencode auto-discovers plugins in that directory ([config docs](https://opencode.ai/docs/config/)) — no `opencode.json` edit is required. Spans are sent directly to the backend from the reconciler — no separate buffer/collector service is required.
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and copies the plugin shim into `~/.config/opencode/plugin/atatus-tracing.ts`. opencode auto-discovers plugins in that directory ([config docs](https://opencode.ai/docs/config/)) — no `opencode.json` edit is required. Spans are sent directly to the backend from the reconciler — no separate buffer/collector service is required.
 
 Pass `--with-skills` to also symlink the `manage-opencode-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage opencode tracing configuration.
 

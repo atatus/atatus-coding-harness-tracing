@@ -15,24 +15,24 @@ from __future__ import annotations
 import json
 import sys
 
-from core.config import get_value, load_config
 from core.setup import (
+    configure_harness,
     dry_run,
-    ensure_shared_runtime,
     info,
-    merge_harness_entry,
-    needs_content_logging_prompt,
-    prompt_backend,
-    prompt_content_logging,
-    prompt_project_name,
-    prompt_user_id,
     remove_harness_entry,
+    symlink_skills,
     unlink_skills,
     venv_bin,
-    write_config,
-    write_logging_config,
 )
-from tracing.gemini.constants import EVENTS, HARNESS_NAME, HOOK_NAME, HOOK_TIMEOUT_MS
+from tracing.gemini.constants import (
+    DISPLAY_NAME,
+    EVENTS,
+    HARNESS_BIN,
+    HARNESS_HOME,
+    HARNESS_NAME,
+    HOOK_NAME,
+    HOOK_TIMEOUT_MS,
+)
 
 # ---------------------------------------------------------------------------
 # JSON helpers
@@ -166,35 +166,22 @@ def _uninstall_hooks() -> None:
 # ---------------------------------------------------------------------------
 
 
-def install() -> None:
+def install(with_skills: bool = False) -> None:
     """Install Gemini tracing hooks and register in config.json."""
-    ensure_shared_runtime()
-
-    config = load_config()
-    existing_entry = get_value(config, f"harnesses.{HARNESS_NAME}")
-
-    if not existing_entry or not isinstance(existing_entry, dict) or "target" not in existing_entry:
-        existing_harnesses = config.get("harnesses") if config else None
-        target, credentials = prompt_backend(existing_harnesses)
-        project_name = prompt_project_name()
-        user_id = prompt_user_id()
-        if not dry_run():
-            write_config(target, credentials, HARNESS_NAME, project_name, user_id=user_id)
-        else:
-            info("would write config.json with backend credentials")
-    else:
-        project_name = prompt_project_name(existing_entry.get("project_name") or "")
-        merge_harness_entry(HARNESS_NAME, project_name)
-
-    # Logging settings are global. Prompt on a fresh install, or once more when
-    # the stored block predates LOG_CONFIG_VERSION (see needs_content_logging_prompt).
-    if needs_content_logging_prompt(config):
-        logging_block = prompt_content_logging()
-        write_logging_config(logging_block)
-    else:
-        info("Using existing logging settings from config.json")
+    setup = configure_harness(
+        HARNESS_NAME,
+        display_name=DISPLAY_NAME,
+        home_subdir=HARNESS_HOME,
+        bin_name=HARNESS_BIN,
+    )
+    if setup is None:
+        info("Aborted.")
+        return
 
     _install_hooks()
+
+    if with_skills:
+        symlink_skills(HARNESS_NAME)
 
     info("Gemini tracing installed")
 
@@ -216,13 +203,14 @@ def uninstall() -> None:
 def main() -> None:
     """Dispatch install / uninstall from the command line."""
     if len(sys.argv) < 2 or sys.argv[1] not in ("install", "uninstall"):
-        print(f"usage: {sys.argv[0]} {{install|uninstall}}", file=sys.stderr)
+        print(f"usage: {sys.argv[0]} {{install|uninstall}} [--with-skills]", file=sys.stderr)
         sys.exit(1)
 
     action = sys.argv[1]
+    flags = set(sys.argv[2:])
 
     if action == "install":
-        install()
+        install(with_skills="--with-skills" in flags)
     else:
         uninstall()
 

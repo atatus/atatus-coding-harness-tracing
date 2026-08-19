@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+import core.setup as _setup
 import tracing.antigravity.constants as _ac
 import tracing.antigravity.install as _install
 
@@ -26,6 +27,17 @@ ATATUS_BACKEND = (
     "atatus",
     {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
 )
+
+
+@pytest.fixture(autouse=True)
+def _always_reconfigure(monkeypatch):
+    """Take the reconfigure branch of configure_harness.
+
+    These tests predate the "use this existing configuration?" gate and assert
+    on what the prompts do with a pre-seeded config, so they need the prompts to
+    actually run. The gate itself is covered in tests/core/test_configure_harness.py.
+    """
+    monkeypatch.setattr(_setup, "_reuse_existing", lambda *a, **k: False)
 
 
 # ---------------------------------------------------------------------------
@@ -52,18 +64,18 @@ def _mock_prompts(monkeypatch, backend=None):
         backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
-        _install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: backend,
+        lambda existing_harnesses=None, current=None: backend,
     )
-    monkeypatch.setattr(_install, "prompt_project_name", lambda default: default)
-    monkeypatch.setattr(_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default: default)
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        _install,
+        _setup,
         "prompt_content_logging",
         lambda: {"prompts": True, "tool_details": True, "tool_content": True},
     )
-    monkeypatch.setattr(_install, "write_logging_config", lambda block, config_path=None: None)
+    monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
     monkeypatch.setattr("sys.stdout", _fake_stdout())
 
 

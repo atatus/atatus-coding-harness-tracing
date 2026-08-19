@@ -3,7 +3,7 @@
 Automatic OpenInference tracing for the Claude Code CLI and the Claude Agent SDK. Spans are exported to [Atatus](https://atatus.com).
 
 ## Setup
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `~/.claude/settings.json`.
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `~/.claude/settings.json`.
 
 Pass `--with-skills` to also symlink the `manage-claude-code-tracing` skill into the current directory's `.agents/skills/` so Claude can help you manage the configuration interactively.
 

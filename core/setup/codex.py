@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""Atatus Codex Tracing Plugin - Interactive Setup.
+"""Atatus Codex Tracing - Interactive Setup.
 
-Writes config.json, ~/.codex/atatus-env.sh, and ~/.codex/config.toml.
+Entry point for ``atatus-setup-codex``. The heavy lifting lives in
+``tracing/codex/install.py``; this module is a thin shim for the
+``atatus-setup-codex`` console script.
 
-The ``atatus-setup-codex`` entry point calls ``main()`` here, which runs the
-legacy interactive wizard.  The new ``tracing/codex/install.py`` module
-provides the decomposed ``install()`` / ``uninstall()`` API used by the
-shell router.  ``install()`` and ``uninstall()`` below delegate to it.
+It used to carry a second, complete wizard of its own, with its own
+existing-config branch and its own ``~/.codex/atatus-env.sh`` contents. That
+meant codex had two install paths that asked different questions and wrote
+different env files depending on whether you came via the shell router or the
+console script. Delegating is what keeps there being one.
 """
 
-import os
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-from core.common import DEFAULT_OTLP_ENDPOINT
-from core.config import get_value, load_config, save_config, set_value
-from core.setup import err, info, print_color, prompt_backend, prompt_project_name, prompt_user_id, write_config
+import sys
+
 from tracing.codex import install as _install_mod
-from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 
 
 def install(with_skills: bool = False) -> None:
@@ -30,29 +29,6 @@ def uninstall() -> None:
     _install_mod.uninstall()
 
 
-def _write_env_file(env_path: Path, target: str, credentials: dict, project_name: str = "codex") -> None:
-    """Write ~/.codex/atatus-env.sh with export statements."""
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-
-    lines = ["# Atatus Codex tracing environment (auto-generated)"]
-    lines.append("export ATATUS_TRACE_ENABLED=true")
-
-    lines.append(f'export ATATUS_OTLP_ENDPOINT="{credentials.get("endpoint", DEFAULT_OTLP_ENDPOINT)}"')
-    api_key = credentials.get("api_key", "")
-    if api_key:
-        lines.append(f'export ATATUS_API_KEY="{api_key}"')
-
-    lines.append(f'export ATATUS_PROJECT_NAME="{project_name}"')
-
-    env_path.write_text("\n".join(lines) + "\n")
-
-    # chmod 600
-    try:
-        os.chmod(env_path, 0o600)
-    except OSError:
-        pass  # Windows doesn't support chmod the same way
-
-
 def main() -> None:
     """Entry point for atatus-setup-codex."""
     try:
@@ -63,79 +39,8 @@ def main() -> None:
 
 
 def _run() -> None:
-    codex_config_dir = get_codex_home()
-    env_file = codex_config_dir / ENV_FILE_NAME
-
-    print("")
-    print_color("▸ ATATUS Codex Tracing Setup", "green")
-    print("")
-
-    # Check for existing config
-    config = load_config()
-    existing_entry = get_value(config, "harnesses.codex")
-
-    # Project name — offer the stored one on re-install, require a fresh one otherwise
-    project_name = prompt_project_name((existing_entry or {}).get("project_name") or "")
-
-    if existing_entry:
-        target = existing_entry.get("target", "")
-        print_color(
-            f"Existing config found: target={target} in ~/.atatus/harness/config.json",
-            "yellow",
-        )
-        print("Skipping credential prompts — updating codex harness entry.")
-        print("")
-
-        # Update codex harness entry
-        set_value(config, "harnesses.codex.project_name", project_name)
-        save_config(config)
-        info("Updated codex harness in existing config")
-
-        # Write env file from existing config
-        endpoint = get_value(config, "harnesses.codex.endpoint") or ""
-        api_key = get_value(config, "harnesses.codex.api_key") or ""
-        if target != "atatus":
-            err(f"Unknown target in config: {target}")
-            sys.exit(1)
-        creds = {"endpoint": endpoint or DEFAULT_OTLP_ENDPOINT, "api_key": api_key}
-
-        _write_env_file(env_file, target, creds, project_name)
-        info(f"Wrote credentials to {env_file}")
-    else:
-        # No existing config — prompt for backend
-        existing_harnesses = config.get("harnesses", {}) if config else {}
-        target, credentials = prompt_backend(existing_harnesses=existing_harnesses)
-        info(f"Target: Atatus at {credentials['endpoint']}")
-
-        # Write config.json
-        write_config(target, credentials, "codex", project_name)
-        info("Wrote config to ~/.atatus/harness/config.json")
-
-        # Write env file
-        _write_env_file(env_file, target, credentials, project_name)
-        info(f"Wrote credentials to {env_file}")
-
-    # Optional: User ID
-    user_id = prompt_user_id()
-    if user_id:
-        config = load_config()
-        set_value(config, "user_id", user_id)
-        save_config(config)
-        info(f"User ID set: {user_id}")
-
-    # Summary
-    print("")
-    info("Setup complete!")
-    print("")
-    print("  Configuration:")
-    print("    Config file:  ~/.atatus/harness/config.json")
-    print(f"    Env file:     {env_file}")
-    print("")
-    print("  Next steps:")
-    print("    Run codex — traces are sent straight to Atatus from the hooks.")
-    print("")
-    print("  To verify setup: ATATUS_DRY_RUN=true codex")
-    print("")
+    """Delegate to the install module in tracing/codex/."""
+    _install_mod.install(with_skills=False)
 
 
 if __name__ == "__main__":

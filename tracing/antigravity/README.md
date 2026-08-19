@@ -6,7 +6,7 @@ This harness is **transcript-driven**: Antigravity hooks are control-plane trigg
 
 ## Setup
 
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers hooks under the top-level `atatus-tracing` key in `~/.gemini/config/hooks.json` (Antigravity's global hooks file — distinct from Gemini's `~/.gemini/settings.json`).
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and registers hooks under the top-level `atatus-tracing` key in `~/.gemini/config/hooks.json` (Antigravity's global hooks file — distinct from Gemini's `~/.gemini/settings.json`).
 
 Pass `--with-skills` to also symlink the `manage-antigravity-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage Antigravity tracing configuration.
 

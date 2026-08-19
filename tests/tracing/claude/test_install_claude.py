@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import core.setup as _setup
+
 
 @pytest.fixture()
 def fake_home(tmp_path, monkeypatch):
@@ -70,24 +72,33 @@ ATATUS_BACKEND = (
 )
 
 
-def _mock_prompts(monkeypatch, backend=None):
-    """Patch prompt functions on the install module (where they're bound after import)."""
-    import tracing.claude_code.install as claude_install
+@pytest.fixture(autouse=True)
+def _always_reconfigure(monkeypatch):
+    """Take the reconfigure branch of configure_harness.
 
+    These tests predate the "use this existing configuration?" gate and assert
+    on what the prompts do with a pre-seeded config, so they need the prompts to
+    actually run. The gate itself is covered in tests/core/test_configure_harness.py.
+    """
+    monkeypatch.setattr(_setup, "_reuse_existing", lambda *a, **k: False)
+
+
+def _mock_prompts(monkeypatch, backend=None):
+    """Patch the prompts on core.setup, which is where configure_harness calls them."""
     if backend is None:
         backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
-        claude_install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: backend,
+        lambda existing_harnesses=None, current=None: backend,
     )
-    monkeypatch.setattr(claude_install, "prompt_project_name", lambda default="": default or "claude-code")
-    monkeypatch.setattr(claude_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "claude-code")
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        claude_install, "prompt_content_logging", lambda: {"prompts": True, "tool_details": True, "tool_content": True}
+        _setup, "prompt_content_logging", lambda: {"prompts": True, "tool_details": True, "tool_content": True}
     )
-    monkeypatch.setattr(claude_install, "write_logging_config", lambda block, config_path=None: None)
+    monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
     monkeypatch.setattr("sys.stdout", _fake_stdout())
 
 
@@ -197,7 +208,15 @@ class TestExistingEntry:
         config_file.write_text(json.dumps({"harnesses": {"claude-code": original_entry}}, indent=2))
 
         # Mock prompt_project_name to return a new name
-        monkeypatch.setattr(claude_install, "prompt_project_name", lambda default="": "new-project-name")
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": "new-project-name")
+        # These two files stub prompt_backend wholesale in _mock_prompts, so
+        # re-stub it with what a blank licence key and endpoint resolve to:
+        # the stored credentials, unchanged.
+        monkeypatch.setattr(
+            _setup,
+            "prompt_backend",
+            lambda existing_harnesses=None, current=None: (current["target"], dict(current)),
+        )
 
         claude_install.install(with_skills=False)
 
@@ -233,18 +252,18 @@ class TestCopyFrom:
         # Mock prompt_backend to return atatus target with codex's credentials (simulating copy-from)
         copied_creds = {"endpoint": "https://otel-rx.atatus.com", "api_key": "codex-key"}
         monkeypatch.setattr(
-            claude_install,
+            _setup,
             "prompt_backend",
-            lambda existing_harnesses=None: ("atatus", copied_creds),
+            lambda existing_harnesses=None, current=None: ("atatus", copied_creds),
         )
-        monkeypatch.setattr(claude_install, "prompt_project_name", lambda default="": default or "claude-code")
-        monkeypatch.setattr(claude_install, "prompt_user_id", lambda: "")
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "claude-code")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
         monkeypatch.setattr(
-            claude_install,
+            _setup,
             "prompt_content_logging",
             lambda: {"prompts": True, "tool_details": True, "tool_content": True},
         )
-        monkeypatch.setattr(claude_install, "write_logging_config", lambda block, config_path=None: None)
+        monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         claude_install.install(with_skills=False)

@@ -4,7 +4,7 @@ Automatic OpenInference tracing for the Kiro CLI. Spans are exported to [Atatus]
 
 ## Setup
 
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers hooks in a Kiro agent config under `~/.kiro/agents/<agent>.json` (default agent: `atatus-traced`). You can optionally have the installer run `kiro-cli agent set-default <agent>` so the traced agent is used by default.
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and registers hooks in a Kiro agent config under `~/.kiro/agents/<agent>.json` (default agent: `atatus-traced`). You can optionally have the installer run `kiro-cli agent set-default <agent>` so the traced agent is used by default.
 
 Pass `--with-skills` to also symlink the `manage-kiro-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage Kiro tracing configuration.
 

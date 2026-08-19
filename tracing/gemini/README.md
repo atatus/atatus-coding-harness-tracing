@@ -3,7 +3,7 @@
 Automatic OpenInference tracing for Gemini CLI sessions. Spans are exported to [Atatus](https://atatus.com).
 
 ## Setup
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `~/.gemini/settings.json`.
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and registers the hooks in `~/.gemini/settings.json`.
 
 Pass `--with-skills` to also symlink the `manage-gemini-tracing` skill into the current directory's `.agents/skills/` so coding agents in this workspace can help manage Gemini tracing configuration.
 

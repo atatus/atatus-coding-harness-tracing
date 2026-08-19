@@ -6,7 +6,7 @@ Devin's hook payloads are thin (no session ID, no token or model data), so the r
 
 ## Setup
 
-The installer prompts for your Atatus license key and project name, writes credentials to `~/.atatus/harness/config.json`, and registers `Stop` and `SessionEnd` command hooks under the top-level `"hooks"` key in Devin's user config — `~/.config/devin/config.json` on macOS and Linux, `%APPDATA%\devin\config.json` on Windows.
+The installer prompts for a project name and your Atatus license key (and offers to keep what is already there when you re-run it), writes credentials to `~/.atatus/harness/config.json`, and registers `Stop` and `SessionEnd` command hooks under the top-level `"hooks"` key in Devin's user config — `~/.config/devin/config.json` on macOS and Linux, `%APPDATA%\devin\config.json` on Windows.
 
 Devin allows comments in its config files. The installer reads them, but writes the file back as plain JSON, so comments in a config it has to modify are not preserved. A config it cannot parse is left untouched and the install aborts with an error rather than overwriting your settings.
 

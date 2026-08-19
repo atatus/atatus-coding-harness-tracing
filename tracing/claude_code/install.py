@@ -5,25 +5,15 @@ from __future__ import annotations
 import json
 import sys
 
-from core.config import load_config
 from core.setup import (
+    configure_harness,
     dry_run,
-    ensure_harness_installed,
-    ensure_shared_runtime,
     harness_dir,
     info,
-    merge_harness_entry,
-    needs_content_logging_prompt,
-    prompt_backend,
-    prompt_content_logging,
-    prompt_project_name,
-    prompt_user_id,
     remove_harness_entry,
     symlink_skills,
     unlink_skills,
     venv_bin,
-    write_config,
-    write_logging_config,
 )
 from tracing.claude_code.constants import (
     ATATUS_ENV_KEYS,
@@ -38,45 +28,17 @@ from tracing.claude_code.constants import (
 
 def install(with_skills: bool = False) -> None:
     """Install Claude Code tracing: configure backend, register hooks, optionally symlink skills."""
-    if not ensure_harness_installed(DISPLAY_NAME, home_subdir=HARNESS_HOME, bin_name=HARNESS_BIN):
+    setup = configure_harness(
+        HARNESS_NAME,
+        display_name=DISPLAY_NAME,
+        home_subdir=HARNESS_HOME,
+        bin_name=HARNESS_BIN,
+    )
+    if setup is None:
         info("Aborted.")
         return
 
-    ensure_shared_runtime()
-
-    config = load_config()
-    existing_entry = (config.get("harnesses") or {}).get(HARNESS_NAME)
-
-    if existing_entry:
-        # Already configured — just let user update project_name.
-        project_name = prompt_project_name(existing_entry.get("project_name") or "")
-        merge_harness_entry(HARNESS_NAME, project_name)
-    else:
-        # New install. Pass existing harnesses so prompt_backend can offer copy-from.
-        existing_harnesses = config.get("harnesses", {})
-        target, credentials = prompt_backend(existing_harnesses=existing_harnesses)
-        project_name = prompt_project_name()
-        user_id = prompt_user_id()
-        if not dry_run():
-            write_config(
-                target=target,
-                credentials=credentials,
-                harness_name=HARNESS_NAME,
-                project_name=project_name,
-                user_id=user_id,
-            )
-        else:
-            info("would write config.json with harness entry")
-
-    # Logging settings are global. Prompt on a fresh install, or once more when
-    # the stored block predates LOG_CONFIG_VERSION (see needs_content_logging_prompt).
-    if needs_content_logging_prompt(config):
-        logging_block = prompt_content_logging()
-        write_logging_config(logging_block)
-    else:
-        info("Using existing logging settings from config.json")
-
-    _register_claude_hooks(project_name)
+    _register_claude_hooks(setup.project_name)
     if with_skills:
         symlink_skills(HARNESS_NAME)
     info(f"Claude Code tracing installed ({SETTINGS_FILE})")
@@ -130,10 +92,11 @@ def _register_claude_hooks(project_name: str = HARNESS_NAME) -> None:
     if not has_plugin:
         plugins.append({"type": "local", "path": plugin_dir})
 
-    # Set env vars (only if absent)
+    # The project name is assigned, not defaulted: a reconfigure exists to change
+    # it, and this file exports the value into every session, so leaving a stale
+    # one here would silently outrank the answer the user just gave.
     env_block = settings.setdefault("env", {})
-    if not env_block.get("ATATUS_PROJECT_NAME"):
-        env_block["ATATUS_PROJECT_NAME"] = project_name
+    env_block["ATATUS_PROJECT_NAME"] = project_name
     env_block.setdefault("ATATUS_TRACE_ENABLED", "true")
 
     # Register hooks

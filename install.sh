@@ -320,8 +320,16 @@ Flags:
   --json                With `status`: emit machine-readable JSON. Exit code is
                         0 wired up, 1 nothing configured, 2 hooks missing.
   --non-interactive, -y Ask nothing; read every value from the environment or
-                        the file named by ATATUS_ENV_FILE. A missing required
-                        value is an error rather than a prompt.
+                        the file named by ATATUS_ENV_FILE. On a FRESH install a
+                        missing required value is an error rather than a prompt;
+                        over an already-configured harness the stored values are
+                        reused instead.
+
+Re-install:
+    Over an already-configured harness the installer shows what is stored and
+    asks "Use this existing configuration? [Y/n]". Enter keeps it and just
+    re-registers the hooks; 'n' re-asks each question with the stored value as
+    the default, which is how a key is rotated or a project renamed.
 
 Non-interactive install:
     Put the licence key in a file so it never reaches argv or shell history:
@@ -331,6 +339,10 @@ Non-interactive install:
 
     Content capture is OFF unless ATATUS_LOG_PROMPTS / ATATUS_LOG_TOOL_DETAILS /
     ATATUS_LOG_TOOL_CONTENT say otherwise — nobody is watching to consent.
+
+    Over an already-configured harness only ATATUS_ENV_FILE values override what
+    is stored; ambient ATATUS_* vars are ignored, since every installed harness
+    exports them into the sessions it spawns.
 
 EOF
 }

@@ -332,7 +332,12 @@ echo     --json          With status: emit machine-readable JSON. Exit code is
 echo                     0 wired up, 1 nothing configured, 2 hooks missing.
 echo     --non-interactive, -y  Ask nothing; read values from the environment
 echo                     or the file named by ATATUS_ENV_FILE. Missing required
-echo                     values are an error.
+echo                     values are an error on a fresh install; over an
+echo                     already-configured harness stored values are reused.
+echo.
+echo   Re-installing an already-configured harness shows what is stored and asks
+echo   "Use this existing configuration? [Y/n]". Enter keeps it and re-registers
+echo   the hooks; n re-asks each question with the stored value as the default.
 echo.
 echo   Non-interactive install reads the environment, plus a dotenv file named
 echo   with ATATUS_ENV_FILE — no automatic .env search. ATATUS_API_KEY is

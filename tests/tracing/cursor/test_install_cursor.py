@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import core.setup as _setup
 import tracing.cursor.constants
 import tracing.cursor.install
 
@@ -82,26 +83,35 @@ ATATUS_BACKEND = (
 )
 
 
-def _mock_prompts(monkeypatch, backend=None):
-    """Patch prompt functions on the install module (where they're bound after import)."""
-    cursor_install = _load_cursor_module("install")
+@pytest.fixture(autouse=True)
+def _always_reconfigure(monkeypatch):
+    """Take the reconfigure branch of configure_harness.
 
+    These tests predate the "use this existing configuration?" gate and assert
+    on what the prompts do with a pre-seeded config, so they need the prompts to
+    actually run. The gate itself is covered in tests/core/test_configure_harness.py.
+    """
+    monkeypatch.setattr(_setup, "_reuse_existing", lambda *a, **k: False)
+
+
+def _mock_prompts(monkeypatch, backend=None):
+    """Patch the prompts on core.setup, which is where configure_harness calls them."""
     if backend is None:
         backend = ATATUS_BACKEND
 
     monkeypatch.setattr(
-        cursor_install,
+        _setup,
         "prompt_backend",
-        lambda existing_harnesses=None: backend,
+        lambda existing_harnesses=None, current=None: backend,
     )
-    monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": default or "cursor")
-    monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
+    monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "cursor")
+    monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
     monkeypatch.setattr(
-        cursor_install,
+        _setup,
         "prompt_content_logging",
         lambda: {"prompts": True, "tool_details": True, "tool_content": True},
     )
-    monkeypatch.setattr(cursor_install, "write_logging_config", lambda block, config_path=None: None)
+    monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
     monkeypatch.setattr("sys.stdout", _fake_stdout())
 
 
@@ -197,19 +207,19 @@ class TestCopyFrom:
         # Track what prompt_backend receives
         received_harnesses = {}
 
-        def fake_prompt_backend(existing_harnesses=None):
+        def fake_prompt_backend(existing_harnesses=None, current=None):
             received_harnesses["value"] = existing_harnesses
             return ATATUS_BACKEND
 
-        monkeypatch.setattr(cursor_install, "prompt_backend", fake_prompt_backend)
-        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": default or "cursor")
-        monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
+        monkeypatch.setattr(_setup, "prompt_backend", fake_prompt_backend)
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "cursor")
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
         monkeypatch.setattr(
-            cursor_install,
+            _setup,
             "prompt_content_logging",
             lambda: {"prompts": True, "tool_details": True, "tool_content": True},
         )
-        monkeypatch.setattr(cursor_install, "write_logging_config", lambda block, config_path=None: None)
+        monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         cursor_install.install(with_skills=False)
@@ -249,19 +259,27 @@ class TestExistingEntry:
         # prompt_backend should NOT be called
         prompt_backend_called = {"called": False}
 
-        def fail_prompt_backend(existing_harnesses=None):
+        def fail_prompt_backend(existing_harnesses=None, current=None):
             prompt_backend_called["called"] = True
             return ATATUS_BACKEND
 
-        monkeypatch.setattr(cursor_install, "prompt_backend", fail_prompt_backend)
-        monkeypatch.setattr(cursor_install, "prompt_project_name", lambda default="": "my-cursor")
-        monkeypatch.setattr(cursor_install, "prompt_user_id", lambda: "")
+        monkeypatch.setattr(_setup, "prompt_backend", fail_prompt_backend)
+        monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": "my-cursor")
+        # These two files stub prompt_backend wholesale in _mock_prompts, so
+        # re-stub it with what a blank licence key and endpoint resolve to:
+        # the stored credentials, unchanged.
         monkeypatch.setattr(
-            cursor_install,
+            _setup,
+            "prompt_backend",
+            lambda existing_harnesses=None, current=None: (current["target"], dict(current)),
+        )
+        monkeypatch.setattr(_setup, "prompt_user_id", lambda default="": "")
+        monkeypatch.setattr(
+            _setup,
             "prompt_content_logging",
             lambda: {"prompts": True, "tool_details": True, "tool_content": True},
         )
-        monkeypatch.setattr(cursor_install, "write_logging_config", lambda block, config_path=None: None)
+        monkeypatch.setattr(_setup, "write_logging_config", lambda block, config_path=None: None)
         monkeypatch.setattr("sys.stdout", _fake_stdout())
 
         cursor_install.install(with_skills=False)

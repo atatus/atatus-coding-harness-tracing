@@ -67,10 +67,13 @@ Then proceed to [Configure Settings](#configure-settings).
 
 ### Ask the user for:
 
-1. **Credentials** (only if no existing config):
+0. **Whether to reuse an existing config**: if `harnesses.cursor` already has a
+   `target`, show what is stored (license key as its last 4 characters only) and ask
+   whether to keep it. If yes, change nothing and just re-register the hooks.
+1. **Credentials** (only if reconfiguring, or if no existing config):
    - Atatus license key, and optionally a custom OTLP endpoint
      (default: `https://otel-rx.atatus.com`)
-2. **Project name** (optional): defaults to `"cursor"`, stored under `harnesses.cursor.project_name`
+2. **Project name**: defaults to `"cursor"` on a fresh install, and to the stored name when one exists. Stored under `harnesses.cursor.project_name`. This becomes the OTLP `service.name`, so everyone who accepts the default shares one project — suggest a distinct name when that is not what they want
 3. **User ID** (optional): Set `ATATUS_USER_ID` env var to identify spans by user (useful for teams)
 
 ### Write the config

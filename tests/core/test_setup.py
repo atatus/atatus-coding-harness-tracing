@@ -449,49 +449,6 @@ class TestClaudeSetup:
         assert result["env"]["EXISTING_VAR"] == "keep_me"
         assert result["env"]["ATATUS_OTLP_ENDPOINT"] == "https://otel-rx.atatus.com"
 
-    def test_check_existing_config_no_overwrite(self, tmp_path):
-        """Declining overwrite returns False."""
-        settings_path = tmp_path / "settings.json"
-        settings_path.write_text(json.dumps({"env": {"ATATUS_OTLP_ENDPOINT": "https://otel-rx.atatus.com"}}))
-
-        from core.setup.claude import _check_existing_configuration
-
-        with patch("builtins.input", return_value="n"):
-            result = _check_existing_configuration(settings_path)
-        assert result is False
-
-    def test_check_existing_config_overwrite(self, tmp_path):
-        """Accepting overwrite returns True."""
-        settings_path = tmp_path / "settings.json"
-        settings_path.write_text(json.dumps({"env": {"ATATUS_OTLP_ENDPOINT": "https://otel-rx.atatus.com"}}))
-
-        from core.setup.claude import _check_existing_configuration
-
-        with patch("builtins.input", return_value="y"):
-            result = _check_existing_configuration(settings_path)
-        assert result is True
-
-    def test_check_existing_config_atatus_no_overwrite(self, tmp_path):
-        """Declining overwrite for Atatus config returns False."""
-        settings_path = tmp_path / "settings.json"
-        settings_path.write_text(json.dumps({"env": {"ATATUS_API_KEY": "some-key"}}))
-
-        from core.setup.claude import _check_existing_configuration
-
-        with patch("builtins.input", return_value="N"):
-            result = _check_existing_configuration(settings_path)
-        assert result is False
-
-    def test_check_no_existing_config(self, tmp_path):
-        """No existing config returns True (proceed)."""
-        settings_path = tmp_path / "settings.json"
-        settings_path.write_text("{}")
-
-        from core.setup.claude import _check_existing_configuration
-
-        result = _check_existing_configuration(settings_path)
-        assert result is True
-
     def test_load_settings_missing_file(self, tmp_path):
         """_load_settings returns {} for missing file."""
         from core.setup.claude import _load_settings
@@ -570,10 +527,10 @@ class TestClaudeSetup:
         """Full Claude _run() flow for Atatus backend writes settings.json and config.json."""
         config_path, settings_file = self._setup_install_env(tmp_path, monkeypatch)
 
-        # Inputs: endpoint=default, project_name (REQUIRED on a fresh install --
-        # a blank is rejected), user_id="", then three content-logging
-        # prompts (defaults: Y, N, N). The licence key comes from getpass.
-        inputs = iter(["", "my-project", "", "", "", ""])
+        # Inputs, in the shared order: project name, endpoint (blank = default),
+        # user_id="", then three content-logging prompts (defaults: Y, N, N).
+        # The licence key comes from getpass.
+        inputs = iter(["my-project", "", "", "", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
 
@@ -595,151 +552,6 @@ class TestClaudeSetup:
 # ---------------------------------------------------------------------------
 # Codex setup tests (core.setup.codex)
 # ---------------------------------------------------------------------------
-
-
-class TestCodexWriteEnvFile:
-    """Tests for _write_env_file()."""
-
-    def test_atatus_env_file(self, tmp_path):
-        """Env file for Atatus backend has correct exports."""
-        env_path = tmp_path / ".codex" / "atatus-env.sh"
-        from core.setup.codex import _write_env_file
-
-        _write_env_file(env_path, "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
-
-        content = env_path.read_text()
-        assert "export ATATUS_TRACE_ENABLED=true" in content
-        assert 'export ATATUS_OTLP_ENDPOINT="https://otel-rx.atatus.com"' in content
-        assert "ATATUS_API_KEY" not in content  # empty api_key should be skipped
-        assert 'export ATATUS_PROJECT_NAME="codex"' in content
-
-    def test_atatus_env_file_with_api_key(self, tmp_path):
-        """Env file for Atatus with API key includes it."""
-        env_path = tmp_path / ".codex" / "atatus-env.sh"
-        from core.setup.codex import _write_env_file
-
-        _write_env_file(env_path, "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": "my-key"})
-
-        content = env_path.read_text()
-        assert 'export ATATUS_API_KEY="my-key"' in content
-
-    def test_env_file_creates_parent_dir(self, tmp_path):
-        """_write_env_file creates parent directories."""
-        env_path = tmp_path / "deep" / "nested" / "atatus-env.sh"
-        from core.setup.codex import _write_env_file
-
-        _write_env_file(env_path, "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
-        assert env_path.exists()
-
-    def test_env_file_permissions(self, tmp_path):
-        """Env file should be chmod 600 on Unix."""
-        if os.name == "nt":
-            pytest.skip("chmod test only on Unix")
-        env_path = tmp_path / ".codex" / "atatus-env.sh"
-        from core.setup.codex import _write_env_file
-
-        _write_env_file(env_path, "atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
-        mode = oct(env_path.stat().st_mode & 0o777)
-        assert mode == "0o600"
-
-
-class TestCodexRunFlow:
-    """Integration tests for codex _run() flow."""
-
-    def test_run_fresh_atatus(self, tmp_path, monkeypatch):
-        """Codex _run() with no existing config prompts and writes all files."""
-        config_path = str(tmp_path / "config.json")
-        codex_dir = tmp_path / ".codex"
-
-        import core.config
-
-        monkeypatch.setattr(core.config, "CONFIG_FILE", config_path)
-
-        # Patch Path.home() to use tmp_path
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Inputs: project_name (required on fresh install), endpoint=default,
-        # user_id="" (key via getpass)
-        inputs = iter(["my-project", "", ""])
-        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-        monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
-        monkeypatch.setattr(
-            "sys.stdout",
-            type(
-                "FakeOut",
-                (),
-                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
-            )(),
-        )
-
-        from core.setup.codex import _run
-
-        _run()
-
-        # config.json written
-        config = json.loads(Path(config_path).read_text())
-        assert config["harnesses"]["codex"]["target"] == "atatus"
-        assert config["harnesses"]["codex"]["project_name"] == "my-project"
-
-        # atatus-env.sh written
-        env_file = codex_dir / "atatus-env.sh"
-        assert env_file.exists()
-        env_content = env_file.read_text()
-        assert "export ATATUS_TRACE_ENABLED=true" in env_content
-        assert 'export ATATUS_OTLP_ENDPOINT="https://otel-rx.atatus.com"' in env_content
-
-        # The wizard no longer touches ~/.codex/config.toml — spans are sent
-        # straight to Atatus from the hooks, so there is no local collector to
-        # point Codex's own OTLP exporter at.
-        assert not (codex_dir / "config.toml").exists()
-
-    def test_run_existing_config_skips_prompts(self, tmp_path, monkeypatch):
-        """Codex _run() with existing config skips backend prompts."""
-        config_path = str(tmp_path / "config.json")
-        codex_dir = tmp_path / ".codex"
-        existing = {
-            "harnesses": {
-                "codex": {
-                    "project_name": "codex",
-                    "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
-                    "api_key": "",
-                    "collector": {"host": "127.0.0.1", "port": 4318},
-                }
-            }
-        }
-        Path(config_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w") as f:
-            json.dump(existing, f, indent=2)
-
-        import core.config
-
-        monkeypatch.setattr(core.config, "CONFIG_FILE", config_path)
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Inputs: project_name=default, user_id="" (no backend prompts)
-        inputs = iter(["", ""])
-        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-        monkeypatch.setattr(
-            "sys.stdout",
-            type(
-                "FakeOut",
-                (),
-                {"isatty": lambda self: False, "write": lambda self, s: None, "flush": lambda self: None},
-            )(),
-        )
-
-        from core.setup.codex import _run
-
-        _run()
-
-        config = json.loads(Path(config_path).read_text())
-        assert config["harnesses"]["codex"]["project_name"] == "codex"
-        assert config["harnesses"]["codex"]["target"] == "atatus"
-
-        # env file is still written; config.toml is not touched
-        assert (codex_dir / "atatus-env.sh").exists()
-        assert not (codex_dir / "config.toml").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -850,9 +662,9 @@ class TestCursorSetup:
         """Cursor _run() with no existing config prompts and writes config.json."""
         config_path = self._patch_cursor_install(tmp_path, monkeypatch)
 
-        # Inputs: endpoint=default, project_name (required on fresh install),
+        # Inputs, in the shared order: project name, endpoint (blank = default),
         # user_id="", then three content-logging prompts. Key via getpass.
-        inputs = iter(["", "my-project", "", "", "", ""])
+        inputs = iter(["my-project", "", "", "", "", ""])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         monkeypatch.setattr("core.setup.getpass", lambda prompt="": "lic-key")
 
