@@ -385,8 +385,8 @@ def prompt_content_logging() -> dict:
     `LOG_FLAG_DEFAULTS` has on. That asymmetry is the point: a `[Y/n]` default is
     a human declining to change an answer they were shown, which is consent; the
     same default with nobody watching is capture of prompts and command output
-    that no one agreed to. Reaching it needs no malice — `update` forces
-    non-interactive mode whenever there is no terminal, so a cron or CI run
+    that no one agreed to. Reaching it needs no malice — `update` always runs
+    non-interactively, so a cron or CI run
     against a config with no `logging:` block would switch capture on silently.
     Each category needs its `ATATUS_LOG_*` variable to say so explicitly.
     """

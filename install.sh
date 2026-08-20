@@ -398,11 +398,15 @@ main() {
                 local harnesses
                 harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
                 if [[ -n "$harnesses" ]]; then
-                    while IFS= read -r key; do
+                    # fd 3, not stdin: run_harness_py reads the user's TTY via
+                    # /dev/stdin, which inside a `done <<< "$list"` loop is the
+                    # list itself — the harness would eat the remaining names as
+                    # prompt answers and the loop would end after the first one.
+                    while IFS= read -r key <&3; do
                         harness_dir "$key" >/dev/null || { warn "Unknown harness: ${key} (skipping)"; continue; }
                         info "Uninstalling ${key} tracing..."
                         run_harness_py "$key" "$vp" uninstall || warn "${key} uninstall failed (continuing)"
-                    done <<< "$harnesses"
+                    done 3<<< "$harnesses"
                 fi
                 "$vp" -m core.setup.wipe
             fi
@@ -414,11 +418,9 @@ main() {
         update)
             header "Updating atatus-coding-harness-tracing"
             # Re-registering runs each harness's installer, which prompts for the
-            # project name. With no terminal to answer on that used to die with an
-            # EOFError partway through, leaving some harnesses re-registered and
-            # others not. Fall back to stored values there — and only there, so an
-            # interactive update keeps every prompt it has today.
-            [[ -n "$_tty_in" ]] || export ATATUS_NONINTERACTIVE=1
+            # project name. An update re-registers what is already configured, so
+            # it always reuses the stored values instead of re-asking per harness.
+            export ATATUS_NONINTERACTIVE=1
             # A wheel install has no repo to pull and no newer wheel to hand us.
             # Silently converting it to a network install would change how it was
             # installed behind the user's back, so refuse and say who can update.
@@ -441,7 +443,9 @@ main() {
             local harnesses
             harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
             if [[ -n "$harnesses" ]]; then
-                while IFS= read -r key; do
+                # fd 3: see the uninstall loop — a plain `<<<` here feeds the
+                # harness list to the first harness's prompts as stdin.
+                while IFS= read -r key <&3; do
                     harness_dir "$key" >/dev/null || { warn "Unknown harness: ${key} (skipping)"; continue; }
                     # Keep going, as the uninstall loop does: one harness whose
                     # registration fails should not abandon the rest half-updated.
