@@ -73,9 +73,11 @@ call :bootstrap_repo
 if %ERRORLEVEL% neq 0 exit /b 1
 call :setup_venv
 if %ERRORLEVEL% neq 0 exit /b 1
-echo [atatus] Running %COMMAND% install...
+echo [atatus] Installing %COMMAND% tracing...
 call :run_harness_py "%COMMAND%" install "%WITH_SKILLS%"
-exit /b %ERRORLEVEL%
+if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
+echo [atatus] Setup complete!
+exit /b 0
 
 REM --- cmd_status ---
 :cmd_status
@@ -89,10 +91,9 @@ if not exist "%INSTALL_DIR%" ( echo [atatus] Not installed at %INSTALL_DIR% >&2 
 call :find_python
 if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
 REM Re-registering runs each harness's installer, which prompts for the project
-REM name. With no console to answer on that dies with an EOFError, so fall back
-REM to stored values there — and only there, so an interactive update keeps
-REM every prompt it has today. cmd has no -t test; ask Python instead.
-%FOUND_PYTHON% -c "import sys; sys.exit(0 if sys.stdin.isatty() else 1)" >nul 2>&1 || set "ATATUS_NONINTERACTIVE=1"
+REM name. An update re-registers what is already configured, so it always reuses
+REM the stored values instead of re-asking per harness. Matches install.sh.
+set "ATATUS_NONINTERACTIVE=1"
 REM A wheel install has no repo to pull and no newer wheel to hand us. Silently
 REM converting it to a network install would change how it was installed behind
 REM the user's back, so refuse and say who can update.
@@ -101,45 +102,41 @@ if not defined WHEEL_DIR if not exist "%INSTALL_DIR%\.git" if not exist "%INSTAL
     echo [atatus] Re-run the installer that created it, or pass --wheel-dir with a newer wheel. >&2
     exit /b 1
 )
-set "_UPDATE_NEED_VENV=0"
+REM Re-extract over the existing tree rather than rmdir + re-clone: the venv
+REM lives inside INSTALL_DIR, so deleting it took the venv (and every hook path
+REM pointing into it) with it. install.sh has always re-extracted in place.
 if defined WHEEL_DIR (
     echo [atatus] Updating from local wheels in %WHEEL_DIR%...
 ) else if exist "%INSTALL_DIR%\.git" (
     echo [atatus] Pulling latest changes...
     git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1
     if !ERRORLEVEL! neq 0 (
-        echo [atatus] Pull failed — re-cloning
-        rmdir /s /q "%INSTALL_DIR%" 2>nul
-        call :bootstrap_repo
+        echo [atatus] git pull failed — falling back to tarball re-extract
+        call :download_tarball
         if !ERRORLEVEL! neq 0 exit /b 1
-        set "_UPDATE_NEED_VENV=1"
     )
 ) else (
-    rmdir /s /q "%INSTALL_DIR%" 2>nul
-    call :bootstrap_repo
-    if !ERRORLEVEL! neq 0 exit /b 1
-    set "_UPDATE_NEED_VENV=1"
-)
-REM Re-create venv if it was wiped along with INSTALL_DIR
-if "!_UPDATE_NEED_VENV!"=="1" (
-    call :setup_venv
-    if !ERRORLEVEL! neq 0 exit /b 1
-) else if exist "%VENV_PIP%" (
-    echo [atatus] Reinstalling package...
-    call :pip_install_harness "-U"
-    REM Stop here on failure: migrating config and re-registering hooks against
-    REM the package that is still installed would report success for an update
-    REM that did not happen.
+    call :download_tarball
     if !ERRORLEVEL! neq 0 exit /b 1
 )
-if exist "%VENV_PYTHON%" (
-    for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
-        echo [atatus] Reinstalling %%H...
-        call :run_harness_py "%%H" install
-        if !ERRORLEVEL! neq 0 echo [atatus] %%H re-registration failed ^(continuing^) >&2
-    )
+if not exist "%VENV_PIP%" ( echo [atatus] Venv not found - run install first >&2 & exit /b 1 )
+echo [atatus] Reinstalling atatus-coding-harness-tracing...
+REM Stop here on failure: re-registering hooks against the package that is still
+REM installed would report success for an update that did not happen.
+call :pip_install_harness "-U"
+if !ERRORLEVEL! neq 0 exit /b 1
+if not exist "%VENV_PYTHON%" ( echo [atatus] venv python not found >&2 & exit /b 1 )
+set "_ANY_HARNESS=0"
+for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
+    set "_ANY_HARNESS=1"
+    REM Keep going, as the uninstall loop does: one harness whose registration
+    REM fails should not abandon the rest half-updated.
+    echo [atatus] Re-registering %%H...
+    call :run_harness_py "%%H" install
+    if !ERRORLEVEL! neq 0 echo [atatus] %%H re-registration failed ^(continuing^) >&2
 )
-echo [atatus] Update complete!
+if "!_ANY_HARNESS!"=="0" echo [atatus] No installed harnesses found to re-register
+echo [atatus] Update complete.
 exit /b 0
 
 REM --- cmd_uninstall ---
@@ -152,11 +149,18 @@ if not "%UNINSTALL_HARNESS%"=="" (
 )
 REM Full wipe
 echo [atatus] Uninstalling atatus-coding-harness-tracing
+REM Run each installed harness's uninstall first so external registrations
+REM (settings.json hooks, config.toml notify, cursor hooks.json, .github/hooks/*)
+REM are cleaned before the shared runtime is wiped — wipe.py does not touch them.
 if exist "%VENV_PYTHON%" (
     for /f "usebackq delims=" %%H in (`"%VENV_PYTHON%" -c "from core.setup import list_installed_harnesses; [print(h) for h in list_installed_harnesses()]" 2^>nul`) do (
+        echo [atatus] Uninstalling %%H tracing...
         call :run_harness_py "%%H" uninstall
+        if !ERRORLEVEL! neq 0 echo [atatus] %%H uninstall failed ^(continuing^) >&2
     )
     "%VENV_PYTHON%" -c "from core.setup.wipe import wipe_shared_runtime; wipe_shared_runtime()" 2>nul
+) else (
+    echo [atatus] Venv not found - removing install directory
 )
 REM Everything after this point must live on one line. A full uninstall deletes
 REM the directory this script is running from, and cmd reads a batch file from

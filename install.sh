@@ -241,8 +241,8 @@ setup_venv() {
 # list_installed_harnesses(), which yields *config keys*, so without the alias
 # both skipped Claude Code entirely — a full uninstall wiped the venv and left
 # all 16 hooks in ~/.claude/settings.json pointing at the deleted path, after
-# printing "Uninstall complete." install.bat has accepted both spellings all
-# along (lines 202-203), so this is parity, not new behaviour.
+# printing "Uninstall complete." install.bat's resolve_dir has accepted both
+# spellings all along, so this is parity, not new behaviour.
 #
 # The install dispatch below is deliberately left alone: `install.sh claude-code`
 # stays an unknown command, because a second way to install the same harness
@@ -451,7 +451,7 @@ main() {
                     # registration fails should not abandon the rest half-updated.
                     info "Re-registering ${key}..."
                     run_harness_py "$key" "$vp" install || warn "${key} re-registration failed (continuing)"
-                done <<< "$harnesses"
+                done 3<<< "$harnesses"
             else info "No installed harnesses found to re-register"; fi
             info "Update complete."
             ;;
