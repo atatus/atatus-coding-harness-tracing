@@ -119,7 +119,6 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     Sets the following state keys (matching bash lines 71-82):
     - session_id: from input_json or generate_trace_id()
     - session_start_time: get_timestamp_ms() as string
-    - project_name: from ATATUS_PROJECT_NAME env, or basename of input_json["cwd"], or cwd
     - trace_count: "0"
     - tool_count: "0"
     - user_id: from env.get_user_id(SERVICE_NAME), then input_json["user_id"], then ""
@@ -134,15 +133,9 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     if not session_id:
         session_id = generate_trace_id()
 
-    # project_name
-    project_name = env.project_name
-    if not project_name:
-        cwd = input_json.get("cwd", "")
-        project_name = os.path.basename(cwd) if cwd else os.path.basename(os.getcwd())
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
 

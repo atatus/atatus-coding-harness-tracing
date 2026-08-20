@@ -58,7 +58,6 @@ def state(tmp_path):
     sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
     sm.init_state()
     sm.set("session_id", "test-session-copilot")
-    sm.set("project_name", "test-copilot-project")
     sm.set("trace_count", "0")
     sm.set("tool_count", "0")
     sm.set("user_id", "test-user")
@@ -170,7 +169,6 @@ class TestSessionStart:
 
         state = resolve_session(payload)
         assert state.get("session_id") == "sess-123"
-        assert state.get("project_name") == "repo"
         assert state.get("trace_count") == "0"
 
 
@@ -713,40 +711,5 @@ class TestEntryPoints:
 
 
 # ---------------------------------------------------------------------------
-# project.name attribute tests
 # ---------------------------------------------------------------------------
 
-
-class TestProjectNameOnAllSpans:
-
-    def test_tool_span_has_project_name(self, mock_resolve, state, captured_spans):
-        """TOOL spans include project.name."""
-        state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
-        inp = {
-            "session_id": "sess-1",
-            "hook_event_name": "PostToolUse",
-            "cwd": "/repo",
-            "tool_name": "bash",
-            "tool_input": {"command": "ls"},
-            "tool_result": {"text_result_for_llm": "output"},
-        }
-        _handle_post_tool_use(inp)
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["project.name"]["stringValue"] == "test-copilot-project"
-
-    def test_subagent_span_has_project_name(self, mock_resolve, state, captured_spans):
-        """Subagent CHAIN spans include project.name."""
-        inp = {"session_id": "sess-1", "hook_event_name": "SubagentStop", "agent_type": "test-agent", "agent_id": "a1"}
-        _handle_subagent_stop(inp)
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["project.name"]["stringValue"] == "test-copilot-project"
-
-    def test_user_prompt_sets_trace_state(self, mock_resolve, mock_ensure, state, captured_spans):
-        """user_prompt_submitted sets trace state with project context."""
-        inp = {"cwd": "/tmp/project", "prompt": "new prompt"}
-        _handle_user_prompt_submitted(inp)
-        assert state.get("current_trace_id") is not None
-        assert state.get("current_trace_prompt") == "new prompt"
-        assert state.get("trace_count") == "1"
-        assert state.get("tool_count") == "0"

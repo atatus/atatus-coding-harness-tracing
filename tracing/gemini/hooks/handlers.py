@@ -211,7 +211,6 @@ def _flush_pending_model_call(state) -> None:
 
     parent_span_id = state.get("current_trace_span_id") or ""
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     start_time = state.get(f"model_{model_call_id}_start") or str(get_timestamp_ms())
@@ -231,7 +230,6 @@ def _flush_pending_model_call(state) -> None:
     span_name = f"LLM: {model_name}" if model_name else "LLM"
     attrs = {
         "session.id": session_id,
-        "project.name": project_name,
         "openinference.span.kind": "LLM",
         "llm.model_name": model_name,
         "llm.token_count.prompt": p_tokens,
@@ -280,7 +278,6 @@ def _close_pending_turn(state, reason: str) -> None:
     _flush_pending_model_call(state)
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
@@ -288,7 +285,6 @@ def _close_pending_turn(state, reason: str) -> None:
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
-        "project.name": project_name,
         "input.value": redact_content(env.log_prompts, prompt),
         "output.value": f"(closed by {reason} fail-safe)",
     }
@@ -410,7 +406,6 @@ def _handle_after_agent(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     # Extract response: try prompt_response (CLI specific) then standard keys
@@ -420,7 +415,6 @@ def _handle_after_agent(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
-        "project.name": project_name,
         "input.value": redact_content(env.log_prompts, prompt),
         "output.value": redact_content(env.log_prompts, response_str or ""),
     }
@@ -557,7 +551,6 @@ def _handle_after_tool(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     state.increment("tool_count")
@@ -627,7 +620,6 @@ def _handle_after_tool(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "TOOL",
-        "project.name": project_name,
         "tool.name": tool_name,
         "input.value": tool_input,
         "output.value": tool_output,

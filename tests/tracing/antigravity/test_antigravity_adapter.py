@@ -142,11 +142,9 @@ class TestEnsureSessionInitialized:
         return sm
 
     def test_sets_expected_keys(self, antigravity_state_dir, disable_env_vars):
-        """First call sets session_id, project_name, user_id, last_emitted_turn."""
         sm = self._make_state(antigravity_state_dir, "all-keys")
         adapter.ensure_session_initialized(sm, {"conversationId": "abc"})
         assert sm.get("session_id") == "abc"
-        assert sm.get("project_name") is not None
         assert sm.get("user_id") is not None
         assert sm.get("last_emitted_turn") == "-1"
 
@@ -169,35 +167,6 @@ class TestEnsureSessionInitialized:
         assert session_id is not None
         assert len(session_id) == 32
         assert all(c in "0123456789abcdef" for c in session_id)
-
-    def test_project_name_from_env(self, antigravity_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority over workspacePaths."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        sm = self._make_state(antigravity_state_dir, "proj-env")
-        adapter.ensure_session_initialized(
-            sm,
-            {"conversationId": "c", "workspacePaths": ["/home/user/other-project"]},
-        )
-        assert sm.get("project_name") == "my-env-project"
-
-    def test_project_name_from_workspace_paths(self, antigravity_state_dir, disable_env_vars):
-        """project_name uses basename of workspacePaths[0] when env empty."""
-        sm = self._make_state(antigravity_state_dir, "proj-ws")
-        adapter.ensure_session_initialized(
-            sm,
-            {"conversationId": "c", "workspacePaths": ["/some/path/myproj"]},
-        )
-        assert sm.get("project_name") == "myproj"
-
-    def test_project_name_falls_back_to_cwd(self, antigravity_state_dir, disable_env_vars):
-        """project_name falls back to basename of cwd when no workspacePaths."""
-        sm = self._make_state(antigravity_state_dir, "proj-cwd")
-        adapter.ensure_session_initialized(sm, {"conversationId": "c"})
-        project = sm.get("project_name")
-        assert project is not None
-        assert len(project) > 0
 
     def test_user_id_from_env(self, antigravity_state_dir, monkeypatch):
         """user_id is read from env.user_id."""

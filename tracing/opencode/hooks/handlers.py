@@ -249,7 +249,6 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by reconcile
         return
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
@@ -258,7 +257,6 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by reconcile
     attrs: dict[str, Any] = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
-        "project.name": project_name,
         "input.value": redact_content(env.log_prompts, prompt),
         "output.value": reason,
     }
@@ -378,7 +376,6 @@ def _emit_llm_span(
         return
 
     session_id = session_id_override or state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     model_id = _string_value(info.get("modelID"))
@@ -417,7 +414,6 @@ def _emit_llm_span(
 
     attrs: dict[str, Any] = {
         "session.id": session_id,
-        "project.name": project_name,
         "openinference.span.kind": "LLM",
         "llm.message_id": msg_id,
         "llm.model_name": model_id,
@@ -507,7 +503,6 @@ def _emit_tool_span(
         parentage = "turn_fallback"
 
     session_id = session_id_override or state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     tool_name = _string_value(tool_part.get("tool"), "unknown") or "unknown"
@@ -534,7 +529,6 @@ def _emit_tool_span(
 
     attrs: dict[str, Any] = {
         "session.id": session_id,
-        "project.name": project_name,
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
         "tool.call_id": call_id,
@@ -686,7 +680,6 @@ def _emit_child_session(state: StateManager, child: dict, *, finalize_agent: boo
         attrs: dict[str, Any] = {
             "session.id": child_session_id,
             "session.parent_id": child.get("parentSessionID") or info.get("parentID") or "",
-            "project.name": state.get("project_name") or "",
             "openinference.span.kind": "AGENT",
             "agent.name": agent_name,
             "input.value": redact_content(env.log_prompts, prompt),
@@ -840,7 +833,6 @@ def _handle_close(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
@@ -849,7 +841,6 @@ def _handle_close(input_json: dict) -> None:
     attrs: dict[str, Any] = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
-        "project.name": project_name,
         "input.value": redact_content(env.log_prompts, prompt),
         "output.value": redact_content(env.log_prompts, final_output),
     }

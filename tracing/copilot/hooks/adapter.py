@@ -124,7 +124,6 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     State keys set:
       session_id          -- input_json["session_id"] (always populated by Copilot)
       session_start_time  -- get_timestamp_ms() as string
-      project_name        -- env.project_name, else basename(input_json["cwd"]),
                              else basename(getcwd())
       trace_count         -- "0"
       tool_count          -- "0"
@@ -135,14 +134,9 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     session_id = input_json.get("session_id", "") or generate_trace_id()
 
-    project_name = env.project_name
-    if not project_name:
-        cwd = input_json.get("cwd", "")
-        project_name = os.path.basename(cwd) if cwd else os.path.basename(os.getcwd())
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
     state.set("user_id", env.get_user_id(SERVICE_NAME))

@@ -71,14 +71,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     session_id = input_json.get("conversationId") or generate_trace_id()
 
-    project_name = env.project_name
-    if not project_name:
-        workspaces = input_json.get("workspacePaths") or []
-        first = workspaces[0] if workspaces else ""
-        project_name = os.path.basename(first) if first else os.path.basename(os.getcwd())
-
     state.set("session_id", session_id)
-    state.set("project_name", project_name)
     state.set("user_id", env.user_id)
     state.set("last_emitted_turn", "-1")
     state.set("trace_count", "0")

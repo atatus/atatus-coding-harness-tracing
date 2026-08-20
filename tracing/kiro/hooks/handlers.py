@@ -123,9 +123,6 @@ def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
     user_id = state.get("user_id") or ""
     if user_id:
         attrs["user.id"] = user_id
-    project_name = state.get("project_name") or ""
-    if project_name:
-        attrs["project.name"] = project_name
 
     span = build_span(
         f"Tool: {tool_name}" if tool_name else "Tool",
@@ -168,7 +165,6 @@ def _handle_stop(input_json: dict, state: StateManager) -> None:
     ]
 
     session_id = state.get("session_id") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
     trace_count = state.get("trace_count") or "?"
 
@@ -180,8 +176,6 @@ def _handle_stop(input_json: dict, state: StateManager) -> None:
         "output.value": redacted_output,
         "llm.output_messages": json.dumps(output_messages),
     }
-    if project_name:
-        attrs["project.name"] = project_name
     if user_id:
         attrs["user.id"] = user_id
 

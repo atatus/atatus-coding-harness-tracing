@@ -152,7 +152,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {})
         assert sm.get("session_id") is not None
         assert sm.get("session_start_time") is not None
-        assert sm.get("project_name") is not None
         assert sm.get("trace_count") == "0"
         assert sm.get("tool_count") == "0"
         assert sm.get("user_id") is not None
@@ -174,31 +173,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {})
         # The session_id in state should match the key used for the file
         assert sm.get("session_id") is not None
-
-    def test_project_name_from_env(self, gemini_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        monkeypatch.delenv("GEMINI_SESSION_ID", raising=False)
-        sm = self._make_state(gemini_state_dir, "proj-env")
-        adapter.ensure_session_initialized(sm, {"cwd": "/home/user/other-project"})
-        assert sm.get("project_name") == "my-env-project"
-
-    def test_project_name_from_cwd(self, gemini_state_dir, disable_env_vars):
-        """project_name falls back to basename of cwd."""
-        sm = self._make_state(gemini_state_dir, "proj-cwd")
-        adapter.ensure_session_initialized(sm, {})
-        # Should use basename of os.getcwd() as fallback
-        project = sm.get("project_name")
-        assert project is not None
-        assert len(project) > 0
-
-    def test_project_name_from_cwd_in_payload(self, gemini_state_dir, disable_env_vars):
-        """project_name uses basename of cwd from payload when env var not set."""
-        sm = self._make_state(gemini_state_dir, "proj-cwd-payload")
-        adapter.ensure_session_initialized(sm, {"cwd": "/some/path/myproj"})
-        assert sm.get("project_name") == "myproj"
 
     def test_counters_start_at_zero(self, gemini_state_dir, disable_env_vars):
         """trace_count and tool_count start at '0'."""

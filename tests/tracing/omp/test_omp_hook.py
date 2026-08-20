@@ -100,7 +100,6 @@ def state(tmp_path):
     sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
     sm.init_state()
     sm.set("session_id", "omp_sess_1")
-    sm.set("project_name", "test-omp-project")
     sm.set("trace_count", "0")
     sm.set("tool_count", "0")
     sm.set("user_id", "test-user")
@@ -366,7 +365,6 @@ class TestTurnEndLLMSpan:
         _run_basic_turn(state)
         attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])
         assert attrs["session.id"]["stringValue"] == "omp_sess_1"
-        assert attrs["project.name"]["stringValue"] == "test-omp-project"
         assert attrs["openinference.span.kind"]["stringValue"] == "LLM"
 
     def test_llm_timing_uses_timestamp_and_duration(self, mock_resolve, mock_ensure, state, captured_spans):

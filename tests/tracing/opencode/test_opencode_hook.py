@@ -89,7 +89,6 @@ def state(tmp_path):
     sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
     sm.init_state()
     sm.set("session_id", "ses_test")
-    sm.set("project_name", "test-opencode-project")
     sm.set("trace_count", "0")
     sm.set("tool_count", "0")
     sm.set("user_id", "test-user")
@@ -217,7 +216,6 @@ class TestReconcileBasic:
         assert cost_val == pytest.approx(0.0125)
         # session / project / kind
         assert attrs["session.id"]["stringValue"] == "ses_test"
-        assert attrs["project.name"]["stringValue"] == "test-opencode-project"
         assert attrs["openinference.span.kind"]["stringValue"] == "LLM"
         # input.value = turn prompt, output.value = assistant text
         assert attrs["input.value"]["stringValue"] == "list files and edit main.py"

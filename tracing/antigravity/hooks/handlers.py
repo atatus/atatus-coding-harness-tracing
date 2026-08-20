@@ -586,7 +586,6 @@ def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversa
 
     common: dict = {
         "session.id": state.get("session_id") or "",
-        "project.name": state.get("project_name") or "",
     }
     user_id = state.get("user_id") or ""
     if user_id:

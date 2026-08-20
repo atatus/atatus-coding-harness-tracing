@@ -189,11 +189,9 @@ def _handle_post_tool_use(input_json: dict) -> None:
 
     # Build attributes
     user_id = state.get("user_id") or ""
-    project_name = state.get("project_name") or ""
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "TOOL",
-        "project.name": project_name,
         "tool.name": tool_name,
         "input.value": tool_input,
         "output.value": tool_response,
@@ -238,7 +236,6 @@ def _handle_stop(input_json: dict) -> None:
     trace_span_id = state.get("current_trace_span_id") or generate_span_id()
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
 
     transcript_path = input_json.get("transcript_path", "")
@@ -258,7 +255,6 @@ def _handle_stop(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "LLM",
-        "project.name": project_name,
         "input.value": user_prompt,
         "output.value": output_text,
         "metadata": json.dumps(
@@ -308,14 +304,12 @@ def _handle_subagent_stop(input_json: dict) -> None:
     summary = parse_transcript(transcript_path) if transcript_path else {}
     model_name = summary.get("model_name", "")
 
-    project_name = state.get("project_name") or ""
     user_id = state.get("user_id") or ""
     end_time = str(get_timestamp_ms())
 
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
-        "project.name": project_name,
         "metadata": json.dumps({"agent_type": agent_type, "agent_id": agent_id}),
     }
     if model_name:

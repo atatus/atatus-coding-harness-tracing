@@ -175,7 +175,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"sessionID": "ses_all"})
         assert sm.get("session_id") is not None
         assert sm.get("session_start_time") is not None
-        assert sm.get("project_name") is not None
         assert sm.get("trace_count") == "0"
         assert sm.get("tool_count") == "0"
         assert sm.get("user_id") == "test-user-all-keys"
@@ -197,83 +196,10 @@ class TestEnsureSessionInitialized:
         assert sm.get("session_id") == session_id
         assert sm.get("session_start_time") == start_time
 
-    def test_project_name_from_env(self, opencode_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority over snapshot path."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        sm = self._make_state(opencode_state_dir, "proj-env")
-        payload = {
-            "sessionID": "ses_e",
-            "messages": [
-                {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"cwd": "/home/user/other-project", "root": "/home/user"},
-                    },
-                    "parts": [],
-                }
-            ],
-        }
-        adapter.ensure_session_initialized(sm, payload)
-        assert sm.get("project_name") == "my-env-project"
-
     # We do not resolve it: the installer bakes
     # ATATUS_PROJECT_NAME into the harness settings and the env var is the source
     # of truth, so the config key is never consulted. Removed rather than skipped
     # so it does not read as a temporary gap.
-
-    def test_project_name_from_snapshot_cwd(self, opencode_state_dir, disable_env_vars):
-        """project_name uses basename of the snapshot message path.cwd."""
-        sm = self._make_state(opencode_state_dir, "proj-cwd")
-        payload = {
-            "sessionID": "ses_c",
-            "messages": [
-                {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"cwd": "/some/path/myproj", "root": "/some/path"},
-                    },
-                    "parts": [],
-                }
-            ],
-        }
-        adapter.ensure_session_initialized(sm, payload)
-        assert sm.get("project_name") == "myproj"
-
-    def test_project_name_from_snapshot_root_when_no_cwd(self, opencode_state_dir, disable_env_vars):
-        """project_name falls back to basename of path.root when path.cwd missing."""
-        sm = self._make_state(opencode_state_dir, "proj-root")
-        payload = {
-            "sessionID": "ses_r",
-            "messages": [
-                {
-                    "info": {
-                        "role": "assistant",
-                        "path": {"root": "/workspace/rootproj"},
-                    },
-                    "parts": [],
-                }
-            ],
-        }
-        adapter.ensure_session_initialized(sm, payload)
-        assert sm.get("project_name") == "rootproj"
-
-    def test_project_name_fallback_to_cwd_basename(self, opencode_state_dir, disable_env_vars):
-        """project_name falls back to basename of os.getcwd() when snapshot lacks path."""
-        sm = self._make_state(opencode_state_dir, "proj-fallback")
-        # No messages / no path in payload
-        adapter.ensure_session_initialized(sm, {"sessionID": "ses_f"})
-        project = sm.get("project_name")
-        assert project is not None
-        assert project == os.path.basename(os.getcwd())
-
-    def test_project_name_fallback_when_messages_empty(self, opencode_state_dir, disable_env_vars):
-        """project_name falls back to cwd basename when messages list is empty."""
-        sm = self._make_state(opencode_state_dir, "proj-empty-msgs")
-        adapter.ensure_session_initialized(sm, {"sessionID": "ses_em", "messages": []})
-        project = sm.get("project_name")
-        assert project == os.path.basename(os.getcwd())
 
     def test_counters_start_at_zero(self, opencode_state_dir, disable_env_vars):
         """trace_count and tool_count start at '0' (string)."""

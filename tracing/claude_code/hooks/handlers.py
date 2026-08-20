@@ -556,7 +556,6 @@ def _handle_stop(input_json: dict) -> None:
     trace_span_id = state.get("current_trace_span_id") or generate_span_id()
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
-    project_name = state.get("project_name") or ""
     trace_count = state.get("trace_count") or "0"
     user_id = state.get("user_id") or ""
 
@@ -587,7 +586,6 @@ def _handle_stop(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         "trace.number": trace_count,
-        "project.name": project_name,
         "openinference.span.kind": "LLM",
         **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
@@ -758,7 +756,6 @@ def _handle_stop_failure(input_json: dict) -> None:
     trace_span_id = state.get("current_trace_span_id") or generate_span_id()
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
-    project_name = state.get("project_name") or ""
     trace_count = state.get("trace_count") or "0"
     user_id = state.get("user_id") or ""
 
@@ -774,7 +771,6 @@ def _handle_stop_failure(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         "trace.number": trace_count,
-        "project.name": project_name,
         "openinference.span.kind": "LLM",
         "input.value": redacted_prompt,
         "output.value": redacted_output,

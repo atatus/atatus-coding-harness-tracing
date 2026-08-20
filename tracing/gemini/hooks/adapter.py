@@ -142,15 +142,9 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
         or generate_trace_id()
     )
 
-    # project_name
-    project_name = env.project_name
-    if not project_name:
-        cwd = input_json.get("projectDir") or input_json.get("cwd", "")
-        project_name = os.path.basename(cwd) if cwd else os.path.basename(os.getcwd())
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
 

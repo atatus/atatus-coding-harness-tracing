@@ -1795,7 +1795,7 @@ class TestBuildSpanCustomAttributes:
         monkeypatch.setattr(
             env,
             "custom_attributes",
-            lambda service_name="": {"project.name": "from-custom"},
+            lambda service_name="": {"session.id": "from-custom"},
         )
         result = build_span(
             name="t",
@@ -1804,10 +1804,10 @@ class TestBuildSpanCustomAttributes:
             trace_id="bb",
             start_ms=1000,
             end_ms=2000,
-            attrs={"project.name": "from-handler"},
+            attrs={"session.id": "from-handler"},
         )
         attrs = self._attrs_dict(result)
-        assert attrs["project.name"] == {"stringValue": "from-handler"}
+        assert attrs["session.id"] == {"stringValue": "from-handler"}
 
     def test_empty_resolver_is_noop(self, monkeypatch):
         monkeypatch.setattr(env, "custom_attributes", lambda service_name="": {})
@@ -1818,10 +1818,10 @@ class TestBuildSpanCustomAttributes:
             trace_id="bb",
             start_ms=1000,
             end_ms=2000,
-            attrs={"project.name": "p", "user.id": "u"},
+            attrs={"session.id": "p", "user.id": "u"},
         )
         attrs = self._attrs_dict(result)
-        assert set(attrs.keys()) == {"project.name", "user.id"}
+        assert set(attrs.keys()) == {"session.id", "user.id"}
 
     def test_caller_attrs_dict_not_mutated(self, monkeypatch):
 
@@ -1830,7 +1830,7 @@ class TestBuildSpanCustomAttributes:
             "custom_attributes",
             lambda service_name="": {"team": "payments"},
         )
-        caller_attrs = {"project.name": "p"}
+        caller_attrs = {"session.id": "p"}
         build_span(
             name="t",
             kind="LLM",
@@ -1840,7 +1840,7 @@ class TestBuildSpanCustomAttributes:
             end_ms=2000,
             attrs=caller_attrs,
         )
-        assert caller_attrs == {"project.name": "p"}
+        assert caller_attrs == {"session.id": "p"}
 
     def test_resolver_receives_service_name(self, monkeypatch):
 

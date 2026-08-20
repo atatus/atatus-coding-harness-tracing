@@ -54,29 +54,6 @@ def resolve_session(input_json: dict, *, initialize: bool = True) -> StateManage
     return sm
 
 
-def _project_name_from_snapshot(input_json: dict) -> str:
-    """Best-effort project name derivation from an opencode snapshot payload.
-
-    Looks for the first message's ``info.path.cwd`` (then ``info.path.root``)
-    and returns its basename. Returns ``""`` if nothing usable is found.
-    """
-    messages = input_json.get("messages") or []
-    if not isinstance(messages, list):
-        return ""
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        info = msg.get("info") or {}
-        path = info.get("path") or {}
-        cwd = path.get("cwd") or ""
-        if cwd:
-            return os.path.basename(cwd)
-        root = path.get("root") or ""
-        if root:
-            return os.path.basename(root)
-    return ""
-
-
 def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     """Idempotent session initialization."""
     existing = state.get("session_id")
@@ -85,13 +62,9 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     session_id = input_json.get("sessionID") or "unknown"
 
-    project_name = env.project_name
-    if not project_name:
-        project_name = _project_name_from_snapshot(input_json) or os.path.basename(os.getcwd())
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
     state.set("user_id", env.get_user_id(SERVICE_NAME))

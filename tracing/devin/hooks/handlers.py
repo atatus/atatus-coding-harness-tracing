@@ -63,15 +63,6 @@ def _token_attrs(prompt: int, completion: int, cache_read: int = 0, cache_write:
     return attrs
 
 
-def _resolve_project_name() -> str:
-    """Project name from config/env, falling back to the working dir basename."""
-    if env.project_name:
-        return env.project_name
-    project_dir = os.environ.get("DEVIN_PROJECT_DIR") or os.getcwd()
-    base = os.path.basename(os.path.normpath(project_dir)) if project_dir else ""
-    return base or "devin"
-
-
 def _step_output(step: LlmStep) -> str:
     """Output text for an LLM span: visible content, or reasoning when the
     generation produced only thinking + tool calls (so the span still renders —
@@ -86,7 +77,6 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
 
     trace_id = generate_trace_id()
     root_span_id = generate_span_id()
-    project_name = _resolve_project_name()
     user_id = env.get_user_id(SERVICE_NAME)
 
     start_ms = steps[0].start_ms
@@ -110,8 +100,6 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
             sum(s.cache_write_tokens for s in steps),
         )
     )
-    if project_name:
-        root_attrs["project.name"] = project_name
     if user_id:
         root_attrs["user.id"] = user_id
     if meta.get("backend"):

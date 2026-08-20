@@ -221,7 +221,6 @@ def _emit_turn_root(state: StateManager, output_value: str) -> None:
 
     attrs: dict[str, Any] = {
         "session.id": state.get("session_id") or "",
-        "project.name": state.get("project_name") or "",
         "openinference.span.kind": "CHAIN",
         "input.value": redact_content(env.log_prompts, state.get("current_trace_prompt") or ""),
         "output.value": output_value,
@@ -286,7 +285,6 @@ def _emit_llm_span(state: StateManager, message: Any) -> None:
     output_text = _assistant_text(message)
     attrs: dict[str, Any] = {
         "session.id": state.get("session_id") or "",
-        "project.name": state.get("project_name") or "",
         "openinference.span.kind": "LLM",
         "llm.model_name": model,
         "llm.provider": message.get("provider") or "",
@@ -341,7 +339,6 @@ def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict) -> None
     output_text = _text_of_content(tool_result.get("content"))
     attrs: dict[str, Any] = {
         "session.id": state.get("session_id") or "",
-        "project.name": state.get("project_name") or "",
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
         "input.value": redact_content(env.log_tool_content, input_text),

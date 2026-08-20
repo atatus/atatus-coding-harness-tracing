@@ -107,7 +107,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"session_id": "sid-1"})
         assert sm.get("session_id") == "sid-1"
         assert sm.get("session_start_time") is not None
-        assert sm.get("project_name") is not None
         assert sm.get("trace_count") == "0"
         assert sm.get("tool_count") == "0"
         assert sm.get("user_id") is not None
@@ -154,28 +153,6 @@ class TestEnsureSessionInitialized:
         assert len(sid) == 32
         int(sid, 16)
 
-    def test_project_name_from_env(self, copilot_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        sm = self._make_state(copilot_state_dir, "proj-env")
-        adapter.ensure_session_initialized(sm, {"cwd": "/home/user/other-project"})
-        assert sm.get("project_name") == "my-env-project"
-
-    def test_project_name_from_cwd_input(self, copilot_state_dir, disable_env_vars):
-        """project_name from input cwd -> basename extracted."""
-        sm = self._make_state(copilot_state_dir, "proj-cwd")
-        adapter.ensure_session_initialized(sm, {"cwd": "/home/user/my-project"})
-        assert sm.get("project_name") == "my-project"
-
-    def test_project_name_fallback_to_os_cwd(self, copilot_state_dir, disable_env_vars):
-        """project_name falls back to os.getcwd() basename when no cwd in input."""
-        sm = self._make_state(copilot_state_dir, "proj-fallback")
-        adapter.ensure_session_initialized(sm, {})
-        # Should be basename of current working directory
-        assert sm.get("project_name") == os.path.basename(os.getcwd())
-
     def test_counters_start_at_zero(self, copilot_state_dir, disable_env_vars):
         """trace_count and tool_count start at '0'."""
         sm = self._make_state(copilot_state_dir, "counters")
@@ -205,7 +182,6 @@ class TestEnsureSessionInitialized:
         }
         adapter.ensure_session_initialized(sm, payload)
         assert sm.get("session_id") == "d4870649-2f69-472d-96a2-599e55ab13f0"
-        assert sm.get("project_name") == "test-project"
 
 
 # ── gc_stale_state_files tests ───────────────────────────────────────────────

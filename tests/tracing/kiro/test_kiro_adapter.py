@@ -148,7 +148,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, agent_spawn_payload)
         assert sm.get("session_id") is not None
         assert sm.get("session_start_time") is not None
-        assert sm.get("project_name") is not None
         assert sm.get("trace_count") is not None
         assert sm.get("tool_count") is not None
         assert sm.get("user_id") is not None
@@ -178,22 +177,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"session_id": "different-uuid"})
         assert sm.get("session_id") == original_uuid
         assert sm.get("session_start_time") == original_start
-
-    def test_project_name_from_env(self, kiro_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority over cwd."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-proj")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        monkeypatch.delenv("KIRO_SESSION_ID", raising=False)
-        sm = self._make_state(kiro_state_dir, "proj-env")
-        adapter.ensure_session_initialized(sm, {"session_id": "s1", "cwd": "/foo/bar/other"})
-        assert sm.get("project_name") == "my-proj"
-
-    def test_project_name_falls_back_to_cwd_basename(self, kiro_state_dir, disable_env_vars):
-        """project_name uses basename of cwd from payload when env var not set."""
-        sm = self._make_state(kiro_state_dir, "proj-cwd")
-        adapter.ensure_session_initialized(sm, {"session_id": "s2", "cwd": "/foo/bar/myproj"})
-        assert sm.get("project_name") == "myproj"
 
     def test_counters_start_at_zero(self, kiro_state_dir, disable_env_vars, agent_spawn_payload):
         """trace_count and tool_count start at '0' strings."""

@@ -120,7 +120,6 @@ Errors always land in `~/.atatus/harness/logs/devin.log`; set `export ATATUS_VER
 | `llm.token_count.total` | Interaction total tokens (omitted when 0) |
 | `llm.token_count.prompt_details.cache_read` | Cached prompt tokens read, a subset of prompt (omitted when 0) |
 | `llm.token_count.prompt_details.cache_write` | Prompt tokens written to cache, a subset of prompt (omitted when 0) |
-| `project.name` | Project name (config/env, else working-dir basename) |
 | `user.id` | Optional user identifier |
 | `devin.backend` | Agent backend (e.g. `Windsurf`) |
 

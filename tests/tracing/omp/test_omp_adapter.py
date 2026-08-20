@@ -10,7 +10,7 @@ collide on a shared state file.
 
 omp also differs from opencode in project-name derivation: there is no
 snapshot/message payload to mine, so the chain is simply
-``env.project_name`` -> ``os.path.basename(os.getcwd())`` -> ``HARNESS_NAME``.
+``os.getcwd()``.
 """
 from __future__ import annotations
 
@@ -192,7 +192,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"sessionId": "ses_all"})
         assert sm.get("session_id") is not None
         assert sm.get("session_start_time") is not None
-        assert sm.get("project_name") is not None
         assert sm.get("trace_count") == "0"
         assert sm.get("tool_count") == "0"
         assert sm.get("user_id") == "test-user-all-keys"
@@ -219,33 +218,6 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"sessionId": "ses_second"})
         assert sm.get("session_id") == session_id
         assert sm.get("session_start_time") == start_time
-
-    def test_project_name_from_env(self, omp_state_dir, monkeypatch):
-        """ATATUS_PROJECT_NAME env var takes priority."""
-        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
-        monkeypatch.setenv("ATATUS_PROJECT_NAME", "my-env-project")
-        monkeypatch.delenv("ATATUS_USER_ID", raising=False)
-        sm = self._make_state(omp_state_dir, "proj-env")
-        adapter.ensure_session_initialized(sm, {"sessionId": "ses_e"})
-        assert sm.get("project_name") == "my-env-project"
-
-    def test_project_name_fallback_to_cwd_basename(self, omp_state_dir, disable_env_vars):
-        """project_name falls back to basename of os.getcwd() when no env value."""
-        sm = self._make_state(omp_state_dir, "proj-fallback")
-        adapter.ensure_session_initialized(sm, {"sessionId": "ses_f"})
-        project = sm.get("project_name")
-        assert project is not None
-        assert project == os.path.basename(os.getcwd())
-
-    def test_project_name_final_fallback_to_harness_name(self, omp_state_dir, disable_env_vars, monkeypatch):
-        """project_name falls back to HARNESS_NAME ('omp') when cwd basename is empty.
-
-        os.path.basename('/') == '' so the chain reaches its final literal fallback.
-        """
-        monkeypatch.setattr(os, "getcwd", lambda: "/")
-        sm = self._make_state(omp_state_dir, "proj-harness")
-        adapter.ensure_session_initialized(sm, {"sessionId": "ses_h"})
-        assert sm.get("project_name") == "omp"
 
     def test_counters_start_at_zero(self, omp_state_dir, disable_env_vars):
         """trace_count and tool_count start at '0' (string)."""

@@ -71,7 +71,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     """Idempotent session initialization.
 
     On first call, populate session_id (Kiro's UUID — preserves correlation),
-    session_start_time, project_name, trace_count, tool_count, user_id.
+    session_start_time, trace_count, tool_count, user_id.
     Subsequent calls are no-ops.
     """
     if state.get("session_id") is not None:
@@ -81,19 +81,14 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     # users find a Kiro session in Atatus. NEVER substitute a fresh trace ID.
     session_id = input_json.get("session_id") or os.environ.get("KIRO_SESSION_ID") or ""
 
-    project_name = env.project_name
-    if not project_name:
-        cwd = input_json.get("cwd", "") or os.getcwd()
-        project_name = os.path.basename(cwd) if cwd else HARNESS_NAME
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
     state.set("user_id", env.get_user_id(SERVICE_NAME) or "")
 
-    log(f"Session initialized: {session_id} (project={project_name})")
+    log(f"Session initialized: {session_id}")
 
 
 def gc_stale_state_files() -> None:

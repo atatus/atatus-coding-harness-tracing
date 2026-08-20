@@ -71,7 +71,6 @@ def state(tmp_path):
     sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
     sm.init_state()
     sm.set("session_id", "test-session-gemini")
-    sm.set("project_name", "test-gemini-project")
     sm.set("trace_count", "0")
     sm.set("tool_count", "0")
     sm.set("user_id", "test-user")
@@ -327,7 +326,6 @@ class TestAfterAgent:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["openinference.span.kind"]["stringValue"] == "CHAIN"
         assert attrs["session.id"]["stringValue"] == "test-session-gemini"
-        assert attrs["project.name"]["stringValue"] == "test-gemini-project"
         assert attrs["input.value"]["stringValue"] == "explain this"
         assert attrs["output.value"]["stringValue"] == "Here is the explanation."
 
@@ -812,15 +810,6 @@ class TestAfterTool:
         # Start time key should be cleaned up
         assert state.get("tool_tc-1_start") is None
 
-    def test_session_and_project_attrs(self, mock_resolve, state, captured_spans):
-        """TOOL span includes session.id and project.name."""
-        state.set("current_trace_id", "a" * 32)
-        state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool({"tool_name": "read_file", "tool_result": "content"})
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["session.id"]["stringValue"] == "test-session-gemini"
-        assert attrs["project.name"]["stringValue"] == "test-gemini-project"
-
     # -- Tool argument enrichment tests --
 
     def test_run_shell_command_enrichment(self, mock_resolve, state, captured_spans):
@@ -1215,39 +1204,7 @@ class TestTurnFlow:
 
 
 # ---------------------------------------------------------------------------
-# project.name attribute tests
 # ---------------------------------------------------------------------------
-
-
-class TestProjectNameOnAllSpans:
-    def test_chain_span_has_project_name(self, mock_resolve, state, captured_spans):
-        """CHAIN spans include project.name."""
-        state.set("current_trace_id", "a" * 32)
-        state.set("current_trace_span_id", "b" * 16)
-        state.set("current_trace_start_time", "1000")
-        state.set("current_trace_prompt", "test")
-        _handle_after_agent({"response": {"content": "ok"}})
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["project.name"]["stringValue"] == "test-gemini-project"
-
-    def test_llm_span_has_project_name(self, mock_resolve, state, captured_spans):
-        """LLM spans include project.name."""
-        state.set("current_trace_id", "a" * 32)
-        state.set("current_trace_span_id", "b" * 16)
-        state.set("current_model_call_id", "mc-1")
-        state.set("model_mc-1_start", "1000")
-        _handle_after_model(_final_chunk({"model": "gemini-2.5-pro", "model_call_id": "mc-1"}))
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["project.name"]["stringValue"] == "test-gemini-project"
-
-    def test_tool_span_has_project_name(self, mock_resolve, state, captured_spans):
-        """TOOL spans include project.name."""
-        state.set("current_trace_id", "a" * 32)
-        state.set("current_trace_span_id", "b" * 16)
-        _handle_after_tool({"tool_name": "read_file", "tool_args": {"file_path": "/foo.py"}, "tool_result": "content"})
-        attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["project.name"]["stringValue"] == "test-gemini-project"
-
 
 # ---------------------------------------------------------------------------
 # Integration tests: session initialization via actual adapter (not mocked)
@@ -1292,7 +1249,6 @@ class TestSessionStartIntegration:
         # back to the same Gemini session.
         assert data["session_id"] == "sess-123"
         assert data["trace_count"] == "0"
-        assert data["project_name"] == "proj"
 
     def test_session_id_from_env_when_payload_missing(
         self, tmp_harness_dir, gemini_state_dir, monkeypatch, captured_spans_real

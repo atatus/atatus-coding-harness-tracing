@@ -10,7 +10,7 @@ runs cannot collide on a single shared state file.
 
 Unlike opencode there is no snapshot/message payload to mine for the project
 name, so the derivation chain is simply
-``env.project_name`` -> ``os.path.basename(os.getcwd())`` -> ``HARNESS_NAME``.
+``os.getcwd()``.
 """
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ import time
 
 from core.common import StateManager, env, get_timestamp_ms, log, redirect_stderr_to_log_file
 from core.constants import HARNESSES, STATE_BASE_DIR
-from tracing.omp.constants import HARNESS_NAME
 
 # --- Module-level constants derived from HARNESSES ---
 _HARNESS = HARNESSES["omp"]
@@ -83,13 +82,9 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     session_id = _session_key(input_json)
 
-    project_name = env.project_name
-    if not project_name:
-        project_name = os.path.basename(os.getcwd()) or HARNESS_NAME
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
-    state.set("project_name", project_name)
     state.set("trace_count", "0")
     state.set("tool_count", "0")
     state.set("user_id", env.get_user_id(SERVICE_NAME))
