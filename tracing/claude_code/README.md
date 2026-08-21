@@ -33,14 +33,14 @@ Install:
 
 ```bash
 claude plugin marketplace add atatus/atatus-coding-harness-tracing
-claude plugin install claude-code-tracing@coding-harness-tracing
+claude plugin install atatus-claude-code-tracing@atatus-coding-harness-tracing
 ```
 
 Uninstall:
 
 ```bash
-claude plugin uninstall claude-code-tracing@coding-harness-tracing
-claude plugin marketplace remove coding-harness-tracing
+claude plugin uninstall atatus-claude-code-tracing@atatus-coding-harness-tracing
+claude plugin marketplace remove atatus-coding-harness-tracing
 ```
 
 ### Remote setup

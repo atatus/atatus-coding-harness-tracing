@@ -1,5 +1,5 @@
 {
-  "name": "coding-harness-tracing",
+  "name": "atatus-coding-harness-tracing",
   "owner": {
     "name": "Atatus",
     "email": "hello@atatus.com"
@@ -9,10 +9,10 @@
   },
   "plugins": [
     {
-      "name": "claude-code-tracing",
+      "name": "atatus-claude-code-tracing",
       "source": "./tracing/claude_code",
       "description": "Automatic tracing of Claude Code sessions to Atatus with OpenInference spans",
-      "version": "1.0.1",
+      "version": "1.0.0",
       "homepage": "https://atatus.com",
       "repository": "https://github.com/atatus/atatus-coding-harness-tracing",
       "license": "Apache-2.0",

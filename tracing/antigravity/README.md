@@ -46,7 +46,7 @@ iwr -useb https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing
 
 ```bash
 git clone https://github.com/atatus/atatus-coding-harness-tracing.git
-cd coding-harness-tracing
+cd atatus-coding-harness-tracing
 ```
 
 **macOS / Linux**
