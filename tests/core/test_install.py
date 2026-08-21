@@ -193,3 +193,42 @@ def test_install_sh_no_jq_dependency():
     """install.sh must not require jq."""
     text = INSTALL_SH.read_text()
     assert "jq is required" not in text
+
+
+# ---------------------------------------------------------------------------
+# update re-execs from a fresh installer, on both platforms
+# ---------------------------------------------------------------------------
+
+
+def test_install_bat_update_refetches_itself():
+    """cmd.exe re-reads a batch file by offset after every line, so an update
+    that rewrites install.bat underneath itself is worse on Windows than on
+    POSIX. It must hand over to a freshly downloaded copy."""
+    text = INSTALL_BAT.read_text()
+    assert "raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/!INSTALL_BRANCH!/install.bat" in text
+    assert 'call "!FRESH!" update --branch !INSTALL_BRANCH!' in text
+
+
+def test_install_bat_reexec_is_guarded_against_looping():
+    text = INSTALL_BAT.read_text()
+    assert "if not defined ATATUS_UPDATE_REEXEC if not defined WHEEL_DIR" in text
+    assert 'set "ATATUS_UPDATE_REEXEC=1"' in text
+
+
+def test_install_bat_falls_back_when_the_fetch_fails():
+    assert "continuing with the local copy" in INSTALL_BAT.read_text()
+
+
+def test_install_bat_only_refetches_the_installed_copy():
+    """The documented Windows update runs the installer from TEMP, which the
+    update never rewrites. Only the copy in INSTALL_DIR needs the hand-over."""
+    text = INSTALL_BAT.read_text()
+    assert 'set "SELF_DIR=%~dp0"' in text
+    assert 'if /i "!SELF_DIR!"=="%INSTALL_DIR%\\"' in text
+
+
+def test_neither_installer_writes_into_the_install_dir():
+    """The fresh copy must not land in the tree the update is rewriting, and
+    INSTALL_DIR is a checkout, so a stray file would show up untracked there."""
+    assert '"${TMPDIR:-/tmp}/atatus-install-update.sh"' in INSTALL_SH.read_text()
+    assert '%TEMP%\\atatus-install-update.bat' in INSTALL_BAT.read_text()

@@ -88,6 +88,26 @@ exit /b %ERRORLEVEL%
 REM --- cmd_update ---
 :cmd_update
 if not exist "%INSTALL_DIR%" ( echo [atatus] Not installed at %INSTALL_DIR% >&2 & exit /b 1 )
+REM Only the copy inside INSTALL_DIR is at risk: the pull/extract rewrites it
+REM while cmd.exe is still re-reading it by byte offset after every line. Run
+REM from anywhere else, including the TEMP copy the docs tell Windows users to
+REM download, the running file is untouched and already current. Mirrors
+REM install.sh, which skips the fetch on the same condition.
+set "SELF_DIR=%~dp0"
+if /i "!SELF_DIR!"=="%INSTALL_DIR%\" if not defined ATATUS_UPDATE_REEXEC if not defined WHEEL_DIR (
+    set "FRESH=%TEMP%\atatus-install-update.bat"
+    set "FRESH_URL=https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/!INSTALL_BRANCH!/install.bat"
+    if exist "!FRESH!" del /q "!FRESH!" >nul 2>&1
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri '!FRESH_URL!' -OutFile '!FRESH!'" >nul 2>&1
+    if not exist "!FRESH!" curl -sSfL "!FRESH_URL!" -o "!FRESH!" >nul 2>&1
+    if exist "!FRESH!" (
+        echo [atatus] Fetched the latest installer
+        set "ATATUS_UPDATE_REEXEC=1"
+        call "!FRESH!" update --branch !INSTALL_BRANCH!
+        exit /b !ERRORLEVEL!
+    )
+    echo [atatus] Could not fetch the latest installer - continuing with the local copy
+)
 call :find_python
 if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
 REM Re-registering runs each harness's installer, which prompts for the project
@@ -323,7 +343,7 @@ echo     omp                 Install tracing for Oh My Pi (omp)
 echo     devin               Install tracing for Devin CLI
 echo     antigravity         Install tracing for Google Antigravity
 echo     status              Report configured harnesses and hook wiring
-echo     update              Update to latest and reinstall all harnesses
+echo     update              Fetch the latest installer, update and reinstall all harnesses
 echo     uninstall [harness] Remove one harness or full wipe
 echo.
 echo   Flags:

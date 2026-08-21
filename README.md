@@ -114,7 +114,7 @@ All three take the same form as the install command, on either OS:
 | Action | Command argument | Notes |
 |---|---|---|
 | Add another harness | `bash -s -- codex` | Offers to copy the license key from a harness you already set up. Each harness gets its own project name. |
-| Update | `bash -s -- update` | Updates the package and re-registers every installed harness. On a terminal you are asked once per harness whether to keep its stored config; with no terminal it keeps them all. |
+| Update | `bash -s -- update` | Updates the package and re-registers every installed harness. On a terminal you are asked once per harness whether to keep its stored config; with no terminal it keeps them all. Running the installed copy (`~/.atatus/harness/install.sh update`) fetches the current installer and hands over to it first, so an old local copy never updates with stale steps. |
 | Remove one harness | `bash -s -- uninstall codex` | Removes that harness's hooks. Everything else is left alone. |
 | Remove everything | `bash -s -- uninstall` | Full wipe: venv, package and `~/.atatus/harness/config.json`. |
 

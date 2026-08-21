@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from core.common import DEFAULT_OTLP_ENDPOINT
 from core.config import load_config
 from core.setup import CONFIG_FILE, INSTALL_DIR, VENV_DIR
 
@@ -244,7 +245,11 @@ def _format_human(status: dict) -> str:
 
         lines.append(f"  {item['name']}")
         lines.append(f"    project:  {item['project_name']}")
-        lines.append(f"    backend:  {item['target']} → {item['endpoint']}")
+        endpoint = item["endpoint"] or ""
+        backend = item["target"]
+        if endpoint and endpoint != DEFAULT_OTLP_ENDPOINT:
+            backend = f"{backend} → {endpoint}"
+        lines.append(f"    backend:  {backend}")
         lines.append(f"    API key:  {'present' if item['api_key_present'] else 'MISSING'}")
         lines.append(f"    hooks:    {reg}" + (f" ({item['registration_path']})" if item["registration_path"] else ""))
 

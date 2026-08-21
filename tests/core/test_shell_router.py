@@ -52,10 +52,14 @@ class TestShellSyntax:
         Cap raised 400 -> 460 for non-interactive install, `status` and
         `--wheel-dir`: flag parsing and the pip invocation both run *before* the
         venv exists, so neither can move into core/setup/.
+
+        Raised again 460 -> 500: `update` now re-execs from a freshly fetched
+        installer, which has to happen before any of the update runs and so
+        cannot live in core/setup/ either.
         """
         text = _read_install_sh()
         lines = text.strip().splitlines()
-        assert len(lines) <= 460, f"install.sh has {len(lines)} lines — should be under 460"
+        assert len(lines) <= 500, f"install.sh has {len(lines)} lines — should be under 500"
 
 
 # ---------------------------------------------------------------------------
@@ -426,15 +430,17 @@ class TestNonInteractiveFlags:
         assert "status      Report configured harnesses" in self.sh
         assert "status              Report configured harnesses" in self.bat
 
-    def test_update_forces_noninteractive_without_a_terminal(self):
+    def test_update_forces_noninteractive(self):
         """update re-registers every harness, which prompts for the project name.
 
         With no terminal that died with an unhandled EOFError partway through,
-        leaving some harnesses re-registered and others not.
+        leaving some harnesses re-registered and others not. Both installers used
+        to set the flag only when no terminal was detected; they now set it for
+        every update, since an update re-registers what is already configured and
+        has nothing to ask about either way.
         """
-        assert '[[ -n "$_tty_in" ]] || export ATATUS_NONINTERACTIVE=1' in self.sh
-        # cmd has no -t test, so the .bat asks Python instead.
-        assert "sys.stdin.isatty()" in self.bat
+        assert "export ATATUS_NONINTERACTIVE=1" in self.sh
+        assert 'set "ATATUS_NONINTERACTIVE=1"' in self.bat
 
 
 class TestWheelDir:
@@ -518,3 +524,62 @@ class TestConfigKeysResolve:
         )
         assert result.returncode == 0, f"harness_dir does not accept config key {key!r}"
         assert result.stdout.strip().startswith("tracing/")
+
+
+# ---------------------------------------------------------------------------
+# `update` re-execs from a freshly fetched installer
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateRefetchesItself:
+    """An update rewrites install.sh while bash is still reading it by offset.
+
+    Continuing in the replaced file is what corrupts a half-finished update, so
+    `update` downloads a fresh copy and hands over to it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.sh = _read_install_sh()
+
+    def test_installer_url_is_branch_derived(self):
+        assert 'INSTALL_SH_URL="https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/${INSTALL_BRANCH}/install.sh"' in self.sh
+
+    def test_branch_urls_are_set_in_one_place(self):
+        """--branch must not update the tarball URL and miss the installer URL."""
+        assert self.sh.count("set_branch_urls") == 3  # definition + two callers
+        assert self.sh.count("archive/refs/heads/${INSTALL_BRANCH}.tar.gz") == 1
+
+    def test_update_execs_the_fresh_copy(self):
+        assert 'exec bash "$fresh" update ${args[@]+"${args[@]}"}' in self.sh
+
+    def test_reexec_is_guarded_against_looping(self):
+        assert '-z "${ATATUS_UPDATE_REEXEC:-}"' in self.sh
+        assert "export ATATUS_UPDATE_REEXEC=1" in self.sh
+
+    def test_only_the_installed_copy_refetches(self):
+        """The overwrite hazard exists only for the copy inside INSTALL_DIR.
+
+        The documented paths -- `curl | bash -s -- update` and, on Windows, the
+        installer downloaded to TEMP -- are already current and are never a
+        target of the pull or the extract, so they must not fetch anything.
+        """
+        guard = [ln for ln in self.sh.splitlines() if "ATATUS_UPDATE_REEXEC:-" in ln][0]
+        assert '-z "$WHEEL_DIR"' in guard
+        assert "running_from_install_dir" in guard
+        assert '[[ -f "${BASH_SOURCE[0]}" ]] || return 1' in self.sh
+        assert '[[ "$self" == "$dir" ]]' in self.sh
+
+    def test_the_fresh_copy_is_not_written_into_the_install_dir(self):
+        """It would sit inside the tree the update is rewriting, and INSTALL_DIR
+        is a checkout, so it would also show up as untracked there."""
+        assert '"${TMPDIR:-/tmp}/atatus-install-update.sh"' in self.sh
+        assert ".install-update.sh" not in self.sh
+
+    def test_a_failed_fetch_falls_back_instead_of_aborting(self):
+        assert "continuing with the local copy" in self.sh
+
+    def test_the_fetch_is_time_bounded(self):
+        """A hung network must not stall the update indefinitely."""
+        assert "--connect-timeout 5" in self.sh
+        assert 'download_file "$INSTALL_SH_URL" "$fresh" 8' in self.sh

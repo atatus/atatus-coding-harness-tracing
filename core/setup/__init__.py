@@ -175,13 +175,16 @@ def prompt_backend(
         sys.exit(1)
 
     endpoint_default = stored_endpoint or DEFAULT_OTLP_ENDPOINT
+    # The hosted collector URL is never echoed: nobody types it, and showing it
+    # invites hard-coding. A stored value is the user's own on-premise URL.
+    endpoint_hint = stored_endpoint or "press Enter if you are not using Atatus on-premise"
 
     print("")
     if sys.stdout.isatty() and os.name != "nt":
-        print("\033[1;33mOTLP Endpoint\033[0m (leave blank for the default collector):")
+        print("\033[1;33mOTLP Endpoint\033[0m (only needed for Atatus on-premise):")
     else:
-        print("OTLP Endpoint (leave blank for the default collector):")
-    otlp_endpoint = input(f"OTLP Endpoint [{endpoint_default}]: ").strip()
+        print("OTLP Endpoint (only needed for Atatus on-premise):")
+    otlp_endpoint = input(f"OTLP Endpoint [{endpoint_hint}]: ").strip()
     if not otlp_endpoint:
         otlp_endpoint = endpoint_default
 
@@ -236,7 +239,8 @@ def _backend_from_env(target: str, current: dict | None = None) -> tuple[str, di
         endpoint_source = _source_of("ATATUS_OTLP_ENDPOINT", fallback="default")
 
     info(f"Licence key: found (from {source})")
-    info(f"OTLP endpoint: {endpoint} (from {endpoint_source})")
+    shown = "default" if endpoint == DEFAULT_OTLP_ENDPOINT else endpoint
+    info(f"OTLP endpoint: {shown} (from {endpoint_source})")
 
     return (target, {"endpoint": endpoint, "api_key": api_key})
 
@@ -1080,7 +1084,9 @@ def _reuse_existing(harness_name: str, entry: dict, user_id: str) -> bool:
     print("")
     info(f"Existing '{harness_name}' configuration found:")
     print(f"         Project name : {entry.get('project_name') or '(unset)'}")
-    print(f"         Endpoint     : {entry.get('endpoint') or DEFAULT_OTLP_ENDPOINT}")
+    endpoint = entry.get("endpoint") or ""
+    if endpoint and endpoint != DEFAULT_OTLP_ENDPOINT:
+        print(f"         Endpoint     : {endpoint}")
     print(f"         License key  : {_mask_secret(entry.get('api_key') or '')}")
     print(f"         User ID      : {user_id or '(unset)'}")
     print("")

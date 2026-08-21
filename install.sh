@@ -18,7 +18,11 @@ set -euo pipefail
 
 REPO_URL="https://github.com/atatus/atatus-coding-harness-tracing.git"
 INSTALL_BRANCH="${ATATUS_INSTALL_BRANCH:-main}"
-TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+set_branch_urls() {
+    TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+    INSTALL_SH_URL="https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/${INSTALL_BRANCH}/install.sh"
+}
+set_branch_urls
 INSTALL_DIR="${HOME}/.atatus/harness"
 VENV_DIR="${INSTALL_DIR}/venv"
 WHEEL_DIR="${ATATUS_WHEEL_DIR:-}"
@@ -110,13 +114,29 @@ git_sync_harness_repo() {
     return 1
 }
 
+# True only when this script is the copy the installer placed in INSTALL_DIR,
+# which is the one an update overwrites underneath itself. A pipe has no file.
+running_from_install_dir() {
+    [[ -f "${BASH_SOURCE[0]}" ]] || return 1
+    local self; self="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+    local dir;  dir="$(cd "$INSTALL_DIR" 2>/dev/null && pwd)" || return 1
+    [[ "$self" == "$dir" ]]
+}
+
+# max_time bounds the whole transfer: a hung network must not leave the user
+# staring at an update that never starts.
+download_file() {
+    local url="$1" dest="$2" max_time="${3:-120}"
+    if command_exists curl; then curl -sSfL --connect-timeout 5 --max-time "$max_time" "$url" -o "$dest"
+    elif command_exists wget; then wget -q --tries=1 --timeout="$max_time" -O "$dest" "$url"
+    else err "Neither curl nor wget found — cannot download"; return 1; fi
+}
+
 install_repo_tarball() {
     local tarball_url="${1:-$TARBALL_URL}"
     info "Downloading coding-harness-tracing tarball..."
     local tmp_tar; tmp_tar="$(mktemp)"
-    if command_exists curl; then curl -sSfL "$tarball_url" -o "$tmp_tar"
-    elif command_exists wget; then wget -qO "$tmp_tar" "$tarball_url"
-    else rm -f "$tmp_tar"; err "Neither curl nor wget found — cannot download"; exit 1; fi
+    download_file "$tarball_url" "$tmp_tar" || { rm -f "$tmp_tar"; exit 1; }
     mkdir -p "$INSTALL_DIR"
     tar xzf "$tmp_tar" --strip-components=1 -C "$INSTALL_DIR"
     rm -f "$tmp_tar"
@@ -306,7 +326,8 @@ Commands:
   devin       Install and configure tracing for Devin CLI
   antigravity Install and configure tracing for Google Antigravity
   status      Report configured harnesses and whether their hooks are wired up
-  update      Update the installed atatus-coding-harness-tracing and re-register all harnesses
+  update      Fetch the latest installer, update atatus-coding-harness-tracing and
+              re-register all harnesses
   uninstall <harness>   Tear down one harness
   uninstall             Full wipe: venv + repo + shared config
 
@@ -360,7 +381,7 @@ main() {
             --branch)
                 i=$((i + 1))
                 INSTALL_BRANCH="${args[$i]:-main}"
-                TARBALL_URL="https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/${INSTALL_BRANCH}.tar.gz"
+                set_branch_urls
                 ;;
             --wheel-dir)
                 i=$((i + 1))
@@ -416,6 +437,16 @@ main() {
             "$vp" -m core.setup.status $status_args
             ;;
         update)
+            if [[ -z "${ATATUS_UPDATE_REEXEC:-}" && -z "$WHEEL_DIR" ]] && running_from_install_dir; then
+                local fresh="${TMPDIR:-/tmp}/atatus-install-update.sh"
+                if download_file "$INSTALL_SH_URL" "$fresh" 8; then
+                    info "Fetched the latest installer"
+                    export ATATUS_UPDATE_REEXEC=1
+                    exec bash "$fresh" update ${args[@]+"${args[@]}"}
+                fi
+                rm -f "$fresh"
+                warn "Could not fetch the latest installer — continuing with the local copy"
+            fi
             header "Updating atatus-coding-harness-tracing"
             # Re-registering runs each harness's installer, which prompts for the
             # project name. An update re-registers what is already configured, so
