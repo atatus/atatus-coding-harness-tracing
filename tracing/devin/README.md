@@ -85,7 +85,7 @@ install.bat uninstall devin
 |---------|---------|
 | Harness key | `devin` |
 | Project name | `devin` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.config/devin/config.json` (Windows: `%APPDATA%\devin\config.json`) |
 | Hook events registered | `Stop`, `SessionEnd` |
 | Data source | `~/.local/share/devin/cli/sessions.db` (live, read-only; Windows: `%USERPROFILE%\.local\share\devin\cli\sessions.db`) |

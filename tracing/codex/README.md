@@ -80,7 +80,7 @@ install.bat uninstall codex
 |---------|---------|
 | Harness key | `codex` |
 | Project name | `codex` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.codex/config.toml` |
 | Hook events handled | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop` (via real Codex hooks); `agent-turn-complete` (via `notify`) for token usage |
 | Env override file | `~/.codex/atatus-env.sh` |

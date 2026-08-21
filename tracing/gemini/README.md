@@ -80,7 +80,7 @@ install.bat uninstall gemini
 |---------|---------|
 | Harness key | `gemini` |
 | Project name | `gemini` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.gemini/settings.json` |
 | Hook events registered | `SessionStart`, `SessionEnd`, `BeforeAgent`, `AfterAgent`, `BeforeModel`, `AfterModel`, `BeforeTool`, `AfterTool` |
 | State directory | `~/.atatus/harness/state/gemini/` |

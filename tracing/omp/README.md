@@ -106,7 +106,7 @@ Uninstall removes the shim's path from the `extensions` array in `~/.omp/agent/s
 |---------|---------|
 | Harness key | `omp` |
 | Project name | `omp` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook file | `~/.omp/extensions/atatus-tracing.ts` |
 | Registration | absolute path in `extensions` array of `~/.omp/agent/settings.json` |
 | Lifecycle events forwarded | `before_agent_start`, `turn_end`, `agent_end`, `session_shutdown` |

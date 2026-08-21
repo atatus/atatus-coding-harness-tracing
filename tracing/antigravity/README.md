@@ -83,7 +83,7 @@ install.bat uninstall antigravity
 |---------|---------|
 | Harness key | `antigravity` |
 | Project name | `antigravity` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.gemini/config/hooks.json` |
 | Hook events registered | `PreInvocation`, `Stop` |
 | State directory | `~/.atatus/harness/state/antigravity/` |

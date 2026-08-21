@@ -67,7 +67,7 @@ Then proceed to [Configure Settings](#configure-settings).
    `target`, show what is stored (license key as its last 4 characters only) and ask
    whether to keep it. If yes, change nothing and just re-register the hooks.
 1. **Credentials** (only if reconfiguring, or if no existing config): the Atatus license key
-2. **OTLP Endpoint** (optional): only if you were given a collector other than the default `https://otel-rx.atatus.com`
+2. **OTLP Endpoint** (optional): only if you are running Atatus on-premise
 3. **Project name**: defaults to `"antigravity"` on a fresh install, and to the stored name when one exists. Stored under `harnesses.antigravity.project_name`. This becomes the OTLP `service.name`, so everyone who accepts the default shares one project — suggest a distinct name when that is not what they want
 4. **User ID** (optional): Set `ATATUS_USER_ID` env var to identify spans by user (useful for teams)
 

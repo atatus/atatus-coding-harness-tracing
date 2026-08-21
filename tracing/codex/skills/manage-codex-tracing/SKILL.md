@@ -134,7 +134,6 @@ If no config exists yet, create it:
     "codex": {
       "project_name": "codex",
       "target": "atatus",
-      "endpoint": "https://otel-rx.atatus.com",
       "api_key": ""
     }
   }
@@ -244,7 +243,7 @@ Tell the user:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ATATUS_API_KEY` | Yes | - | Atatus license key |
-| `ATATUS_OTLP_ENDPOINT` | No | `https://otel-rx.atatus.com` | Atatus collector URL |
+| `ATATUS_OTLP_ENDPOINT` | No | set by the installer | Atatus collector URL |
 | `ATATUS_PROJECT_NAME` | No | `codex` | Project name in Atatus |
 | `ATATUS_USER_ID` | No | - | User ID to attach to all spans as `user.id` attribute |
 | `ATATUS_TRACE_ENABLED` | No | `true` | Enable/disable tracing |

@@ -66,7 +66,7 @@ Then proceed to [Configure Settings](#configure-settings).
    whether to keep it. If yes, change nothing and just re-register the hooks.
 1. **Credentials** (only if reconfiguring, or if no existing config):
    - Atatus license key, and optionally a custom OTLP endpoint
-     (default: `https://otel-rx.atatus.com`)
+     (leave blank unless you are running Atatus on-premise)
 2. **Project name**: defaults to `"gemini"` on a fresh install, and to the stored name when one exists. Stored under `harnesses.gemini.project_name`. This becomes the OTLP `service.name`, so everyone who accepts the default shares one project — suggest a distinct name when that is not what they want
 3. **User ID** (optional): Set `ATATUS_USER_ID` env var to identify spans by user (useful for teams)
 

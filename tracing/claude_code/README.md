@@ -23,7 +23,7 @@ The marketplace flow registers the hooks but skips the interactive wizard, so ba
 }
 ```
 
-`ATATUS_OTLP_ENDPOINT` is optional and defaults to `https://otel-rx.atatus.com`. Each `ATATUS_LOG_*` flag accepts `"true"` or `"false"`. The values above mirror the wizard's defaults; omitting a flag entirely gives you the same posture.
+`ATATUS_OTLP_ENDPOINT` is optional. Set it only if you are running Atatus on-premise. Each `ATATUS_LOG_*` flag accepts `"true"` or `"false"`. The values above mirror the wizard's defaults; omitting a flag entirely gives you the same posture.
 
 > **`ATATUS_LOG_TOOL_CONTENT` is `false` on purpose.** Tool output is where file bodies, shell stdout, and anything pasted into a session end up. Set it to `"true"` only if you intend to capture all of that.
 
@@ -116,7 +116,7 @@ install.bat uninstall claude
 |---------|---------|
 | Harness key | `claude-code` |
 | Project name | `claude-code` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.claude/settings.json` |
 | Hook events registered | `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`, `PermissionDenied`, `PreCompact`, `PostCompact` |
 | State directory | `~/.atatus/harness/state/claude-code/` |

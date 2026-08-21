@@ -68,7 +68,7 @@ Configuration has two parts:
 1. **Scope**: Global (`~/.claude/settings.json`) or project-local (`.claude/settings.local.json`)
 2. **Credentials** (only if no existing config):
    - Atatus license key, and optionally a custom OTLP endpoint
-     (default: `https://otel-rx.atatus.com`)
+     (leave blank unless you are running Atatus on-premise)
 3. **Project name**: defaults to `"claude-code"` on a fresh install, and to the stored name when one exists. Stored under `harnesses.claude-code.project_name`. This becomes the OTLP `service.name`, so everyone who accepts the default shares one project — suggest a distinct name when that is not what they want
 4. **User ID** (optional): Set `ATATUS_USER_ID` to identify spans by user (useful for teams)
 
@@ -99,7 +99,6 @@ The config file at `~/.atatus/harness/config.json` is the single source of truth
     "claude-code": {
       "project_name": "claude-code",
       "target": "atatus",
-      "endpoint": "https://otel-rx.atatus.com",
       "api_key": "<key>"
     }
   }

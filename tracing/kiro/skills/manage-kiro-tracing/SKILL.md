@@ -71,7 +71,7 @@ Configuration has two parts:
    whether to keep it. If yes, change nothing and just re-register the hooks.
 1. **Credentials** (only if reconfiguring, or if no existing config):
    - Atatus license key, and optionally a custom OTLP endpoint
-     (default: `https://otel-rx.atatus.com`)
+     (leave blank unless you are running Atatus on-premise)
 2. **Project name**: defaults to `"kiro"` on a fresh install, and to the stored name when one exists. Stored under `harnesses.kiro.project_name`. This becomes the OTLP `service.name`, so everyone who accepts the default shares one project — suggest a distinct name when that is not what they want
 3. **User ID** (optional): Set `ATATUS_USER_ID` env var to identify spans by user (useful for teams)
 4. **Agent name** (Kiro-specific): defaults to `atatus-traced`. The hooks are written into `~/.kiro/agents/<name>.json`. Use an existing agent if the user wants to add tracing to their current workflow without switching agents.

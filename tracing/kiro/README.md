@@ -81,7 +81,7 @@ install.bat uninstall kiro
 |---------|---------|
 | Harness key | `kiro` |
 | Project name | `kiro` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Default agent name | `atatus-traced` |
 | Hook config file | `~/.kiro/agents/<agent>.json` |
 | Hook events registered | `agentSpawn`, `userPromptSubmit`, `preToolUse`, `postToolUse`, `stop` |

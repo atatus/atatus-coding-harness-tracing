@@ -80,7 +80,7 @@ install.bat uninstall copilot
 |---------|---------|
 | Harness key | `copilot` |
 | Project name | `copilot` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `.github/hooks/hooks.json` |
 | Hook events registered | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop` |
 | State directory | `~/.atatus/harness/state/copilot/` |

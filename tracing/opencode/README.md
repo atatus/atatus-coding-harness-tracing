@@ -104,7 +104,7 @@ Uninstall deletes the plugin file at `~/.config/opencode/plugin/atatus-tracing.t
 |---------|---------|
 | Harness key | `opencode` |
 | Project name | `opencode` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Plugin file | `~/.config/opencode/plugin/atatus-tracing.ts` |
 | Lifecycle events forwarded | `message.updated` (assistant completed), `session.idle` |
 | Span tree | `Turn` (CHAIN) → `LLM` → `TOOL`; a `task` tool may contain `AGENT` → child `LLM`/`TOOL` |

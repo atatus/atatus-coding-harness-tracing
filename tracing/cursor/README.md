@@ -20,8 +20,8 @@ ways:
 
 - **Recommended:** run the bundled `manage-cursor-tracing` skill once from any agent session — it
   writes `~/.atatus/harness/config.json` for you.
-- **Or** export `ATATUS_API_KEY` (and `ATATUS_OTLP_ENDPOINT` if you were given a non-default
-  collector) in the environment Cursor launches from. On macOS a GUI-launched Cursor may not inherit
+- **Or** export `ATATUS_API_KEY` (and `ATATUS_OTLP_ENDPOINT` if you are running Atatus on-premise)
+  in the environment Cursor launches from. On macOS a GUI-launched Cursor may not inherit
   exports from your shell profile, so the config.json route is the more reliable of the two.
 
 If no backend is configured the hooks fail open — they no-op and never block Cursor.
@@ -104,7 +104,7 @@ install.bat uninstall cursor
 |---------|---------|
 | Harness key | `cursor` |
 | Project name | `cursor` |
-| Atatus endpoint | `https://otel-rx.atatus.com` |
+| Atatus endpoint | set by the installer |
 | Hook config file | `~/.cursor/hooks.json` |
 | Hook events registered | `sessionStart`, `sessionEnd`, `beforeSubmitPrompt`, `afterAgentResponse`, `afterAgentThought`, `beforeShellExecution`, `afterShellExecution`, `beforeMCPExecution`, `afterMCPExecution`, `beforeReadFile`, `afterFileEdit`, `beforeTabFileRead`, `afterTabFileEdit`, `postToolUse`, `stop` |
 | Events emitted by Cursor CLI | `sessionStart`, `sessionEnd`, `beforeShellExecution`, `afterShellExecution`, `afterFileEdit`, `postToolUse`, `stop` (subset of the above; remaining events are IDE-only) |

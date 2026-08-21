@@ -58,7 +58,6 @@ installer prints what is stored and offers to keep it:
 ```
 [atatus] Existing 'codex' configuration found:
          Project name : ashif-codex
-         Endpoint     : https://otel-rx.atatus.com
          License key  : ****...a91f
          User ID      : ashif
 
@@ -86,7 +85,7 @@ your own if you want them separated.
 #### 2. Credentials
 
 - **Atatus license key** — required. Create one under **Settings → Account Settings → API Keys**, choosing the type **Ingest License Key**.
-- **OTLP endpoint** — optional. Defaults to `https://otel-rx.atatus.com`; set it only if you have been given a different collector URL.
+- **OTLP endpoint** — optional. Set it only if you are running Atatus on-premise.
 
 If you've already configured *another* harness, the installer offers a **copy-from** menu so you can reuse those credentials instead of re-entering them. When this harness has its own stored credentials, both prompts default to keeping them — a blank line at each is what leaves them untouched.
 
@@ -162,7 +161,7 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | Variable | Description |
 |----------|-------------|
 | `ATATUS_API_KEY` | Atatus license key. Required — without it spans are dropped. |
-| `ATATUS_OTLP_ENDPOINT` | Collector URL. Optional; defaults to `https://otel-rx.atatus.com`. |
+| `ATATUS_OTLP_ENDPOINT` | Collector URL. Optional; set it only if you are running Atatus on-premise. |
 
 > Claude Code plugin reads env vars from `~/.claude/settings.json` under the `env` block
 
