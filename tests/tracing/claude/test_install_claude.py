@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import core.setup as _setup
+from core.common import DEFAULT_OTLP_ENDPOINT
 
 
 @pytest.fixture()
@@ -65,10 +66,10 @@ def _fake_stdout():
     )()
 
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 
@@ -155,7 +156,7 @@ class TestFreshInstall:
         # All fields at the same level — no nested backend block
         assert entry["project_name"] == "claude-code"
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "test-key"
 
         # No legacy top-level backend block
@@ -202,7 +203,7 @@ class TestExistingEntry:
         original_entry = {
             "project_name": "old-name",
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "original-key",
         }
         config_file.write_text(json.dumps({"harnesses": {"claude-code": original_entry}}, indent=2))
@@ -227,7 +228,7 @@ class TestExistingEntry:
         assert entry["project_name"] == "new-project-name"
         # credentials preserved
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "original-key"
 
 
@@ -244,13 +245,13 @@ class TestCopyFrom:
         codex_entry = {
             "project_name": "codex",
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "codex-key",
         }
         config_file.write_text(json.dumps({"harnesses": {"codex": codex_entry}}, indent=2))
 
         # Mock prompt_backend to return atatus target with codex's credentials (simulating copy-from)
-        copied_creds = {"endpoint": "https://otel-rx.atatus.com", "api_key": "codex-key"}
+        copied_creds = {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "codex-key"}
         monkeypatch.setattr(
             _setup,
             "prompt_backend",
@@ -273,7 +274,7 @@ class TestCopyFrom:
 
         # claude-code got codex's credentials
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "codex-key"
         assert entry["project_name"] == "claude-code"
 
@@ -320,7 +321,7 @@ class TestUninstall:
         config["harnesses"]["copilot"] = {
             "project_name": "copilot",
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "copilot-key",
         }
         config_file.write_text(json.dumps(config, indent=2))
@@ -363,7 +364,7 @@ class TestUninstall:
             {
                 "ATATUS_USER_ID": "user-42",
                 "ATATUS_API_KEY": "ak-secret",
-                "ATATUS_OTLP_ENDPOINT": "https://otel-rx.atatus.com",
+                "ATATUS_OTLP_ENDPOINT": DEFAULT_OTLP_ENDPOINT,
                 "UNRELATED_VAR": "keep-me",
             }
         )

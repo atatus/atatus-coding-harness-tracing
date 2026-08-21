@@ -8,6 +8,7 @@ import pytest
 
 import core.setup as _setup
 import tracing.copilot.install as _install
+from core.common import DEFAULT_OTLP_ENDPOINT
 
 install = _install.install
 uninstall = _install.uninstall
@@ -17,10 +18,10 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 
@@ -180,7 +181,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -233,7 +234,7 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
                 "copilot": {
                     "project_name": "copilot",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -261,7 +262,7 @@ class TestInstallExistingCopilotEntryOnlyUpdatesProjectName:
         assert entry["project_name"] == "my-copilot"
         # Other fields preserved
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "ak-existing"
 
 

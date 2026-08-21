@@ -13,6 +13,7 @@ import pytest
 import core.setup as _setup
 import tracing.codex._toml as codex_toml
 import tracing.codex.install as codex_install
+from core.common import DEFAULT_OTLP_ENDPOINT
 from tracing.codex.constants import NOTIFY_BIN_NAME, get_codex_home
 
 # ---------------------------------------------------------------------------
@@ -20,10 +21,10 @@ from tracing.codex.constants import NOTIFY_BIN_NAME, get_codex_home
 # ---------------------------------------------------------------------------
 
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-xxx"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-xxx"},
 )
 
 
@@ -185,7 +186,7 @@ class TestInstall:
         config = json.loads(config_file.read_text())
         entry = config["harnesses"]["codex"]
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "ak-xxx"
         assert entry["project_name"] == "codex"
 
@@ -235,7 +236,7 @@ class TestInstall:
                         "codex": {
                             "project_name": "old-name",
                             "target": "atatus",
-                            "endpoint": "https://otel-rx.atatus.com",
+                            "endpoint": DEFAULT_OTLP_ENDPOINT,
                             "api_key": "ak-existing",
                         }
                     }
@@ -268,7 +269,7 @@ class TestInstall:
                         "claude-code": {
                             "project_name": "claude-code",
                             "target": "atatus",
-                            "endpoint": "https://otel-rx.atatus.com",
+                            "endpoint": DEFAULT_OTLP_ENDPOINT,
                             "api_key": "ak-shared",
                         }
                     }
@@ -283,7 +284,7 @@ class TestInstall:
             captured_kwargs["existing_harnesses"] = existing_harnesses
             return (
                 "atatus",
-                {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-shared"},
+                {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-shared"},
             )
 
         monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")

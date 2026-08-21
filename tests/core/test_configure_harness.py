@@ -13,12 +13,12 @@ import json
 import pytest
 
 import core.setup as _setup
-from core.common import LOG_CONFIG_VERSION
+from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION
 
 STORED = {
     "project_name": "ashif-codex",
     "target": "atatus",
-    "endpoint": "https://otel-rx.atatus.com",
+    "endpoint": DEFAULT_OTLP_ENDPOINT,
     "api_key": "ak-live-000000a91f",
 }
 

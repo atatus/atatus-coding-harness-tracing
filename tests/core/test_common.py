@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 from core.common import (
+    DEFAULT_OTLP_ENDPOINT,
     FileLock,
     StateManager,
     _attrs_to_otlp,
@@ -29,6 +30,17 @@ from core.common import (
     restore_stderr_from_log_file,
     send_span,
 )
+
+
+def test_default_endpoint_is_the_hosted_collector():
+    """The only test that spells the URL out.
+
+    Everything else imports the constant, so a test suite full of the literal
+    cannot go stale when the default moves. This one line is what stops the
+    constant itself from being changed by accident.
+    """
+    assert DEFAULT_OTLP_ENDPOINT == "https://otel-rx.atatus.com"
+
 
 # ── Logging tests ──────────────────────────────────────────────────────────
 
@@ -1082,7 +1094,7 @@ class TestSendSpan:
 
         mock_resolve.return_value = {
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
             "project_name": "test-proj"
         }
@@ -1105,7 +1117,7 @@ class TestSendSpan:
 
         mock_resolve.return_value = {
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
             "project_name": "default"
         }
@@ -1128,7 +1140,7 @@ class TestSendSpan:
 
         mock_resolve.return_value = {
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
             "project_name": "default"
         }
@@ -1145,12 +1157,12 @@ class TestSendSpan:
 
         mock_resolve.return_value = {
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
             "project_name": "default"
         }
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://otel-rx.atatus.com/v1/traces",
+            f"{DEFAULT_OTLP_ENDPOINT}/v1/traces",
             400,
             "Bad Request",
             {},
@@ -1170,7 +1182,7 @@ class TestSendSpan:
         mock_resolve.return_value = {
             "target": "atatus",
             "api_key": "my-key",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "project_name": "proj"
         }
         mock_resp = mock.MagicMock()
@@ -1182,7 +1194,7 @@ class TestSendSpan:
         assert send_span(self._SAMPLE_SPAN) is True
 
         req = mock_urlopen.call_args[0][0]
-        assert req.full_url == "https://otel-rx.atatus.com/v1/traces"
+        assert req.full_url == f"{DEFAULT_OTLP_ENDPOINT}/v1/traces"
         assert req.get_header("Content-type") == "application/json"
         assert req.get_header("Api-key") == "my-key"
         body = json.loads(req.data)
@@ -1195,7 +1207,7 @@ class TestGetTarget:
     def test_none_when_only_endpoint_set(self, monkeypatch):
         """An endpoint alone is not enough — the licence key selects the backend."""
         monkeypatch.delenv("ATATUS_API_KEY", raising=False)
-        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", "https://otel-rx.atatus.com")
+        monkeypatch.setenv("ATATUS_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT)
         assert get_target() == "none"
 
     def test_atatus_when_key_and_space(self, monkeypatch):
@@ -1263,7 +1275,7 @@ class TestResolveBackend:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-xxx"
                 }
             }
@@ -1272,7 +1284,7 @@ class TestResolveBackend:
 
         result = resolve_backend(self._make_span("claude-code"))
         assert result["target"] == "atatus"
-        assert result["endpoint"] == "https://otel-rx.atatus.com"
+        assert result["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert result["api_key"] == "ak-xxx"
         assert result["project_name"] == "claude-code"
 
@@ -1287,7 +1299,7 @@ class TestResolveBackend:
         result = resolve_backend(self._make_span("claude-code"))
         assert result["target"] == "atatus"
         assert result["api_key"] == "ak-env"
-        assert result["endpoint"] == "https://otel-rx.atatus.com"  # default
+        assert result["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert result["project_name"] == "claude-code"  # falls back to service_name
 
     def test_endpoint_without_key_is_unresolved(self, monkeypatch):
@@ -1317,7 +1329,7 @@ class TestResolveBackend:
             "harnesses": {
                 "opencode": {
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ph-config-key"
                 }
             }
@@ -1364,7 +1376,7 @@ class TestResolveBackend:
             "harnesses": {
                 "claude-code": {
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com"
+                    "endpoint": DEFAULT_OTLP_ENDPOINT
                 }
             }
         }
@@ -1381,7 +1393,7 @@ class TestResolveBackend:
             "harnesses": {
                 "claude-code": {
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-config"
                 }
             }
@@ -1420,7 +1432,7 @@ class TestResolveBackend:
             "harnesses": {
                 "claude-code": {
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-config",
                 }
             }
@@ -1430,7 +1442,7 @@ class TestResolveBackend:
         result = resolve_backend(self._make_span("claude-code"))
         assert result["target"] == "atatus"
         assert result["api_key"] == "ak-config"
-        assert result["endpoint"] == "https://otel-rx.atatus.com"
+        assert result["endpoint"] == DEFAULT_OTLP_ENDPOINT
 
     def test_config_missing_endpoint_uses_default(self, monkeypatch):
         """Endpoint is optional — it falls back to the default collector."""
@@ -1447,7 +1459,7 @@ class TestResolveBackend:
 
         result = resolve_backend(self._make_span("claude-code"))
         assert result["target"] == "atatus"
-        assert result["endpoint"] == "https://otel-rx.atatus.com"
+        assert result["endpoint"] == DEFAULT_OTLP_ENDPOINT
 
     def test_ignores_top_level_backend_key(self, monkeypatch):
         """Old top-level backend: block is not consulted."""
@@ -1511,7 +1523,7 @@ class TestSendSpanEdgeCases:
 
         mock_resolve.return_value = {
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
             "project_name": "default"
         }

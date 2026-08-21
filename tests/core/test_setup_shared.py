@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from core.common import DEFAULT_OTLP_ENDPOINT
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -50,7 +52,7 @@ def populated_config(fake_install):
             "claude-code": {
                 "project_name": "claude-code",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "",
             }
         }
@@ -197,14 +199,14 @@ class TestMergeHarnessEntry:
             "copilot",
             "my-copilot",
             target="atatus",
-            credentials={"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-xxx"},
+            credentials={"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-xxx"},
         )
 
         with open(fake_install / "config.json") as f:
             config = json.load(f)
         entry = config["harnesses"]["copilot"]
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "ak-xxx"
         assert entry["project_name"] == "my-copilot"
 
@@ -555,7 +557,7 @@ class TestWriteConfigFlat:
         config_path = str(fake_install / "config.json")
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -567,7 +569,7 @@ class TestWriteConfigFlat:
         assert entry == {
             "project_name": "cursor",
             "target": "atatus",
-            "endpoint": "https://otel-rx.atatus.com",
+            "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
         }
         assert "backend" not in cfg
@@ -578,7 +580,7 @@ class TestWriteConfigFlat:
         config_path = str(fake_install / "config.json")
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "codex",
             "codex",
             collector={"host": "127.0.0.1", "port": 4318},
@@ -597,14 +599,14 @@ class TestWriteConfigFlat:
         config_path = str(fake_install / "config.json")
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "claude-code",
             "claude-code",
             config_path=config_path,
         )
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-1"},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-1"},
             "copilot",
             "copilot",
             config_path=config_path,
@@ -628,7 +630,7 @@ class TestWriteConfigFlat:
 
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -659,7 +661,7 @@ class TestMergeHarnessEntryFlat:
         assert entry["project_name"] == "renamed-project"
         # Other fields preserved
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
 
     def test_full_update(self, fake_install, populated_config):
         """credentials param replaces target, endpoint and api_key."""
@@ -669,7 +671,7 @@ class TestMergeHarnessEntryFlat:
             "claude-code",
             "claude-code",
             target="atatus",
-            credentials={"endpoint": "https://otel-rx.atatus.com", "api_key": "ak-new"},
+            credentials={"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-new"},
         )
 
         with open(fake_install / "config.json") as f:
@@ -728,7 +730,7 @@ class TestPromptBackendCopyFrom:
             "claude-code": {
                 "project_name": "claude-code",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "ak-1",
             }
         }
@@ -739,7 +741,7 @@ class TestPromptBackendCopyFrom:
         target, creds = prompt_backend(existing_harnesses=existing)
         assert target == "atatus"
         assert creds["api_key"] == "ak-1"
-        assert creds["endpoint"] == "https://otel-rx.atatus.com"
+        assert creds["endpoint"] == DEFAULT_OTLP_ENDPOINT
 
     def test_no_copy_when_no_matching_target(self, monkeypatch):
         """Only atatus harnesses installed, user picks atatus — no menu shown."""
@@ -749,7 +751,7 @@ class TestPromptBackendCopyFrom:
             "claude-code": {
                 "project_name": "claude-code",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "",
             }
         }
@@ -777,7 +779,7 @@ class TestPromptBackendCopyFrom:
             "claude-code": {
                 "project_name": "claude-code",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "",
             }
         }

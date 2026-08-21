@@ -10,6 +10,7 @@ import pytest
 import core.setup as _setup
 import tracing.cursor.constants
 import tracing.cursor.install
+from core.common import DEFAULT_OTLP_ENDPOINT
 
 
 def _load_cursor_module(name: str):
@@ -76,10 +77,10 @@ def _fake_stdout():
     )()
 
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 
@@ -197,7 +198,7 @@ class TestCopyFrom:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "existing-key",
                 }
             }
@@ -249,7 +250,7 @@ class TestExistingEntry:
                 "cursor": {
                     "project_name": "cursor",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "",
                 }
             }
@@ -292,7 +293,7 @@ class TestExistingEntry:
         entry = config["harnesses"]["cursor"]
         assert entry["project_name"] == "my-cursor"
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
 
 
 class TestIdempotent:

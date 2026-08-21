@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.common import DEFAULT_OTLP_ENDPOINT
+
 
 @pytest.fixture(autouse=True)
 def _isolate_cwd(tmp_path, monkeypatch):
@@ -99,7 +101,7 @@ class TestPromptBackend:
             with patch("core.setup.getpass", return_value="lic-key"):
                 target, creds = prompt_backend()
         assert target == "atatus"
-        assert creds["endpoint"] == "https://otel-rx.atatus.com"
+        assert creds["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert creds["api_key"] == "lic-key"
 
     def test_custom_endpoint(self):
@@ -329,7 +331,7 @@ class TestWriteConfig:
 
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": "k"},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "k"},
             "codex",
             "codex",
             config_path=config_path,
@@ -368,7 +370,7 @@ class TestWriteConfig:
 
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -393,7 +395,7 @@ class TestWriteConfig:
 
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "claude-code",
             "claude-code",
             user_id="alice",
@@ -422,13 +424,13 @@ class TestClaudeSetup:
         settings = _load_settings(settings_path)
         env_block = settings.setdefault("env", {})
         env_block["ATATUS_API_KEY"] = "test-key"
-        env_block["ATATUS_OTLP_ENDPOINT"] = "https://otel-rx.atatus.com"
+        env_block["ATATUS_OTLP_ENDPOINT"] = DEFAULT_OTLP_ENDPOINT
         env_block["ATATUS_TRACE_ENABLED"] = "true"
         _save_settings(settings_path, settings)
 
         result = json.loads(settings_path.read_text())
         assert result["env"]["ATATUS_API_KEY"] == "test-key"
-        assert result["env"]["ATATUS_OTLP_ENDPOINT"] == "https://otel-rx.atatus.com"
+        assert result["env"]["ATATUS_OTLP_ENDPOINT"] == DEFAULT_OTLP_ENDPOINT
         assert result["env"]["ATATUS_TRACE_ENABLED"] == "true"
 
     def test_existing_settings_merged(self, tmp_path):
@@ -441,13 +443,13 @@ class TestClaudeSetup:
 
         settings = _load_settings(settings_path)
         env_block = settings.setdefault("env", {})
-        env_block["ATATUS_OTLP_ENDPOINT"] = "https://otel-rx.atatus.com"
+        env_block["ATATUS_OTLP_ENDPOINT"] = DEFAULT_OTLP_ENDPOINT
         _save_settings(settings_path, settings)
 
         result = json.loads(settings_path.read_text())
         assert result["theme"] == "dark"
         assert result["env"]["EXISTING_VAR"] == "keep_me"
-        assert result["env"]["ATATUS_OTLP_ENDPOINT"] == "https://otel-rx.atatus.com"
+        assert result["env"]["ATATUS_OTLP_ENDPOINT"] == DEFAULT_OTLP_ENDPOINT
 
     def test_load_settings_missing_file(self, tmp_path):
         """_load_settings returns {} for missing file."""
@@ -573,7 +575,7 @@ class TestCursorSetup:
 
         write_config(
             "atatus",
-            {"endpoint": "https://otel-rx.atatus.com", "api_key": ""},
+            {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
             "cursor",
             "cursor",
             config_path=config_path,
@@ -595,7 +597,7 @@ class TestCursorSetup:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "key",
                 }
             }
@@ -684,13 +686,13 @@ class TestCursorSetup:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "k",
                 },
                 "cursor": {
                     "project_name": "cursor",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "k",
                 },
             }

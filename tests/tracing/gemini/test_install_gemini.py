@@ -9,7 +9,7 @@ import pytest
 import core.setup as _setup
 import tracing.gemini.constants as _gc
 import tracing.gemini.install as _install
-from core.common import LOG_CONFIG_VERSION
+from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION
 
 install = _install.install
 uninstall = _install.uninstall
@@ -19,10 +19,10 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 
@@ -211,7 +211,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -269,7 +269,7 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
                 "gemini": {
                     "project_name": "gemini",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -297,7 +297,7 @@ class TestInstallExistingGeminiEntryOnlyUpdatesProjectName:
         assert entry["project_name"] == "my-gemini"
         # Other fields preserved
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "ak-existing"
 
 

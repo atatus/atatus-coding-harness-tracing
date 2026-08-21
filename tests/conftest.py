@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from core.common import DEFAULT_OTLP_ENDPOINT
+
 # Ensure repo root is importable
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -120,20 +122,20 @@ def sample_config(tmp_harness_dir):
             "claude-code": {
                 "project_name": "claude-code",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": ""
             },
             "codex": {
                 "project_name": "codex",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "",
                 "collector": {"host": "127.0.0.1", "port": 4318}
             },
             "cursor": {
                 "project_name": "cursor",
                 "target": "atatus",
-                "endpoint": "https://otel-rx.atatus.com",
+                "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": ""
             }
         }

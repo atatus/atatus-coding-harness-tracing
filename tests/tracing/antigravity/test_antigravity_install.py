@@ -14,6 +14,7 @@ import pytest
 import core.setup as _setup
 import tracing.antigravity.constants as _ac
 import tracing.antigravity.install as _install
+from core.common import DEFAULT_OTLP_ENDPOINT
 
 install = _install.install
 uninstall = _install.uninstall
@@ -25,7 +26,7 @@ uninstall = _install.uninstall
 
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 

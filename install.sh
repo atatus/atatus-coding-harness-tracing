@@ -179,7 +179,7 @@ run_harness_py() {
 #
 # Python.org installers ship their own OpenSSL that doesn't trust the macOS
 # system keychain, so urllib (used by every atatus-hook-*) fails with
-# "CERTIFICATE_VERIFY_FAILED" against https://otel-rx.atatus.com.
+# "CERTIFICATE_VERIFY_FAILED" against the Atatus collector.
 #
 # Fix: install certifi into the venv and write a sitecustomize.py that sets
 # SSL_CERT_FILE before any hook code runs. Idempotent — safe to call repeatedly.

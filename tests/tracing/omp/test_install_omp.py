@@ -24,7 +24,7 @@ import pytest
 import core.setup as _setup
 import tracing.omp.constants as _omp
 import tracing.omp.install as _install
-from core.common import LOG_CONFIG_VERSION
+from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION
 
 install = _install.install
 uninstall = _install.uninstall
@@ -34,10 +34,10 @@ uninstall = _install.uninstall
 # Test backend tuples
 # ---------------------------------------------------------------------------
 
-ATATUS_BACKEND = ("atatus", {"endpoint": "https://otel-rx.atatus.com", "api_key": ""})
+ATATUS_BACKEND = ("atatus", {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""})
 ATATUS_BACKEND = (
     "atatus",
-    {"endpoint": "https://otel-rx.atatus.com", "api_key": "test-key"},
+    {"endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "test-key"},
 )
 
 
@@ -388,7 +388,7 @@ class TestInstallSecondHarnessOffersCopyFrom:
                 "claude-code": {
                     "project_name": "claude-code",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -439,7 +439,7 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
                 "omp": {
                     "project_name": "omp",
                     "target": "atatus",
-                    "endpoint": "https://otel-rx.atatus.com",
+                    "endpoint": DEFAULT_OTLP_ENDPOINT,
                     "api_key": "ak-existing",
                 }
             }
@@ -465,7 +465,7 @@ class TestInstallExistingOmpEntryOnlyUpdatesProjectName:
         entry = config["harnesses"]["omp"]
         assert entry["project_name"] == "my-omp"
         assert entry["target"] == "atatus"
-        assert entry["endpoint"] == "https://otel-rx.atatus.com"
+        assert entry["endpoint"] == DEFAULT_OTLP_ENDPOINT
         assert entry["api_key"] == "ak-existing"
 
 
