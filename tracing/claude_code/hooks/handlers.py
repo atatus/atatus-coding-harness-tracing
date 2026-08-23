@@ -406,10 +406,17 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
             "openinference.span.kind": "LLM",
             "input.value": redact_content(env.log_prompts, prev_prompt),
             "output.value": "(Turn closed by fail-safe: Stop hook did not fire)",
+            # Queryable, so an abandoned turn can be told apart from one that ran and
+            # genuinely failed - the status alone cannot express that difference.
+            "turn.incomplete": "true",
         }
         user_id = state.get("user_id") or ""
         if user_id:
             failsafe_attrs["user.id"] = user_id
+        # Not OK. The turn was abandoned - interrupted, cancelled, or the process died
+        # before Stop - so reporting it as a success is a lie that reads as a clean turn
+        # in every rollup. ERROR is the only non-success state the pipeline models; the
+        # message and turn.incomplete carry the distinction.
         failsafe_span = build_span(
             f"Turn {prev_count}",
             "LLM",
@@ -421,6 +428,8 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
             failsafe_attrs,
             SERVICE_NAME,
             SCOPE_NAME,
+            status_code=2,
+            status_message="Turn did not complete: Stop hook never fired",
         )
         send_span(failsafe_span)
         state.delete("current_trace_id")

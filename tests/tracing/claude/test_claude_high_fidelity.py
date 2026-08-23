@@ -277,3 +277,38 @@ class TestLegacyFallback:
         attrs = {a["key"]: list(a["value"].values())[0] for a in spans[0]["attributes"]}
         assert attrs["openinference.span.kind"] == "LLM"
         assert spans[0]["name"] == "Turn 1"
+
+
+class TestFailSafeTurnIsNotASuccess:
+    """A turn closed by the fail-safe never finished — Stop never fired, because the user
+    interrupted it or the process died. Reporting it as a success makes an abandoned turn
+    indistinguishable from a clean one in every rollup."""
+
+    @pytest.fixture
+    def failsafe_span(self, tmp_path):
+        state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
+        state.init_state()
+        for key, value in {
+            "session_id": "s1", "trace_count": "1",
+            "current_trace_id": "a" * 32, "current_trace_span_id": "b" * 16,
+            "current_trace_start_time": "1", "current_trace_prompt": "go",
+        }.items():
+            state.set(key, value)
+
+        captured = []
+        payload = {"session_id": "s1", "prompt": "next turn", "cwd": str(tmp_path)}
+        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: state), \
+             mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True), \
+             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))):
+            handlers.user_prompt_submit()
+        assert captured, "fail-safe emitted nothing for the abandoned turn"
+        return captured[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+
+    def test_status_is_not_ok(self, failsafe_span):
+        # 1 is OK. An abandoned turn must not claim it.
+        assert failsafe_span["status"]["code"] != 1
+        assert failsafe_span["status"].get("message")
+
+    def test_marked_incomplete_so_it_is_distinguishable_from_a_real_failure(self, failsafe_span):
+        attrs = {a["key"]: list(a["value"].values())[0] for a in failsafe_span["attributes"]}
+        assert attrs.get("turn.incomplete") == "true"
