@@ -307,6 +307,7 @@ def _open_turn_if_new(state: StateManager, user_info: dict, user_parts: list) ->
 
     state.set("current_user_message_id", uid)
     state.set("current_trace_id", generate_trace_id())
+    state.set("llm_call_seq", "0")
     state.set("current_trace_span_id", generate_span_id())
 
     t_created = _timestamp_value((user_info.get("time") or {}).get("created"), get_timestamp_ms())
@@ -435,7 +436,11 @@ def _emit_llm_span(
     if user_id:
         attrs["user.id"] = user_id
 
-    span_name = f"LLM: {model_id}" if model_id else "LLM"
+    state.increment("llm_call_seq")
+    _seq = state.get("llm_call_seq") or "1"
+    # Ordinal is required, not cosmetic: the dashboard span bucketer collapses 3+
+    # adjacent same-name siblings and re-parents their children to depth 0.
+    span_name = f"LLM call {_seq}: {model_id}" if model_id else f"LLM call {_seq}"
     span_id = _message_span_id(state, msg_id)
     span = build_span(
         span_name,

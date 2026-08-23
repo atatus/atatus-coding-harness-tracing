@@ -227,7 +227,11 @@ def _flush_pending_model_call(state) -> None:
     except ValueError:
         c_tokens = 0
 
-    span_name = f"LLM: {model_name}" if model_name else "LLM"
+    state.increment("llm_call_seq")
+    _seq = state.get("llm_call_seq") or "1"
+    # Ordinal is required, not cosmetic: the dashboard span bucketer collapses 3+
+    # adjacent same-name siblings and re-parents their children to depth 0.
+    span_name = f"LLM call {_seq}: {model_name}" if model_name else f"LLM call {_seq}"
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "LLM",
@@ -241,10 +245,11 @@ def _flush_pending_model_call(state) -> None:
     if user_id:
         attrs["user.id"] = user_id
 
+    llm_span_id = generate_span_id()
     span = build_span(
         span_name,
         "LLM",
-        generate_span_id(),
+        llm_span_id,
         trace_id,
         parent_span_id,
         start_time,
@@ -254,6 +259,10 @@ def _flush_pending_model_call(state) -> None:
         SCOPE_NAME,
     )
     _send_span_async(span)
+    # Tools run after the model call that requested them has already been flushed, and
+    # Gemini's tool events carry no link back to it. Remembering the last flushed call
+    # is the only way to parent a tool to the step that asked for it.
+    state.set("last_llm_span_id", llm_span_id)
     _clear_model_state(state, model_call_id)
 
 
@@ -366,6 +375,8 @@ def _handle_before_agent(input_json: dict) -> None:
 
     state.increment("trace_count")
     state.set("current_trace_id", generate_trace_id())
+    state.set("llm_call_seq", "0")
+    state.delete("last_llm_span_id")
     state.set("current_trace_span_id", generate_span_id())
     state.set("current_trace_start_time", str(get_timestamp_ms()))
 
@@ -546,9 +557,15 @@ def _handle_after_tool(input_json: dict) -> None:
     state = resolve_session(input_json)
 
     trace_id = state.get("current_trace_id")
-    parent_span_id = state.get("current_trace_span_id")
-    if not trace_id or not parent_span_id:
+    turn_span_id = state.get("current_trace_span_id")
+    if not trace_id or not turn_span_id:
         return
+
+    # Prefer the model call that requested this tool; fall back to the turn so a tool
+    # that arrives before any call has flushed is kept rather than dropped.
+    llm_span_id = state.get("last_llm_span_id") or ""
+    parent_span_id = llm_span_id or turn_span_id
+    parentage = "model_call" if llm_span_id else "turn_fallback"
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
@@ -621,6 +638,7 @@ def _handle_after_tool(input_json: dict) -> None:
         "session.id": session_id,
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
+        "tracing.parentage": parentage,
         "input.value": tool_input,
         "output.value": tool_output,
         "tool.description": tool_description,

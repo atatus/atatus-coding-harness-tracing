@@ -41,11 +41,37 @@ find_python() {
 }
 
 # --- Check if (re)install is needed ---
+# Fingerprint every source file the venv installs, not just the manifest.
+# pyproject.toml changes only when packaging metadata does, so a code-only update
+# (new modules, rewritten handlers) left the venv serving the previously installed
+# wheel forever. Stat-only: no file reads, ~1ms over the tree.
+source_fingerprint() {
+    "$PYTHON_CMD" - "$PLUGIN_ROOT" <<'PYEOF' 2>/dev/null
+import hashlib, os, sys
+
+root = sys.argv[1]
+digest = hashlib.sha256()
+for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+    dirnames[:] = sorted(d for d in dirnames if d not in {"__pycache__", ".git", ".venv"})
+    for name in sorted(filenames):
+        if not name.endswith(".py") and name != "pyproject.toml":
+            continue
+        path = os.path.join(dirpath, name)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        digest.update(os.path.relpath(path, root).encode())
+        digest.update(b"%d:%d" % (stat.st_size, int(stat.st_mtime)))
+print(digest.hexdigest())
+PYEOF
+}
+
 needs_install() {
     [ ! -d "$VENV_DIR" ] && return 0
     [ ! -f "$MARKER" ] && return 0
-    # Compare pyproject.toml hash
-    current=$("$PYTHON_CMD" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PLUGIN_ROOT/pyproject.toml" 2>/dev/null) || return 0
+    current=$(source_fingerprint) || return 0
+    [ -z "$current" ] && return 0
     stored=$(cat "$MARKER" 2>/dev/null) || return 0
     [ "$current" != "$stored" ]
 }
@@ -88,8 +114,7 @@ bootstrap() {
     fi
 
     # Save hash marker
-    "$PYTHON_CMD" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" \
-        "$PLUGIN_ROOT/pyproject.toml" > "$MARKER"
+    source_fingerprint > "$MARKER"
 
     echo "[atatus] Tracing venv ready" >&2
 }

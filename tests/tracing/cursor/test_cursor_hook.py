@@ -455,7 +455,7 @@ class TestHandleAfterAgentResponse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2500),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "afterAgentResponse",
@@ -464,7 +464,7 @@ class TestHandleAfterAgentResponse:
 
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9999),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch("stop", {"conversation_id": "conv-1", "generation_id": "gen-1"})
 
@@ -483,7 +483,7 @@ class TestHandleAfterAgentResponse:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ccdd" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "afterAgentResponse",
@@ -535,7 +535,7 @@ class TestHandleAfterShellExecution:
         popped = {"command": "old_cmd", "start_ms": "1000"}
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=popped),
         ):
             _dispatch(
@@ -554,7 +554,7 @@ class TestHandleAfterShellExecution:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=None),
         ):
             _dispatch(
@@ -572,7 +572,7 @@ class TestHandleAfterShellExecution:
         fixture = cursor_after_shell_input
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=None),
         ):
             _dispatch(fixture["hook_event_name"], fixture)
@@ -620,7 +620,7 @@ class TestHandleStop:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation") as cleanup,
         ):
             _dispatch("stop", {"conversation_id": "c1"})
@@ -633,7 +633,7 @@ class TestHandleStop:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch("stop", {"conversation_id": "c1", "generation_id": "g1"})
@@ -808,7 +808,7 @@ class TestHandleAfterMcpExecution:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="bbcc" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=None),
         ):
             _dispatch(
@@ -893,7 +893,7 @@ class TestHandleAfterFileEdit:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="3344" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "afterFileEdit",
@@ -977,7 +977,7 @@ class TestHandleAfterTabFileEdit:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="7788" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "afterTabFileEdit",
@@ -1346,7 +1346,7 @@ class TestHandlePostToolUse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "postToolUse",
@@ -1372,7 +1372,7 @@ class TestHandlePostToolUse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "postToolUse",
@@ -1389,7 +1389,7 @@ class TestHandlePostToolUse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "postToolUse",
@@ -1407,7 +1407,7 @@ class TestHandlePostToolUse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "postToolUse",
@@ -1421,7 +1421,7 @@ class TestHandlePostToolUse:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
         ):
             _dispatch(
                 "postToolUse",
@@ -1487,7 +1487,7 @@ class TestHandleStopTokenCounts:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1508,7 +1508,7 @@ class TestHandleStopTokenCounts:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1574,7 +1574,7 @@ class TestHandleSessionEnd:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation") as cleanup,
         ):
             _dispatch(
@@ -1589,7 +1589,7 @@ class TestHandleSessionEnd:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1666,7 +1666,7 @@ class TestConversationIdAttribute:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.gen_root_span_save"),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=None),
@@ -1686,7 +1686,7 @@ class TestConversationIdAttribute:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1871,7 +1871,7 @@ class TestDeferredLlmSpan:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1988,7 +1988,7 @@ class TestDeferredLlmSpan:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(

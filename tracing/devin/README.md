@@ -114,14 +114,13 @@ Errors always land in `~/.atatus/harness/logs/devin.log`; set `export ATATUS_VER
 | `openinference.span.kind` | `AGENT` |
 | `input.value` | User prompt for the interaction |
 | `output.value` | Final assistant text for the interaction |
-| `llm.model_name` | Model name for the interaction |
-| `llm.token_count.prompt` | Interaction prompt tokens (omitted when 0) |
-| `llm.token_count.completion` | Interaction completion tokens (omitted when 0) |
-| `llm.token_count.total` | Interaction total tokens (omitted when 0) |
-| `llm.token_count.prompt_details.cache_read` | Cached prompt tokens read, a subset of prompt (omitted when 0) |
-| `llm.token_count.prompt_details.cache_write` | Prompt tokens written to cache, a subset of prompt (omitted when 0) |
 | `user.id` | Optional user identifier |
 | `devin.backend` | Agent backend (e.g. `Windsurf`) |
+
+🔴 **No token counts and no model on the root.** They used to be here, carrying the *sum* of the
+per-generation spans below — and summary queries sum `llm.token_count.*` across every span in a
+range, so every Devin interaction was billed at exactly **twice** its real usage. Tokens belong to
+the generation that spent them; the root is a container.
 
 ### LLM span (per generation)
 

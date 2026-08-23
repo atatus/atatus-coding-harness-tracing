@@ -332,6 +332,13 @@ def _handle_after_agent_thought(input_json, conversation_id, gen_id, trace_id, n
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
 
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
+
     thought = _jq_str(input_json, "thought", "thinking", "text")
 
     user_id = _resolve_user_id(input_json)
@@ -388,6 +395,13 @@ def _handle_after_shell_execution(input_json, conversation_id, gen_id, trace_id,
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
     popped = state_pop(f"shell_{sanitize(gen_id)}") if gen_id else None
+
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
 
     if popped:
         start_ms = popped.get("start_ms", "")
@@ -470,6 +484,12 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
     popped = state_pop(f"mcp_{sanitize(gen_id)}") if gen_id else None
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
 
     if popped:
         start_ms = popped.get("start_ms", "")
@@ -524,6 +544,13 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
 
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
+
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
 
     user_id = _resolve_user_id(input_json)
@@ -559,6 +586,12 @@ def _handle_after_file_edit(input_json, conversation_id, gen_id, trace_id, now_m
     """TOOL span for file edit. Replaces bash lines 344-371."""
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
 
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
     edits = redact_content(env.log_tool_content, _jq_str(input_json, "edits", "changes", "diff"))
@@ -597,7 +630,6 @@ def _handle_before_tab_file_read(input_json, conversation_id, gen_id, trace_id, 
     """TOOL span for tab file read. Replaces bash lines 376-398."""
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
-
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
 
     user_id = _resolve_user_id(input_json)
@@ -633,7 +665,6 @@ def _handle_after_tab_file_edit(input_json, conversation_id, gen_id, trace_id, n
     """TOOL span for tab file edit. Replaces bash lines 403-430."""
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
-
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
     edits = redact_content(env.log_tool_content, _jq_str(input_json, "edits", "changes", "diff"))
     input_val = f"{file_path}: {edits}" if edits else file_path
@@ -947,6 +978,12 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
 
     sid = span_id_16()
     parent = gen_root_span_get(gen_id) if gen_id else ""
+    if not parent:
+        # No root registered for this generation, so there is no turn to hang this on.
+        # Emitting it anyway makes it a root in its own trace: a Traces-page row with no
+        # prompt, no response and no tokens. Same rule the Claude Code tool hooks use.
+        log("cursor: no root span for this generation - span dropped")
+        return
 
     tool_input = _jq_str(input_json, "tool_input", "toolInput", "input", "arguments", "args")
     output = _jq_str(input_json, "result", "output", "response", "stdout")

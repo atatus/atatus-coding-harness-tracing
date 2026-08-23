@@ -314,17 +314,22 @@ class TestTurnEndBasic:
         assert state.get("current_trace_span_id") is not None
         # Lazily opened trace has an empty prompt.
         assert state.get("current_trace_prompt") == ""
-        # The child spans still got emitted under the lazily-opened root.
+        # The child spans still got emitted under the lazily-opened root: the model call
+        # parents to the turn, and the tools parent to the model call.
+        turn_span_id = state.get("current_trace_span_id")
+        llm_span_id = _get_span(_by_kind(captured_spans, "LLM")[0])["spanId"]
         for s in captured_spans:
-            assert _get_span(s)["traceId"] == state.get("current_trace_id")
-            assert _get_span(s)["parentSpanId"] == state.get("current_trace_span_id")
+            span = _get_span(s)
+            assert span["traceId"] == state.get("current_trace_id")
+            expected = turn_span_id if _kind(s) == "LLM" else llm_span_id
+            assert span["parentSpanId"] == expected
 
 
 class TestTurnEndLLMSpan:
     def test_llm_span_name_includes_model(self, mock_resolve, mock_ensure, state, captured_spans):
         _run_basic_turn(state)
         llm = _by_kind(captured_spans, "LLM")[0]
-        assert _name(llm) == "LLM: claude-sonnet-4"
+        assert _name(llm) == "LLM call 1: claude-sonnet-4"
 
     def test_llm_token_counts(self, mock_resolve, mock_ensure, state, captured_spans):
         _run_basic_turn(state)
@@ -414,15 +419,20 @@ class TestTurnEndToolSpans:
         bash = next(s for s in _by_kind(captured_spans, "TOOL") if _name(s) == "bash")
         assert _get_attrs(bash)["tool.name"]["stringValue"] == "bash"
 
-    def test_tools_are_children_of_turn_root_not_llm(self, mock_resolve, mock_ensure, state, captured_spans):
-        """TOOL spans hang off the Turn root span id, NOT the LLM span."""
-        trace_id, span_id = _run_basic_turn(state)
+    def test_tools_are_children_of_the_model_call_that_requested_them(
+        self, mock_resolve, mock_ensure, state, captured_spans
+    ):
+        """A tool belongs to the model call that asked for it, not to the turn."""
+        trace_id, turn_span_id = _run_basic_turn(state)
         llm_span_id = _get_span(_by_kind(captured_spans, "LLM")[0])["spanId"]
-        for tool in _by_kind(captured_spans, "TOOL"):
+        tools = _by_kind(captured_spans, "TOOL")
+        assert tools
+        for tool in tools:
             span = _get_span(tool)
             assert span["traceId"] == trace_id
-            assert span["parentSpanId"] == span_id
-            assert span["parentSpanId"] != llm_span_id
+            assert span["parentSpanId"] == llm_span_id
+            assert span["parentSpanId"] != turn_span_id
+            assert _get_attrs(tool)["tracing.parentage"]["stringValue"] == "model_call"
 
     def test_tool_timing_from_result_timestamp(self, mock_resolve, mock_ensure, state, captured_spans):
         """TOOL span end uses ToolResultMessage.timestamp (bash result = 5100ms)."""

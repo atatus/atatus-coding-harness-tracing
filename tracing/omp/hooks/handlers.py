@@ -195,6 +195,7 @@ def _per_tool_attrs(tool_name: str, tool_input: Any) -> dict:
 
 def _open_trace(state: StateManager, prompt: str) -> None:
     state.set("current_trace_id", generate_trace_id())
+    state.set("llm_call_seq", "0")
     state.set("current_trace_span_id", generate_span_id())
     state.set("current_trace_start_time", str(get_timestamp_ms()))
     state.set("current_trace_prompt", prompt)
@@ -254,13 +255,17 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by fail-safe
     _emit_turn_root(state, output_value)
 
 
-def _emit_llm_span(state: StateManager, message: Any) -> None:
+def _emit_llm_span(state: StateManager, message: Any) -> str:
+    """Emit the model-call span and return its id, so its tools can parent to it."""
     if not isinstance(message, dict):
-        return
+        return ""
     trace_id = state.get("current_trace_id")
     parent_span_id = state.get("current_trace_span_id")
     if not trace_id or not parent_span_id:
-        return
+        return ""
+
+    state.increment("llm_call_seq")
+    _seq = state.get("llm_call_seq") or "1"
 
     usage = message.get("usage") or {}
     if not isinstance(usage, dict):
@@ -307,10 +312,11 @@ def _emit_llm_span(state: StateManager, message: Any) -> None:
     if user_id:
         attrs["user.id"] = user_id
 
+    llm_span_id = generate_span_id()
     span = build_span(
-        f"LLM: {model}" if model else "LLM",
+        f"LLM call {_seq}: {model}" if model else f"LLM call {_seq}",
         "LLM",
-        generate_span_id(),
+        llm_span_id,
         trace_id,
         parent_span_id,
         start_ms,
@@ -321,13 +327,19 @@ def _emit_llm_span(state: StateManager, message: Any) -> None:
     )
     _send_span_async(span)
     state.set("current_final_output", output_text)
+    return llm_span_id
 
 
-def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict) -> None:
+def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict, llm_span_id: str = "") -> None:
     trace_id = state.get("current_trace_id")
-    parent_span_id = state.get("current_trace_span_id")
-    if not trace_id or not parent_span_id:
+    turn_span_id = state.get("current_trace_span_id")
+    if not trace_id or not turn_span_id:
         return
+
+    # A tool belongs to the model call that requested it. Falling back to the turn keeps
+    # the span rather than dropping it, and records which happened.
+    parent_span_id = llm_span_id or turn_span_id
+    parentage = "model_call" if llm_span_id else "turn_fallback"
 
     tool_name = tool_result.get("toolName") or "unknown"
     call_id = tool_result.get("toolCallId") or ""
@@ -341,6 +353,7 @@ def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict) -> None
         "session.id": state.get("session_id") or "",
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
+        "tracing.parentage": parentage,
         "input.value": redact_content(env.log_tool_content, input_text),
         "output.value": redact_content(env.log_tool_content, output_text),
     }
@@ -391,12 +404,12 @@ def _handle_turn_end(input_json: dict) -> None:
     message = input_json.get("message")
     if not isinstance(message, dict):
         message = {}
-    _emit_llm_span(state, message)
+    llm_span_id = _emit_llm_span(state, message)
 
     calls = _tool_calls(message)
     for tool_result in input_json.get("toolResults") or []:
         if isinstance(tool_result, dict):
-            _emit_tool_span(state, tool_result, calls)
+            _emit_tool_span(state, tool_result, calls, llm_span_id)
 
 
 def _handle_agent_end(input_json: dict) -> None:

@@ -224,7 +224,7 @@ class TestReconcileBasic:
     def test_llm_span_name_includes_model(self, mock_resolve, mock_ensure, state, captured_spans):
         _handle_reconcile(_load_fixture("reconcile_basic.json"))
         llm = _by_kind(captured_spans, "LLM")[0]
-        assert _name(llm) == "LLM: claude-sonnet-4"
+        assert _name(llm) == "LLM call 1: claude-sonnet-4"
 
     def test_llm_span_timing_from_message(self, mock_resolve, mock_ensure, state, captured_spans):
         """LLM span timestamps come from message.time.created / time.completed (ms)."""

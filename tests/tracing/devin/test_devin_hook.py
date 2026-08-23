@@ -241,17 +241,26 @@ class TestEmitInteraction:
         assert "file contents" not in tool["output.value"]
         assert tool["output.value"].startswith("<redacted (")
 
-    def test_root_token_totals_summed(self, captured_spans):
+    def test_tokens_live_only_on_the_steps_never_the_root(self, captured_spans):
+        """The root used to repeat the sum of its children, so any query summing token
+        columns over a range reported exactly twice the real usage — and therefore twice
+        the cost. Tokens belong to the call that spent them."""
         steps = [
             _step("A", content="x", prompt=100, completion=10, cache_read=40),
             _step("B", content="y", prompt=50, completion=5, cache_read=10),
         ]
         self._emit(captured_spans, steps)
+
         root = _span_attrs(next(s for s in captured_spans if _kind(s) == "AGENT"))
-        assert root["llm.token_count.prompt"] == 150
-        assert root["llm.token_count.completion"] == 15
-        assert root["llm.token_count.total"] == 165
-        assert root["llm.token_count.prompt_details.cache_read"] == 50
+        assert not [k for k in root if k.startswith("llm.token_count")], root
+        assert "llm.model_name" not in root
+
+        llm = [_span_attrs(s) for s in captured_spans if _kind(s) == "LLM"]
+        assert len(llm) == 2
+        assert sum(a["llm.token_count.prompt"] for a in llm) == 150
+        assert sum(a["llm.token_count.completion"] for a in llm) == 15
+        assert sum(a["llm.token_count.total"] for a in llm) == 165
+        assert sum(a["llm.token_count.prompt_details.cache_read"] for a in llm) == 50
 
     def test_root_input_output_and_meta(self, captured_spans):
         steps = [

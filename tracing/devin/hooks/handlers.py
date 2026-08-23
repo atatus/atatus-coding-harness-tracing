@@ -82,7 +82,6 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
     start_ms = steps[0].start_ms
     end_ms = steps[-1].end_ms or start_ms
     final_output = _step_output(steps[-1])
-    model_name = meta.get("model") or next((s.model_name for s in reversed(steps) if s.model_name), "")
 
     root_attrs: dict[str, Any] = {
         "session.id": session_id,
@@ -90,16 +89,9 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
         "input.value": redact_content(env.log_prompts, user_prompt),
         "output.value": redact_content(env.log_prompts, final_output),
     }
-    if model_name:
-        root_attrs["llm.model_name"] = model_name
-    root_attrs.update(
-        _token_attrs(
-            sum(s.prompt_tokens for s in steps),
-            sum(s.completion_tokens for s in steps),
-            sum(s.cache_read_tokens for s in steps),
-            sum(s.cache_write_tokens for s in steps),
-        )
-    )
+    # No tokens and no model on the root. Each step already carries its own, and the
+    # summary queries sum these columns across every span in the range - a copy here is
+    # the exact sum of the children, so the turn was being billed twice.
     if user_id:
         root_attrs["user.id"] = user_id
     if meta.get("backend"):
@@ -119,7 +111,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
     )
     send_span(root_span)
 
-    for step in steps:
+    for step_number, step in enumerate(steps, start=1):
         step_span_id = generate_span_id()
         output_text = redact_content(env.log_prompts, _step_output(step))
         output_messages = [{"message.role": "assistant", "message.content": output_text}]
@@ -132,6 +124,8 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
         }
         if step.model_name:
             step_attrs["llm.model_name"] = step.model_name
+        if step.request_id:
+            step_attrs["llm.message.id"] = step.request_id
         if step.thinking:
             step_attrs["llm.reasoning"] = redact_content(env.log_prompts, step.thinking)
         step_attrs.update(
@@ -144,7 +138,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
         )
 
         step_span = build_span(
-            f"LLM {step.request_id}",
+            f"LLM call {step_number}: {step.model_name}" if step.model_name else f"LLM call {step_number}",
             "LLM",
             step_span_id,
             trace_id,

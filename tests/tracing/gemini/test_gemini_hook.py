@@ -516,14 +516,14 @@ class TestAfterModel:
         assert state.get("current_model_call_id") == "mc-1"
 
     def test_span_name_includes_model(self, mock_resolve, state, captured_spans):
-        """Span name is 'LLM: {model_name}' when model is provided."""
+        """Span name is 'LLM call 1: {model_name}' when model is provided."""
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         state.set("current_model_call_id", "mc-1")
         state.set("model_mc-1_start", "1000")
         _handle_after_model(_final_chunk({"model": "gemini-2.5-pro", "model_call_id": "mc-1"}))
         span = _get_span(captured_spans[0])
-        assert span["name"] == "LLM: gemini-2.5-pro"
+        assert span["name"] == "LLM call 1: gemini-2.5-pro"
 
     def test_span_name_plain_when_no_model(self, mock_resolve, state, captured_spans):
         """Span name is 'LLM' when model is not provided."""
@@ -533,7 +533,7 @@ class TestAfterModel:
         state.set("model_mc-1_start", "1000")
         _handle_after_model(_final_chunk({"model_call_id": "mc-1"}))
         span = _get_span(captured_spans[0])
-        assert span["name"] == "LLM"
+        assert span["name"] == "LLM call 1"
 
     def test_child_of_current_turn(self, mock_resolve, state, captured_spans):
         """LLM span is a child of the current turn's span."""
