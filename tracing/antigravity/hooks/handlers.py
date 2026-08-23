@@ -16,18 +16,21 @@ Two hook events drive emission:
 
 Trace shape, one trace per turn::
 
-    Turn N (LLM)                    the turn — the trace's only LLM-kind span
-    ├── Model call 1 (CHAIN)        one per planner response
-    │   ├── run_command (TOOL)      nested under the call that requested it
+    Turn N (CHAIN)                       the turn — carries the prompt and final response
+    ├── LLM call 1: <model> (LLM)        one per planner response, with its own tokens
+    │   ├── run_command (TOOL)           nested under the call that requested it
     │   └── view_file  (TOOL)
-    └── Model call 2 (CHAIN)
+    └── LLM call 2: <model> (LLM)
         └── grep_search (TOOL)
 
-🔴 **Exactly one LLM-kind span per trace, and it is the root.** Consumers count
-LLM-kind spans as turns, so a second one reads as a second turn. Claude Code and
-Codex get this for free — their hooks fire once per turn, so a turn *is* a single
-model span. Antigravity can see every model call, and those extra boundaries are
-kept as CHAIN steps so the fidelity does not inflate turn counts.
+This matches the Claude Code harness and Arize's whole fleet: the root is CHAIN and
+every model call is its own LLM span carrying its own tokens, so cost is attributable
+per call rather than only per turn.
+
+The previous shape inverted these kinds to hold "exactly one LLM-kind span per trace",
+because the Traces page counted chat spans as rows. That constraint is retired — the
+page is now backed by a trace-grained query — and the reason it ever existed is
+recorded in ERRORS/error-found-during-arize-to-atatus-migration.md.
 
 Stdout discipline: each entry point prints exactly ``{}`` (never
 ``{"decision": "continue"}``, which would force Antigravity's agent loop to
@@ -66,7 +69,7 @@ from tracing.antigravity.hooks.model import (
     model_label_from_settings,
 )
 from tracing.antigravity.hooks.transcript import parse_transcript, turn_is_waiting
-from tracing.antigravity.hooks.usage import CallUsage, sum_usage, usage_by_call
+from tracing.antigravity.hooks.usage import CallUsage, usage_by_call
 
 #: The receiver's JSON body limit is 1 MB. Batched payloads are split well under
 #: it: one oversized POST loses the whole turn, where two POSTs lose nothing.
@@ -353,23 +356,6 @@ def _build_tool_span(
     )
 
 
-def _turn_usage(turn: dict, call_usage: list) -> "CallUsage | None":
-    """Total the usage of every model call this turn made.
-
-    Joined by the call's ordinal in the conversation, which is the only link
-    between the transcript and the usage store. A call with no row contributes
-    nothing — the alternative is borrowing a neighbour's numbers.
-    """
-    if not call_usage:
-        return None
-    picked = []
-    for step in turn.get("llm_steps") or []:
-        idx = step.get("model_call_index", -1)
-        if isinstance(idx, int) and 0 <= idx < len(call_usage):
-            picked.append(call_usage[idx])
-    return sum_usage(picked)
-
-
 def _token_attrs(usage: "CallUsage | None") -> dict:
     """OpenInference token attributes, omitting anything not recorded.
 
@@ -398,16 +384,11 @@ def _build_turn_spans(
     common: dict,
     call_usage: list | None = None,
 ) -> list[dict]:
-    """Build the LLM Turn span plus its per-call CHAIN and TOOL descendants.
+    """Build the CHAIN Turn span plus its per-call LLM and TOOL descendants.
 
-    🔴 **The turn is the only LLM-kind span in the trace, and it is the root.**
-    Consumers treat an LLM-kind span as one turn — the Traces list is a span list
-    keyed on that kind, not a grouped-by-trace query — so a second LLM-kind span
-    anywhere in the trace shows up as a second turn. Claude Code and Codex each
-    emit exactly one because their hooks only fire once per turn; Antigravity can
-    see every model call, and that extra fidelity must not arrive as extra turns.
-    The per-call steps are therefore CHAIN: they keep the boundaries and the tool
-    parentage without being counted as turns.
+    Each model call is its own LLM span carrying its own tokens, so cost is
+    attributable per call. The turn is a CHAIN container holding the prompt and the
+    final response. This is the Claude Code shape and Arize's fleet-wide shape.
     """
     trace_id = generate_trace_id()
     root_span_id = generate_span_id()
@@ -420,7 +401,7 @@ def _build_turn_spans(
     root_attrs: dict = dict(common)
     root_attrs.update(
         {
-            "openinference.span.kind": "LLM",
+            "openinference.span.kind": "CHAIN",
             "trace.number": str(trace_number),
             "input.value": redacted_input,
             "output.value": redacted_output,
@@ -436,10 +417,6 @@ def _build_turn_spans(
             env.log_prompts,
             json.dumps([{"message.role": "assistant", "message.content": final_response}]),
         )
-    # The model belongs to the turn span alone. Repeating it on every step would
-    # multiply this turn's contribution to every model-keyed count downstream.
-    if model_id:
-        root_attrs["llm.model_name"] = model_id
     if model_label and model_label != model_id:
         root_attrs["antigravity.model_label"] = model_label
 
@@ -450,11 +427,6 @@ def _build_turn_spans(
     ]
     if steps:
         root_attrs["llm.call_count"] = len(steps)
-
-    # Tokens go on the turn alone, for the same reason the model does: the
-    # summary queries sum these columns across every span in the range, so a
-    # copy on each step would count this turn's usage once per model call.
-    root_attrs.update(_token_attrs(_turn_usage(turn, call_usage or [])))
 
     turn_error = turn.get("error") or ""
     if turn_error:
@@ -499,13 +471,21 @@ def _build_turn_spans(
         attrs: dict = dict(common)
         attrs.update(
             {
-                "openinference.span.kind": "CHAIN",
+                "openinference.span.kind": "LLM",
                 "input.value": redacted_input,
                 "output.value": redact_content(env.log_prompts, content),
                 "llm.output_messages": redact_content(env.log_prompts, _output_messages(content, tool_calls)),
                 "antigravity.step": step_number,
             }
         )
+        if model_id:
+            attrs["llm.model_name"] = model_id
+        # Per call, not summed onto the turn: the whole point of the model-call layer is
+        # that cost is attributable to the step that spent it. The turn carries none, so
+        # a range sum over the trace still totals each turn exactly once.
+        call_index = llm.get("model_call_index", -1)
+        if isinstance(call_index, int) and 0 <= call_index < len(call_usage or []):
+            attrs.update(_token_attrs((call_usage or [])[call_index]))
         if thinking:
             attrs["llm.reasoning"] = redact_content(env.log_prompts, thinking)
         # The span covers the step including the tools it ran, so the model's
@@ -523,8 +503,10 @@ def _build_turn_spans(
 
         spans.append(
             build_span(
-                f"Model call {step_number}",
-                "CHAIN",
+                # The ordinal is required, not cosmetic: the UI span bucketer collapses
+                # 3+ adjacent same-name siblings and re-parents their children to depth 0.
+                f"LLM call {step_number}: {model_id}" if model_id else f"LLM call {step_number}",
+                "LLM",
                 span_id,
                 trace_id,
                 root_span_id,

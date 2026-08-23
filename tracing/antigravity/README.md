@@ -105,20 +105,26 @@ One trace per user turn. Tool spans hang off the model call that requested them,
 trace reads as what the agent actually did:
 
 ```
-Turn 3                LLM     input = the user's prompt, output = the final response
-├── Model call 1      CHAIN   one per planner response
-│   ├── run_command   TOOL
-│   └── view_file     TOOL
-└── Model call 2      CHAIN
-    └── grep_search   TOOL
+Turn 3                     CHAIN   input = the user's prompt, output = the final response
+├── LLM call 1: <model>    LLM     one per planner response, with its own tokens
+│   ├── run_command        TOOL
+│   └── view_file          TOOL
+└── LLM call 2: <model>    LLM
+    └── grep_search        TOOL
 ```
 
-🔴 **The turn is the trace's only LLM-kind span, and it is the root.** Consumers count LLM-kind spans as
-turns — the LLM Traces list is a span list filtered on that kind, not a group-by-trace query — so a second
-LLM-kind span anywhere in the trace shows up as a second turn. Claude Code and Codex get this for free:
-their hooks fire once per turn, so a turn *is* a single model span. Antigravity's transcript exposes every
-model call, and those boundaries are kept as **CHAIN** steps precisely so the extra fidelity does not
-inflate turn counts. If you ever change a step back to `LLM`, a twelve-call turn becomes twelve rows again.
+The root is CHAIN and every model call is its own LLM span carrying its own token counts, so cost is
+attributable to the call that spent it rather than only to the turn. This matches the Claude Code harness
+and Arize's whole fleet.
+
+This shape was previously inverted — the turn was `LLM` and the steps were `CHAIN` — to hold "exactly one
+LLM-kind span per trace", because the Traces list was a span list filtered on that kind rather than a
+group-by-trace query, so a twelve-call turn rendered as twelve rows. That constraint is retired: the page
+is trace-grained now. The history is in `ERRORS/error-found-during-arize-to-atatus-migration.md`.
+
+🔴 **Keep the ordinal in the span name.** The UI span bucketer collapses three or more adjacent same-name
+siblings and re-parents their children to depth 0, so naming every call `LLM call` alone would render the
+trace as flat as it was before the nesting existed.
 
 A step span covers the model call *and* the tools it ran, so its children sit inside it. The model's own
 response time is kept separately as `llm.latency_ms`, and the turn reports `llm.call_count`.

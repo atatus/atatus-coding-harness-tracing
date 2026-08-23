@@ -110,6 +110,44 @@ Uninstall:
 install.bat uninstall claude
 ```
 
+## Trace shape
+
+One trace per user turn. Tool spans hang off the model call that requested them, not off the
+turn, so a trace reads as what the agent actually did:
+
+```
+Turn 3                       CHAIN   input = the user's prompt, output = the final response
+├── LLM call 1: <model>      LLM     one per assistant message.id, with its own tokens
+│   ├── Bash                 TOOL
+│   └── Read                 TOOL
+├── LLM call 2: <model>      LLM
+│   └── Write                TOOL
+├── Permission Request       CHAIN   zero-duration, parented to the turn
+└── Notification: info       CHAIN
+```
+
+Reconstructed at `Stop` from the session transcript, because Claude Code exposes no hook at
+model-request boundaries — the transcript is the only place those boundaries exist. Assistant
+records are grouped by `message.id`: Claude Code v2 writes one response as several records
+(thinking / text / each `tool_use` on its own line), and folding them back is what makes one
+response one span instead of three to five.
+
+Because tool spans come from the transcript rather than from `PostToolUse`, a tool the hook never
+reported is still captured. On the reference session that took coverage from 19 of 21 tools to
+21 of 21.
+
+A transcript with no stable assistant UUIDs (Claude Code v1) cannot be resolved into model calls,
+so the turn falls back to a single flat `LLM` span carrying the whole turn's tokens.
+
+🔴 **Keep the ordinal in the model-call span name.** The UI span bucketer collapses three or more
+adjacent same-name siblings and re-parents their children to depth 0, so naming every call
+`LLM call` alone would render the trace as flat as it was before the nesting existed.
+
+Token counts live on the model calls, never on the turn: summary queries sum those columns across
+every span in a range, so a copy on the turn would count the same usage twice.
+`llm.token_count.prompt` is cache-inclusive (`input + cache_read + cache_write`), and
+`prompt_details.input` is sent explicitly rather than left to be derived by subtraction.
+
 ## Default Settings
 
 | Setting | Default |

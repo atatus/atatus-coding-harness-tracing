@@ -619,9 +619,14 @@ def send_span(span_dict: dict) -> bool:
         # the project from service.name, so this must run before serialization.
         payload = _stamp_atatus_identity(span_dict, backend.get("project_name", ""))
 
-        # Normalize endpoint to an absolute URL for HTTP/JSON transport.
+        # Normalize endpoint to an absolute URL for HTTP/JSON transport. An endpoint
+        # already ending in /v1/traces is a natural thing to configure and would
+        # otherwise POST to /v1/traces/v1/traces, which 404s every span.
+        endpoint = endpoint.rstrip("/")
+        if endpoint.endswith("/v1/traces"):
+            endpoint = endpoint[: -len("/v1/traces")]
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
-            url = f"{endpoint.rstrip('/')}/v1/traces"
+            url = f"{endpoint}/v1/traces"
         else:
             url = f"https://{endpoint}/v1/traces"
 

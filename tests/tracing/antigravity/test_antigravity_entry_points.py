@@ -234,18 +234,16 @@ def test_install_sh_help_output_lists_antigravity() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_only_the_turn_span_carries_token_counts() -> None:
-    """Tokens are recorded once per turn, never per step.
+def test_only_the_model_call_span_carries_token_counts() -> None:
+    """Tokens are recorded once per model call, never on the turn or a tool.
 
-    This replaces an assertion that no token attribute existed at all, which was
-    wrong: the counts are in the conversation store, they are just not in the
-    transcript or the hook payload. The live constraint is different — the
-    summary queries sum the token columns over every span in the range, so the
-    same counts on a step would be added to the turn's again.
+    The summary queries sum the token columns over every span in the range, so a
+    copy anywhere else would count the same usage twice. Attaching them to the
+    call rather than the turn is what makes cost attributable per call.
     """
     source = (REPO_ROOT / "tracing" / "antigravity" / "hooks" / "handlers.py").read_text()
     assert "_token_attrs" in source, "handlers.py must build token attributes"
-    # The only place they are attached is the turn's own attribute dict.
     attachments = [line for line in source.splitlines() if "_token_attrs(" in line and "def " not in line]
     assert len(attachments) == 1, f"token attributes attached in {len(attachments)} places, expected 1"
-    assert "root_attrs.update" in attachments[0], attachments[0]
+    assert "root_attrs.update" not in attachments[0], "tokens must not go on the turn"
+    assert "attrs.update" in attachments[0], attachments[0]
