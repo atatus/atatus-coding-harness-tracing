@@ -12,6 +12,8 @@ import hashlib
 import json
 import os
 import re
+import time
+from pathlib import Path
 
 from core.common import FileLock, env, redirect_stderr_to_log_file
 from core.constants import HARNESSES, STATE_BASE_DIR
@@ -21,23 +23,22 @@ _HARNESS = HARNESSES["cursor"]
 SERVICE_NAME = _HARNESS["service_name"]  # "cursor"
 SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-cursor-tracing"
 STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/cursor
-MAX_ATTR_CHARS = int(os.environ.get("CURSOR_TRACE_MAX_ATTR_CHARS", "100000"))
 
 # Route hook stderr to a per-harness log file unless the user already set one.
 os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
 
 
-def trace_id_from_generation(gen_id: str) -> str:
-    """Deterministic 32-hex trace ID from a Cursor generation_id.
+def trace_id_from_seed(seed: str) -> str:
+    """Deterministic 32-hex trace ID from a Cursor identifier.
 
-    Maps one Cursor "turn" (generation) to one trace.
-    Uses MD5 hash — matches bash: printf '%s' "$gen_id" | md5sum | cut -c1-32
+    Hashing rather than a random id is what lets separate hook processes — one
+    per event, with no shared memory — agree on the trace a span belongs to.
 
-    MD5 is NOT used for security here — it's used for deterministic mapping
-    so all spans in the same generation share a trace_id.
+    SHA-256 rather than MD5: the digest is only a deterministic mapping, but
+    MD5 raises on a host running OpenSSL in FIPS mode.
     """
-    return hashlib.md5(gen_id.encode()).hexdigest()[:32]
+    return hashlib.sha256(seed.encode()).hexdigest()[:32]
 
 
 def span_id_16() -> str:
@@ -54,15 +55,6 @@ def sanitize(s: str) -> str:
     Matches bash: printf '%s' "$1" | tr -c '[:alnum:]._-' '_'
     """
     return re.sub(r"[^a-zA-Z0-9._-]", "_", s)
-
-
-def truncate_attr(s: str, max_chars: "int | None" = None) -> str:
-    """Truncate string to MAX_ATTR_CHARS (default 100000).
-
-    Matches bash: if [[ ${#str} -gt $max ]]; then printf '%s' "${str:0:$max}"
-    """
-    limit = max_chars if max_chars is not None else MAX_ATTR_CHARS
-    return s[:limit] if len(s) > limit else s
 
 
 # --- Disk-backed state stack (LIFO) ---
@@ -142,10 +134,17 @@ def gen_root_span_save(gen_id: str, span_id: str) -> None:
     Written by beforeSubmitPrompt, read by all other events to set parent_span_id.
     File: STATE_DIR/root_{sanitized_gen_id}
     Contains: just the span_id as plain text.
+
+    Written via a temp file and rename: Cursor runs one process per hook event
+    concurrently, and a reader that caught a plain write half-done would use a
+    truncated span id as a parent.
     """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     safe = sanitize(gen_id)
-    (STATE_DIR / f"root_{safe}").write_text(span_id, encoding="utf-8")
+    root_file = STATE_DIR / f"root_{safe}"
+    tmp = root_file.with_name(f"{root_file.name}.tmp.{os.getpid()}")
+    tmp.write_text(span_id, encoding="utf-8")
+    tmp.replace(root_file)
 
 
 def gen_root_span_get(gen_id: str) -> str:
@@ -174,6 +173,9 @@ def state_cleanup_generation(gen_id: str) -> None:
     Matches bash lines 159-176.
     """
     safe = sanitize(gen_id)
+    if not safe:
+        # A blank id makes the glob "**", which Path.glob rejects outright.
+        return
 
     # Root span file
     root_file = STATE_DIR / f"root_{safe}"
@@ -183,11 +185,49 @@ def state_cleanup_generation(gen_id: str) -> None:
     for f in STATE_DIR.glob(f"*{safe}*.stack.json"):
         f.unlink(missing_ok=True)
 
-    # Lock dirs containing this generation ID
-    for d in STATE_DIR.glob(f".lock_*{safe}*"):
-        if d.is_dir():
+    # Locks containing this generation ID. FileLock only creates a directory in
+    # its mkdir fallback; with fcntl or msvcrt available it creates a plain
+    # file, which is every platform we actually run on.
+    for path in STATE_DIR.glob(f".lock_*{safe}*"):
+        _remove_lock(path)
+
+
+def _remove_lock(path: Path) -> None:
+    """Remove a lock left behind by FileLock, whether file or directory."""
+    try:
+        if path.is_dir():
+            path.rmdir()
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def gc_stale_state_files(max_age_seconds: int = 6 * 60 * 60) -> None:
+    """Delete state left by turns that never reached their closing hook.
+
+    A cancelled turn, or one whose stop hook carried a different generation id,
+    leaves its stack and root files behind with nothing that will ever pop them.
+    Cursor's state keys hold no pid, so age is the only signal available —
+    unlike the harnesses whose keys let them check whether the process is alive.
+    """
+    if not STATE_DIR.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in STATE_DIR.iterdir():
+        name = path.name
+        if not (name.endswith(".stack.json") or name.startswith("root_") or name.startswith(".lock_")):
+            continue
+        try:
+            if path.stat().st_mtime >= cutoff:
+                continue
+        except OSError:
+            continue
+        if name.startswith(".lock_"):
+            _remove_lock(path)
+        else:
             try:
-                d.rmdir()  # only works on empty dirs
+                path.unlink(missing_ok=True)
             except OSError:
                 pass
 

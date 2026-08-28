@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Copilot hook handlers. One exported function per hook event.
 
-Each entry point reads stdin JSON (snake_case schema), resolves session state,
-and delegates to the corresponding _handle_* implementation.
+Each entry point reads stdin JSON, resolves session state, and delegates to the
+corresponding _handle_* implementation.
 """
 import json
 
@@ -25,6 +25,7 @@ from tracing.copilot.hooks.adapter import (
     check_requirements,
     ensure_session_initialized,
     gc_stale_state_files,
+    payload_get,
     resolve_session,
 )
 from tracing.copilot.hooks.transcript import parse_transcript
@@ -46,29 +47,103 @@ def _read_stdin(event: str) -> dict:
         data = json.loads(raw) if raw else {}
     except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         data = {}
+    if not isinstance(data, dict):
+        data = {}
     debug_dump(f"copilot_{event}", data)
     return data
 
 
-def _print_response(event: str) -> None:
-    """Print the hook's stdout response.
+def _print_response() -> None:
+    """Emit an empty JSON object — an explicit "no opinion" from this hook.
 
-    PreToolUse must emit a permission decision; all other events emit a
-    ``{"continue": true}`` marker so the agent does not block.
+    Copilot reads a `permissionDecision` here, so anything else would let a
+    tracing hook decide whether the user's tool call is allowed to run.
     """
-    if event == "PreToolUse":
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "allow",
-                    }
-                }
-            )
-        )
+    print("{}")
+
+
+def _ensure_turn(state) -> tuple[str, str]:
+    """Return (trace_id, root_span_id) for the turn in progress, opening one if needed.
+
+    A hook installed mid-session, or a tool that runs before any prompt, arrives
+    with no turn open. Opening one lazily keeps the span attached to something
+    real: the alternative is an empty trace id, which the receiver rejects
+    outright and which takes the whole turn's spans down with it.
+    """
+    trace_id = state.get("current_trace_id")
+    span_id = state.get("current_trace_span_id")
+    if trace_id and span_id:
+        return trace_id, span_id
+
+    trace_id = trace_id or generate_trace_id()
+    span_id = span_id or generate_span_id()
+    state.set("current_trace_id", trace_id)
+    state.set("current_trace_span_id", span_id)
+    if state.get("current_trace_start_time") is None:
+        state.set("current_trace_start_time", str(get_timestamp_ms()))
+    return trace_id, span_id
+
+
+def _tool_key(input_json: dict) -> str:
+    """Key used to pair a PreToolUse with its PostToolUse.
+
+    Copilot's hook payload carries no tool-call id, so the tool name is the only
+    stable handle; parallel calls to the same tool share a start time.
+    """
+    return str(payload_get(input_json, "tool_use_id", "tool_call_id", "tool_name", default="tool"))
+
+
+def _tool_attributes(input_json: dict) -> dict:
+    """Extract the tool name, arguments and per-tool enrichment attributes."""
+    tool_name = str(payload_get(input_json, "tool_name", default="unknown"))
+    tool_input_raw = payload_get(input_json, "tool_args", "tool_input", default=None) or {}
+    tool_input = json.dumps(tool_input_raw) if isinstance(tool_input_raw, dict) else str(tool_input_raw)
+
+    # Match case-insensitively: Copilot uses lowercase tool names (`bash`,
+    # `read`) where other harnesses use TitleCase.
+    tool_name_lc = tool_name.lower()
+    command = file_path = url = query = ""
+    description = ""
+
+    if isinstance(tool_input_raw, dict):
+        if tool_name_lc in ("bash", "shell", "run_command"):
+            command = tool_input_raw.get("command", "")
+            description = command[:200]
+        elif tool_name_lc in ("read", "write", "edit", "glob", "str_replace_editor", "create_file"):
+            file_path = tool_input_raw.get("file_path") or tool_input_raw.get("path") or tool_input_raw.get("pattern", "")
+            description = str(file_path)[:200]
+        elif tool_name_lc in ("websearch", "web_search"):
+            query = tool_input_raw.get("query", "")
+            description = query[:200]
+        elif tool_name_lc in ("webfetch", "fetch"):
+            url = tool_input_raw.get("url", "")
+            description = url[:200]
+        elif tool_name_lc in ("grep", "search"):
+            query = tool_input_raw.get("pattern") or tool_input_raw.get("query", "")
+            file_path = tool_input_raw.get("path", "")
+            description = f"grep: {str(query)[:100]}"
+        else:
+            description = tool_input[:200]
     else:
-        print(json.dumps({"continue": True}))
+        description = tool_input[:200]
+
+    tool_input = redact_content(env.log_tool_content, tool_input)
+    description = redact_content(env.log_tool_details, description)
+    attrs = {
+        "openinference.span.kind": "TOOL",
+        "tool.name": tool_name,
+        "input.value": tool_input,
+        "tool.description": description,
+    }
+    for key, value in (
+        ("tool.command", command),
+        ("tool.file_path", file_path),
+        ("tool.url", url),
+        ("tool.query", query),
+    ):
+        if value:
+            attrs[key] = redact_content(env.log_tool_details, str(value))
+    return {"name": tool_name, "attrs": attrs}
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +157,9 @@ def _handle_session_start(input_json: dict) -> None:
     ensure_session_initialized(state, input_json)
     gc_stale_state_files()
 
-    source = input_json.get("source", "")
-    initial_prompt = input_json.get("initial_prompt", "")
-    log(f"copilot session_start: source={source!r} prompt_len={len(initial_prompt)}")
+    source = payload_get(input_json, "source", default="")
+    initial_prompt = payload_get(input_json, "initial_prompt", default="")
+    log(f"copilot session_start: source={source!r} prompt_len={len(str(initial_prompt))}")
 
 
 def _handle_user_prompt_submitted(input_json: dict) -> None:
@@ -95,15 +170,11 @@ def _handle_user_prompt_submitted(input_json: dict) -> None:
     if session_id is None:
         return
 
-    prompt = input_json.get("prompt", "") or ""
+    prompt = str(payload_get(input_json, "prompt", default=""))
 
-    trace_id = generate_trace_id()
-    span_id = generate_span_id()
-    now_ms = get_timestamp_ms()
-
-    state.set("current_trace_id", trace_id)
-    state.set("current_trace_span_id", span_id)
-    state.set("current_trace_start_time", str(now_ms))
+    state.set("current_trace_id", generate_trace_id())
+    state.set("current_trace_span_id", generate_span_id())
+    state.set("current_trace_start_time", str(get_timestamp_ms()))
     state.set("current_trace_prompt", prompt)
     state.increment("trace_count")
     state.set("tool_count", "0")
@@ -114,174 +185,175 @@ def _handle_user_prompt_submitted(input_json: dict) -> None:
 def _handle_pre_tool_use(input_json: dict) -> None:
     """Handle pre_tool_use: record tool start time."""
     state = resolve_session(input_json)
-    tool_id = input_json.get("tool_use_id") or input_json.get("tool_name", "") or generate_trace_id()
-    state.set(f"tool_{tool_id}_start", str(get_timestamp_ms()))
+    state.set(f"tool_{_tool_key(input_json)}_start", str(get_timestamp_ms()))
 
 
-def _handle_post_tool_use(input_json: dict) -> None:
-    """Handle post_tool_use: build and send a TOOL span."""
+def _emit_tool_span(
+    input_json: dict,
+    *,
+    output: str,
+    status_code: int,
+    status_message: str,
+    result_type: str = "",
+) -> None:
+    """Build and send the TOOL span shared by the success and failure hooks."""
     state = resolve_session(input_json)
     session_id = state.get("session_id")
     if session_id is None:
         return
 
-    trace_id = state.get("current_trace_id")
-    parent_span_id = state.get("current_trace_span_id")
+    trace_id, parent_span_id = _ensure_turn(state)
     state.increment("tool_count")
 
-    tool_name = input_json.get("tool_name", "unknown")
-    tool_id = input_json.get("tool_use_id") or tool_name or generate_trace_id()
-    tool_input_raw = input_json.get("tool_input") or {}
-    tool_input = json.dumps(tool_input_raw) if isinstance(tool_input_raw, dict) else str(tool_input_raw)
+    tool = _tool_attributes(input_json)
+    tool_key = _tool_key(input_json)
 
-    tool_result_obj = input_json.get("tool_result") or {}
-    tool_response = str(tool_result_obj.get("text_result_for_llm", ""))
-    result_type = tool_result_obj.get("result_type", "")
-
-    # Tool-specific enrichment. Match case-insensitively because Copilot uses
-    # lowercase tool names (`bash`, `read`) where Claude Code uses TitleCase.
-    tool_command = ""
-    tool_file_path = ""
-    tool_url = ""
-    tool_query = ""
-    tool_description = ""
-    tool_name_lc = tool_name.lower()
-
-    if isinstance(tool_input_raw, dict):
-        if tool_name_lc == "bash":
-            tool_command = tool_input_raw.get("command", "")
-            tool_description = tool_command[:200]
-        elif tool_name_lc in ("read", "write", "edit", "glob"):
-            tool_file_path = tool_input_raw.get("file_path") or tool_input_raw.get("pattern", "")
-            tool_description = tool_file_path[:200]
-        elif tool_name_lc == "websearch":
-            tool_query = tool_input_raw.get("query", "")
-            tool_description = tool_query[:200]
-        elif tool_name_lc == "webfetch":
-            tool_url = tool_input_raw.get("url", "")
-            tool_description = tool_url[:200]
-        elif tool_name_lc == "grep":
-            tool_query = tool_input_raw.get("pattern", "")
-            tool_file_path = tool_input_raw.get("path", "")
-            tool_description = f"grep: {tool_query[:100]}"
-        else:
-            tool_description = tool_input[:200]
-    else:
-        tool_description = tool_input[:200]
-
-    # Timing
-    start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
+    start_time = state.get(f"tool_{tool_key}_start") or str(get_timestamp_ms())
     end_time = str(get_timestamp_ms())
-    state.delete(f"tool_{tool_id}_start")
+    state.delete(f"tool_{tool_key}_start")
 
-    # Redaction
-    tool_input = redact_content(env.log_tool_content, tool_input)
-    tool_response = redact_content(env.log_tool_content, tool_response)
-    tool_description = redact_content(env.log_tool_details, tool_description)
-    if tool_command:
-        tool_command = redact_content(env.log_tool_details, tool_command)
-    if tool_file_path:
-        tool_file_path = redact_content(env.log_tool_details, tool_file_path)
-    if tool_url:
-        tool_url = redact_content(env.log_tool_details, tool_url)
-    if tool_query:
-        tool_query = redact_content(env.log_tool_details, tool_query)
+    attrs = dict(tool["attrs"])
+    attrs["session.id"] = session_id
+    attrs["output.value"] = redact_content(env.log_tool_content, output)
 
-    # Build attributes
     user_id = state.get("user_id") or ""
-    attrs = {
-        "session.id": session_id,
-        "openinference.span.kind": "TOOL",
-        "tool.name": tool_name,
-        "input.value": tool_input,
-        "output.value": tool_response,
-        "tool.description": tool_description,
-    }
     if user_id:
         attrs["user.id"] = user_id
-    if tool_command:
-        attrs["tool.command"] = tool_command
-    if tool_file_path:
-        attrs["tool.file_path"] = tool_file_path
-    if tool_url:
-        attrs["tool.url"] = tool_url
-    if tool_query:
-        attrs["tool.query"] = tool_query
+
     if result_type:
-        attrs["tool.result_type"] = result_type
+        attrs["tool.result_type"] = str(result_type)
 
     span = build_span(
-        tool_name,
+        tool["name"],
         "TOOL",
         generate_span_id(),
-        trace_id or "",
-        parent_span_id or "",
+        trace_id,
+        parent_span_id,
         start_time,
         end_time,
         attrs,
         SERVICE_NAME,
         SCOPE_NAME,
+        status_code,
+        status_message,
     )
     send_span(span)
 
 
+def _handle_post_tool_use(input_json: dict) -> None:
+    """Handle post_tool_use: build and send a TOOL span."""
+    tool_result = payload_get(input_json, "tool_result", default=None) or {}
+    if isinstance(tool_result, dict):
+        output = str(payload_get(tool_result, "text_result_for_llm", default=""))
+        result_type = str(payload_get(tool_result, "result_type", default=""))
+    else:
+        output = str(tool_result)
+        result_type = ""
+    _emit_tool_span(input_json, output=output, status_code=1, status_message="", result_type=result_type)
+
+
+def _handle_post_tool_use_failure(input_json: dict) -> None:
+    """Handle post_tool_use_failure: send a TOOL span marked as an error.
+
+    Without this the failed call is invisible and its PreToolUse start time is
+    never cleared, so the session state grows one dead key per failed tool.
+    """
+    message = str(payload_get(input_json, "error", default=""))
+    _emit_tool_span(input_json, output=message, status_code=2, status_message=message[:200])
+
+
 def _handle_stop(input_json: dict) -> None:
-    """Handle stop: parse transcript and send LLM span for the completed turn."""
+    """Handle stop: close the turn with a CHAIN root and an LLM child."""
     state = resolve_session(input_json)
     session_id = state.get("session_id")
-    trace_id = state.get("current_trace_id")
-    if session_id is None or trace_id is None:
+    if session_id is None:
         return
 
-    trace_span_id = state.get("current_trace_span_id") or generate_span_id()
+    trace_id, root_span_id = _ensure_turn(state)
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
     user_id = state.get("user_id") or ""
 
-    transcript_path = input_json.get("transcript_path", "")
-    summary = parse_transcript(transcript_path) if transcript_path else {}
+    transcript_path = payload_get(input_json, "transcript_path", default="")
+    summary = parse_transcript(str(transcript_path)) if transcript_path else {}
 
     model_name = summary.get("model_name", "")
-    # TODO(transcript): extract assistant turn text once events.jsonl assistant
-    # event shape is captured. Until then, output_text is empty.
     output_text = summary.get("output_text", "")
+    output_tokens = summary.get("output_tokens", 0)
+    if not user_prompt:
+        user_prompt = summary.get("input_text", "")
     tool_count = state.get("tool_count") or "0"
 
     end_time = str(get_timestamp_ms())
 
     user_prompt = redact_content(env.log_prompts, user_prompt)
-    output_text = redact_content(env.log_tool_content, output_text)
+    output_text = redact_content(env.log_prompts, output_text)
 
-    attrs = {
-        "session.id": session_id,
-        "openinference.span.kind": "LLM",
-        "input.value": user_prompt,
-        "output.value": output_text,
-        "metadata": json.dumps(
-            {
-                "stop_reason": input_json.get("stop_reason", ""),
-                "tool_count": int(tool_count or 0),
-            }
-        ),
-    }
-    if model_name:
-        attrs["llm.model_name"] = model_name
+    common = {"session.id": session_id}
     if user_id:
-        attrs["user.id"] = user_id
+        common["user.id"] = user_id
+    if model_name:
+        common["llm.model_name"] = model_name
 
-    span = build_span(
-        "Agent Stop",
-        "LLM",
-        trace_span_id,
-        trace_id,
-        "",
-        trace_start_time,
-        end_time,
-        attrs,
-        SERVICE_NAME,
-        SCOPE_NAME,
+    root_attrs = dict(common)
+    root_attrs.update(
+        {
+            "openinference.span.kind": "CHAIN",
+            "input.value": user_prompt,
+            "output.value": output_text,
+            "metadata": json.dumps(
+                {
+                    "stop_reason": str(payload_get(input_json, "stop_reason", default="")),
+                    "tool_count": int(tool_count or 0),
+                }
+            ),
+        }
     )
-    send_span(span)
+
+    # Root before child: a strict backend wants the parent to exist first.
+    send_span(
+        build_span(
+            "User Prompt",
+            "CHAIN",
+            root_span_id,
+            trace_id,
+            "",
+            trace_start_time,
+            end_time,
+            root_attrs,
+            SERVICE_NAME,
+            SCOPE_NAME,
+        )
+    )
+
+    llm_attrs = dict(common)
+    llm_attrs.update(
+        {
+            "openinference.span.kind": "LLM",
+            "input.value": user_prompt,
+            "output.value": output_text,
+        }
+    )
+    # Only completion tokens are reported per turn; the prompt-side counts are
+    # session cumulative totals, and splitting them across turns would invent
+    # numbers the transcript never gave us.
+    if output_tokens:
+        llm_attrs["llm.token_count.completion"] = output_tokens
+
+    send_span(
+        build_span(
+            "Agent Response",
+            "LLM",
+            generate_span_id(),
+            trace_id,
+            root_span_id,
+            trace_start_time,
+            end_time,
+            llm_attrs,
+            SERVICE_NAME,
+            SCOPE_NAME,
+        )
+    )
 
     # Clear per-turn state so the next user prompt starts a fresh trace
     state.delete("current_trace_id")
@@ -297,35 +369,47 @@ def _handle_subagent_stop(input_json: dict) -> None:
     if session_id is None:
         return
 
-    agent_id = input_json.get("agent_id", "")
-    agent_type = input_json.get("agent_type", "")
-    transcript_path = input_json.get("transcript_path", "")
+    trace_id = state.get("current_trace_id")
+    parent_span_id = state.get("current_trace_span_id")
+    if not trace_id or not parent_span_id:
+        # A subagent outside any turn has no root to hang from; emitting it
+        # would mint a single-span trace with no prompt and no answer.
+        log("copilot subagent_stop: no open turn, skipping")
+        return
 
-    summary = parse_transcript(transcript_path) if transcript_path else {}
+    agent_id = str(payload_get(input_json, "agent_id", default=""))
+    agent_type = str(payload_get(input_json, "agent_type", "agent_name", default=""))
+    transcript_path = payload_get(input_json, "transcript_path", default="")
+
+    summary = parse_transcript(str(transcript_path)) if transcript_path else {}
     model_name = summary.get("model_name", "")
 
     user_id = state.get("user_id") or ""
     end_time = str(get_timestamp_ms())
+    start_time = state.get(f"subagent_{agent_id}_start") or end_time
 
     attrs = {
         "session.id": session_id,
         "openinference.span.kind": "CHAIN",
         "metadata": json.dumps({"agent_type": agent_type, "agent_id": agent_id}),
     }
+    response = payload_get(input_json, "response", default="")
+    if response:
+        attrs["output.value"] = redact_content(env.log_prompts, str(response))
     if model_name:
         attrs["llm.model_name"] = model_name
     if user_id:
         attrs["user.id"] = user_id
 
-    span_name = f"Subagent: {agent_id}" if agent_id else "Subagent"
+    span_name = f"Subagent: {agent_type or agent_id}" if (agent_type or agent_id) else "Subagent"
 
     span = build_span(
         span_name,
         "CHAIN",
         generate_span_id(),
-        state.get("current_trace_id") or generate_trace_id(),
-        state.get("current_trace_span_id") or "",
-        end_time,
+        trace_id,
+        parent_span_id,
+        start_time,
         end_time,
         attrs,
         SERVICE_NAME,
@@ -339,73 +423,48 @@ def _handle_subagent_stop(input_json: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _run(event: str, handler) -> None:
+    """Read stdin, run *handler*, and always answer the agent."""
+    try:
+        input_json = _read_stdin(event)
+        if check_requirements():
+            handler(input_json)
+    except Exception as e:
+        error(f"copilot {event} hook failed: {e}")
+    finally:
+        _print_response()
+
+
 def session_start():
     """Entry point for atatus-hook-copilot-session-start."""
-    try:
-        input_json = _read_stdin("session_start")
-        if check_requirements():
-            _handle_session_start(input_json)
-    except Exception as e:
-        error(f"copilot session_start hook failed: {e}")
-    finally:
-        _print_response("SessionStart")
+    _run("session_start", _handle_session_start)
 
 
 def user_prompt_submitted():
     """Entry point for atatus-hook-copilot-user-prompt."""
-    try:
-        input_json = _read_stdin("user_prompt_submitted")
-        if check_requirements():
-            _handle_user_prompt_submitted(input_json)
-    except Exception as e:
-        error(f"copilot user_prompt_submitted hook failed: {e}")
-    finally:
-        _print_response("UserPromptSubmit")
+    _run("user_prompt_submitted", _handle_user_prompt_submitted)
 
 
 def pre_tool_use():
     """Entry point for atatus-hook-copilot-pre-tool."""
-    try:
-        input_json = _read_stdin("pre_tool_use")
-        if check_requirements():
-            _handle_pre_tool_use(input_json)
-    except Exception as e:
-        error(f"copilot pre_tool_use hook failed: {e}")
-    finally:
-        _print_response("PreToolUse")
+    _run("pre_tool_use", _handle_pre_tool_use)
 
 
 def post_tool_use():
     """Entry point for atatus-hook-copilot-post-tool."""
-    try:
-        input_json = _read_stdin("post_tool_use")
-        if check_requirements():
-            _handle_post_tool_use(input_json)
-    except Exception as e:
-        error(f"copilot post_tool_use hook failed: {e}")
-    finally:
-        _print_response("PostToolUse")
+    _run("post_tool_use", _handle_post_tool_use)
+
+
+def post_tool_use_failure():
+    """Entry point for atatus-hook-copilot-post-tool-failure."""
+    _run("post_tool_use_failure", _handle_post_tool_use_failure)
 
 
 def stop():
     """Entry point for atatus-hook-copilot-stop."""
-    try:
-        input_json = _read_stdin("stop")
-        if check_requirements():
-            _handle_stop(input_json)
-    except Exception as e:
-        error(f"copilot stop hook failed: {e}")
-    finally:
-        _print_response("Stop")
+    _run("stop", _handle_stop)
 
 
 def subagent_stop():
     """Entry point for atatus-hook-copilot-subagent-stop."""
-    try:
-        input_json = _read_stdin("subagent_stop")
-        if check_requirements():
-            _handle_subagent_stop(input_json)
-    except Exception as e:
-        error(f"copilot subagent_stop hook failed: {e}")
-    finally:
-        _print_response("SubagentStop")
+    _run("subagent_stop", _handle_subagent_stop)

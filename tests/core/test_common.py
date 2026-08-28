@@ -573,12 +573,12 @@ class TestBuildSpan:
             kind="LLM",
             span_id="aa",
             trace_id="bb",
-            parent_span_id="abc123",
+            parent_span_id="abc123abc123abc1",
             start_ms=1000,
             end_ms=2000,
         )
         span = result["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        assert span["parentSpanId"] == "abc123"
+        assert span["parentSpanId"] == "abc123abc123abc1"
 
     def test_timestamp_formatting(self):
         result = build_span(

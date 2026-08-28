@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Copilot adapter — single-mode session resolution, initialization, and GC.
+"""Copilot adapter — session resolution, initialization, and GC.
 
-The Copilot hook payload schema is unified across VS Code Copilot Chat and
-`gh copilot` CLI: snake_case fields with a top-level `session_id`. We use
-that as the session key directly.
+Copilot names its payload fields in camelCase natively and in snake_case when
+running in editor-compatible mode, and the same build emits either depending on
+how it was launched. Every field read therefore goes through ``payload_get``,
+which tries both spellings.
 """
 import os
 import platform
@@ -21,6 +22,29 @@ STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state
 # Route hook stderr to a per-harness log file unless the user already set one.
 os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
+
+
+def _camel(name: str) -> str:
+    """snake_case -> camelCase."""
+    head, *rest = name.split("_")
+    return head + "".join(word[:1].upper() + word[1:] for word in rest)
+
+
+def payload_get(payload: dict, *names: str, default=""):
+    """First non-empty value among *names*, trying snake_case and camelCase.
+
+    Copilot's native payloads are camelCase and its editor-compatible payloads
+    are snake_case, so reading only one spelling silently yields empty fields
+    for half the installs.
+    """
+    if not isinstance(payload, dict):
+        return default
+    for name in names:
+        for key in (name, _camel(name)):
+            value = payload.get(key)
+            if value is not None and value != "":
+                return value
+    return default
 
 
 def _get_grandparent_pid() -> str:
@@ -96,10 +120,10 @@ def _is_pid_alive(pid: int) -> bool:
 def resolve_session(input_json: dict) -> StateManager:
     """Resolve the per-session state file from hook input JSON.
 
-    The hook payload always carries `session_id` (snake_case). Use it directly.
-    Defensive fallback to grandparent PID when the payload is malformed.
+    The hook payload always carries a session id. Defensive fallback to the
+    grandparent PID when the payload is malformed.
     """
-    session_key = input_json.get("session_id") or ""
+    session_key = str(payload_get(input_json, "session_id", default=""))
     if not session_key:
         if platform.system() == "Windows":
             session_key = str(os.getppid())
@@ -132,8 +156,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     if state.get("session_id") is not None:
         return
 
-    session_id = input_json.get("session_id", "") or generate_trace_id()
-
+    session_id = str(payload_get(input_json, "session_id", default="")) or generate_trace_id()
 
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))

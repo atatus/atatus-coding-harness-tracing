@@ -11,6 +11,7 @@ import core.setup as _setup
 import tracing.cursor.constants
 import tracing.cursor.install
 from core.common import DEFAULT_OTLP_ENDPOINT
+from tracing.cursor.constants import HOOK_EVENTS
 
 
 def _load_cursor_module(name: str):
@@ -148,14 +149,14 @@ class TestFreshInstall:
         assert "backend" not in config
         assert "collector" not in config
 
-        # Check hooks.json has 15 events (12 IDE + 3 CLI)
+        # Tab autocomplete events are deliberately not registered.
         hooks_file = fake_home / ".cursor" / "hooks.json"
         assert hooks_file.exists()
         hooks_data = json.loads(hooks_file.read_text())
 
         assert hooks_data["version"] == 1
         hooks = hooks_data.get("hooks", {})
-        assert len(hooks) == 15
+        assert len(hooks) == len(HOOK_EVENTS)
 
         # sessionStart, sessionEnd, and postToolUse are present and use the same hook command
         assert "sessionStart" in hooks
@@ -311,9 +312,9 @@ class TestIdempotent:
         hooks_file = fake_home / ".cursor" / "hooks.json"
         hooks_data = json.loads(hooks_file.read_text())
 
-        # Still exactly 15 events with 1 entry each
+        # Still exactly one entry per registered event
         hooks = hooks_data["hooks"]
-        assert len(hooks) == 15
+        assert len(hooks) == len(HOOK_EVENTS)
         for event, entries in hooks.items():
             assert len(entries) == 1, f"Event {event} has {len(entries)} entries"
 

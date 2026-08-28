@@ -23,7 +23,7 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 
 class TestCopilotEntryPoints:
-    """Verify all 7 Copilot entry points (6 hooks + 1 setup) in pyproject.toml."""
+    """Verify all 8 Copilot entry points (7 hooks + 1 setup) in pyproject.toml."""
 
     @pytest.fixture(autouse=True)
     def _load_pyproject(self):
@@ -41,6 +41,12 @@ class TestCopilotEntryPoints:
     def test_post_tool_entry_point(self):
         assert 'atatus-hook-copilot-post-tool = "tracing.copilot.hooks.handlers:post_tool_use"' in self.text
 
+    def test_post_tool_failure_entry_point(self):
+        assert (
+            'atatus-hook-copilot-post-tool-failure = "tracing.copilot.hooks.handlers:post_tool_use_failure"'
+            in self.text
+        )
+
     def test_stop_entry_point(self):
         assert 'atatus-hook-copilot-stop = "tracing.copilot.hooks.handlers:stop"' in self.text
 
@@ -50,15 +56,24 @@ class TestCopilotEntryPoints:
     def test_setup_entry_point(self):
         assert 'atatus-setup-copilot = "core.setup.copilot:main"' in self.text
 
-    def test_exactly_6_hook_entry_points(self):
-        """There should be exactly 6 copilot hook entry points."""
+    def test_exactly_7_hook_entry_points(self):
+        """There should be exactly 7 copilot hook entry points."""
         count = self.text.count("atatus-hook-copilot-")
-        assert count == 6, f"Expected 6 copilot hook entries, got {count}"
+        assert count == 7, f"Expected 7 copilot hook entries, got {count}"
+
+    def test_entry_points_match_hook_events(self):
+        """Every event in HOOK_EVENTS has an entry point declared in pyproject.toml."""
+        from tracing.copilot.constants import HOOK_EVENTS
+
+        assert len(HOOK_EVENTS) == 7
+        for entry_point in HOOK_EVENTS.values():
+            assert f"{entry_point} = " in self.text
 
     def test_entry_points_importable(self):
         """All referenced handler functions should be importable."""
         from tracing.copilot.hooks.handlers import (
             post_tool_use,
+            post_tool_use_failure,
             pre_tool_use,
             session_start,
             stop,
@@ -66,5 +81,13 @@ class TestCopilotEntryPoints:
             user_prompt_submitted,
         )
 
-        for fn in [session_start, user_prompt_submitted, pre_tool_use, post_tool_use, stop, subagent_stop]:
+        for fn in [
+            session_start,
+            user_prompt_submitted,
+            pre_tool_use,
+            post_tool_use,
+            post_tool_use_failure,
+            stop,
+            subagent_stop,
+        ]:
             assert callable(fn)

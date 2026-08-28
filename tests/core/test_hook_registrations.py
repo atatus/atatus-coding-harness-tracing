@@ -234,6 +234,42 @@ class TestRunHookScript:
         assert "CLAUDE_PLUGIN_ROOT" in text
         assert "CLAUDE_PLUGIN_DATA" in text
 
+    @pytest.mark.parametrize(
+        "env,label",
+        [
+            ({"CLAUDE_PLUGIN_ROOT": "/tmp/plugin"}, "root set, data unset"),
+            ({}, "neither set"),
+            ({"CLAUDE_PLUGIN_DATA": "/tmp/data"}, "data set, root unset"),
+        ],
+    )
+    def test_run_hook_exits_zero_when_not_run_by_claude_code(self, env, label):
+        """Other agents read the same .claude/settings.json and honour its
+        enabledPlugins. Cursor sets CLAUDE_PLUGIN_ROOT but has no per-plugin
+        data dir, so CLAUDE_PLUGIN_DATA is empty there. A non-zero exit is read
+        by those hosts as the hook refusing the request, which stops the user
+        sending a prompt at all — so this must leave quietly instead."""
+        import os
+        import subprocess
+
+        script = REPO_ROOT / "tracing" / "claude_code" / "scripts" / "run-hook"
+        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA")}
+        result = subprocess.run(
+            ["sh", str(script), "atatus-hook-stop"],
+            env={**clean, **env},
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"{label}: exited {result.returncode}: {result.stderr.decode()[:200]}"
+
+    def test_run_hook_exits_zero_without_an_entry_point_argument(self):
+        import os
+        import subprocess
+
+        script = REPO_ROOT / "tracing" / "claude_code" / "scripts" / "run-hook"
+        clean = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PLUGIN_ROOT", "CLAUDE_PLUGIN_DATA")}
+        result = subprocess.run(["sh", str(script)], env=clean, capture_output=True, timeout=30)
+        assert result.returncode == 0
+
 
 # --- No bash/jq/curl references in docs ---
 

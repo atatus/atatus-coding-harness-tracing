@@ -8,13 +8,25 @@ stdout: MUST print permissive JSON response, even on error.
 stderr: redirected to ATATUS_LOG_FILE before dispatch.
 """
 import json
+import re
 import sys
 
-from core.common import build_span, env, error, get_timestamp_ms, log, read_stdin_text, redact_content, send_span
+from core.common import (
+    build_span,
+    env,
+    error,
+    generate_trace_id,
+    get_timestamp_ms,
+    log,
+    read_stdin_text,
+    redact_content,
+    send_span,
+)
 from tracing.cursor.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
     check_requirements,
+    gc_stale_state_files,
     gen_root_span_get,
     gen_root_span_save,
     sanitize,
@@ -22,7 +34,7 @@ from tracing.cursor.hooks.adapter import (
     state_cleanup_generation,
     state_pop,
     state_push,
-    trace_id_from_generation,
+    trace_id_from_seed,
 )
 
 # ---------------------------------------------------------------------------
@@ -105,16 +117,22 @@ def _is_cursor_ide_hook_payload(input_json: dict) -> bool:
 
 
 def _trace_id_from_event(gen_id: str, conversation_id: str) -> str:
-    """Derive a trace ID from generation or conversation ID.
+    """Derive a trace ID for an event, preferring the conversation.
 
-    Prefers gen_id; falls back to conversation_id for CLI events that may
-    lack a generation_id.
+    Keyed on the conversation, not the generation: Cursor mints a fresh
+    generation id for every retry and continuation within a single exchange, so
+    hashing the generation split one conversation into several unrelated traces
+    — including two traces for one prompt the user had retried once.
+
+    Falls back to the generation id when no conversation id is present, and to
+    a random id when neither is, because an empty trace id is rejected by the
+    receiver and would take the rest of the batch down with it.
     """
-    if gen_id:
-        return trace_id_from_generation(gen_id)
     if conversation_id:
-        return trace_id_from_generation(conversation_id)
-    return ""
+        return trace_id_from_seed(conversation_id)
+    if gen_id:
+        return trace_id_from_seed(gen_id)
+    return generate_trace_id()
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +151,11 @@ def _dispatch(event: str, input_json: dict) -> None:
 
     trace_id = _trace_id_from_event(gen_id, conversation_id)
     now_ms = get_timestamp_ms()
+
+    # Cancelled turns leave state behind that nothing will ever pop. Sweeping on
+    # the turn boundaries keeps it off the hot per-keystroke events.
+    if event in ("sessionStart", "beforeSubmitPrompt", "stop", "sessionEnd"):
+        gc_stale_state_files()
 
     handlers = {
         "beforeSubmitPrompt": _handle_before_submit_prompt,
@@ -247,37 +270,16 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
 
     user_id = _resolve_user_id(input_json)
 
-    # IDE: send User Prompt CHAIN first (parent before LLM for strict backends), full I/O + duration.
+    # The root is not sent here. It used to be, ending at this moment — but the
+    # LLM span, Agent Stop and any late tool span all carry timestamps from the
+    # stop hook, which is later, so every turn rendered with its children
+    # spilling past the end of their parent. The stop hook closes it instead.
     if root_state and deferred_root:
-        root_conv_id = root_state.get("conversation_id", conversation_id)
-        root_attrs = {
-            "openinference.span.kind": "CHAIN",
-            "input.value": prompt,
-            "output.value": response,
-            "session.id": root_conv_id,
-        }
-        if root_conv_id:
-            root_attrs["cursor.conversation.id"] = root_conv_id
-        if user_id:
-            root_attrs["user.id"] = user_id
-        root_model = model or root_state.get("model", "")
-        if root_model:
-            root_attrs["llm.model_name"] = root_model
-
-        root_span = build_span(
-            "User Prompt",
-            "CHAIN",
-            root_state["span_id"],
-            root_state.get("trace_id", trace_id),
-            "",
-            root_state.get("start_ms", now_ms),
-            now_ms,
-            root_attrs,
-            SERVICE_NAME,
-            SCOPE_NAME,
-        )
-        send_span(root_span)
-        log(f"afterAgentResponse: sent deferred root span {root_state['span_id']}")
+        root_state["response"] = response
+        root_state["model"] = model or root_state.get("model", "")
+        root_state["user_id"] = user_id
+        state_push(f"root_{safe_gen}", root_state)
+        log(f"afterAgentResponse: root span {root_state.get('span_id')} held for stop")
 
     llm_entry = {
         "span_id": sid,
@@ -630,6 +632,14 @@ def _handle_before_tab_file_read(input_json, conversation_id, gen_id, trace_id, 
     """TOOL span for tab file read. Replaces bash lines 376-398."""
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
+
+    if not parent:
+        # Tab is autocomplete, not agent work, so it usually has no turn to
+        # attach to. This event is no longer registered at install time; the
+        # guard is here for installs whose hooks.json predates that.
+        log("cursor: no root span for this tab read - span dropped")
+        return
+
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
 
     user_id = _resolve_user_id(input_json)
@@ -665,6 +675,11 @@ def _handle_after_tab_file_edit(input_json, conversation_id, gen_id, trace_id, n
     """TOOL span for tab file edit. Replaces bash lines 403-430."""
     sid = span_id_16()
     parent = gen_root_span_get(gen_id)
+
+    if not parent:
+        log("cursor: no root span for this tab edit - span dropped")
+        return
+
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
     edits = redact_content(env.log_tool_content, _jq_str(input_json, "edits", "changes", "diff"))
     input_val = f"{file_path}: {edits}" if edits else file_path
@@ -743,6 +758,43 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
     if model:
         token_attrs["llm.model_name"] = model
 
+    # Close the deferred root first: it is the parent of everything below, and
+    # only now is its real end time known.
+    safe_gen = sanitize(gen_id) if gen_id else ""
+    root_state = state_pop(f"root_{safe_gen}") if safe_gen else None
+    if root_state and root_state.get("deferred_root"):
+        root_conv_id = root_state.get("conversation_id") or conversation_id
+        root_attrs = {
+            "openinference.span.kind": "CHAIN",
+            "input.value": redact_content(env.log_prompts, root_state.get("prompt", "")),
+            "output.value": root_state.get("response", ""),
+            "session.id": root_conv_id,
+        }
+        if root_conv_id:
+            root_attrs["cursor.conversation.id"] = root_conv_id
+        root_user = root_state.get("user_id") or user_id
+        if root_user:
+            root_attrs["user.id"] = root_user
+        root_model = root_state.get("model") or model
+        if root_model:
+            root_attrs["llm.model_name"] = root_model
+
+        send_span(
+            build_span(
+                "User Prompt",
+                "CHAIN",
+                root_state.get("span_id", ""),
+                root_state.get("trace_id", trace_id),
+                "",
+                root_state.get("start_ms", now_ms),
+                now_ms,
+                root_attrs,
+                SERVICE_NAME,
+                SCOPE_NAME,
+            )
+        )
+        log(f"stop: closed root span {root_state.get('span_id')}")
+
     # Drain deferred LLM stack for this generation (LIFO: first pop = most recent).
     llm_entries = []
     if gen_id:
@@ -782,7 +834,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
             entry.get("trace_id", trace_id),
             entry.get("parent", ""),
             llm_start,
-            llm_start,
+            now_ms,
             llm_attrs,
             SERVICE_NAME,
             SCOPE_NAME,
@@ -810,19 +862,25 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
     if not llm_entries:
         attrs.update(token_attrs)
 
-    span = build_span(
-        "Agent Stop",
-        "CHAIN",
-        sid,
-        trace_id,
-        parent,
-        now_ms,
-        now_ms,
-        attrs,
-        SERVICE_NAME,
-        SCOPE_NAME,
-    )
-    send_span(span)
+    if parent or root_state:
+        span = build_span(
+            "Agent Stop",
+            "CHAIN",
+            sid,
+            trace_id,
+            parent,
+            now_ms,
+            now_ms,
+            attrs,
+            SERVICE_NAME,
+            SCOPE_NAME,
+        )
+        send_span(span)
+    else:
+        # No prompt ever opened this turn, so there is nothing for the marker to
+        # close. Sent anyway it becomes its own trace: a row carrying token
+        # counts with no prompt and no response.
+        log("stop: no root span for this generation - Agent Stop dropped")
 
     if gen_id:
         state_cleanup_generation(gen_id)
@@ -899,9 +957,11 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
     if reason:
         attrs["cursor.session.reason"] = reason
 
-    # Token fields can also appear on sessionEnd. Same OpenInference convention
-    # as _handle_stop: ``prompt`` is the total (uncached input + cache buckets),
-    # cache split reported via ``prompt_details.*`` subsets.
+    # Token fields on sessionEnd are session cumulative totals, and every turn
+    # in the session has already reported its own share from the stop hook.
+    # Under `llm.token_count.*` they would be summed a second time, roughly
+    # doubling the session's cost, so they are recorded under a session
+    # namespace the cost model does not read.
     _inp_tok = input_json.get("input_tokens")
     prompt_tokens = _to_int(_inp_tok if _inp_tok is not None else input_json.get("inputTokens"))
     _out_tok = input_json.get("output_tokens")
@@ -910,18 +970,14 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
     cache_read = _to_int(_cr_tok if _cr_tok is not None else input_json.get("cacheReadTokens"))
     _cw_tok = input_json.get("cache_write_tokens")
     cache_write = _to_int(_cw_tok if _cw_tok is not None else input_json.get("cacheWriteTokens"))
-    prompt_total = None
     if prompt_tokens is not None:
-        prompt_total = prompt_tokens + (cache_read or 0) + (cache_write or 0)
-        attrs["llm.token_count.prompt"] = prompt_total
+        attrs["cursor.session.tokens.prompt"] = prompt_tokens + (cache_read or 0) + (cache_write or 0)
     if completion_tokens is not None:
-        attrs["llm.token_count.completion"] = completion_tokens
+        attrs["cursor.session.tokens.completion"] = completion_tokens
     if cache_read is not None:
-        attrs["llm.token_count.prompt_details.cache_read"] = cache_read
+        attrs["cursor.session.tokens.cache_read"] = cache_read
     if cache_write is not None:
-        attrs["llm.token_count.prompt_details.cache_write"] = cache_write
-    if prompt_total is not None and completion_tokens is not None:
-        attrs["llm.token_count.total"] = prompt_total + completion_tokens
+        attrs["cursor.session.tokens.cache_write"] = cache_write
 
     span = build_span(
         "Session End",
@@ -942,29 +998,59 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
     log(f"sessionEnd: span {sid}, cleaned up gen={gen_id}")
 
 
+#: Tools that already produce a span from a dedicated before*/after* pair.
+#: Compared after `_normalize_tool_name`, so each entry covers every spelling
+#: Cursor uses for it — `runTerminalCmd`, `run_terminal_cmd` and `runterminalcmd`
+#: all normalize to the same string.
 _DEDICATED_TOOL_NAMES = frozenset(
     {
         "shell",
         "terminal",
+        "terminalcmd",
+        "runterminalcmd",
         "bash",
-        "run_command",
-        "run_shell",
-        "read_file",
+        "runcommand",
+        "runshell",
+        "readfile",
         "read",
-        "view_file",
+        "viewfile",
         "view",
-        "edit_file",
+        "editfile",
         "edit",
-        "write_file",
+        "multiedit",
+        "searchreplace",
+        "applypatch",
+        "strreplaceeditor",
+        "writefile",
         "write",
-        "create_file",
-        "delete_file",
-        "tab_file_read",
-        "tab_file_edit",
+        "createfile",
+        "deletefile",
+        "tabfileread",
+        "tabfileedit",
         "mcp",
-        "mcp_execution",
+        "mcpexecution",
     }
 )
+
+
+def _normalize_tool_name(name: str) -> str:
+    """Fold a tool name to letters and digits, lowercased."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _has_dedicated_handler(tool_name: str) -> bool:
+    """True when a before*/after* pair already emits a span for this tool.
+
+    Matching on the exact name missed every spelling Cursor actually sends, so
+    a single shell command produced both a `Shell` span and a `Tool:
+    runTerminalCmd` span on the same parent.
+    """
+    normalized = _normalize_tool_name(tool_name)
+    if not normalized:
+        return False
+    # Every MCP call arrives here as mcp_<server>_<tool>, and the MCP pair has
+    # already emitted it under its real name.
+    return normalized in _DEDICATED_TOOL_NAMES or normalized.startswith("mcp")
 
 
 def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms):
@@ -972,7 +1058,7 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
     tool_name = _jq_str(input_json, "tool_name", "toolName", "name", "tool")
 
     # Dedup: skip tools that have dedicated before*/after* handlers
-    if tool_name.lower() in _DEDICATED_TOOL_NAMES:
+    if _has_dedicated_handler(tool_name):
         log(f"postToolUse: skipping {tool_name!r} — covered by dedicated handler")
         return
 

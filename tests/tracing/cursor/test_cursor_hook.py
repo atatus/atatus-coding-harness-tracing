@@ -9,6 +9,7 @@ from unittest import mock
 import pytest
 
 from tracing.cursor.hooks import adapter
+from tracing.cursor.hooks import handlers as handlers_mod
 from tracing.cursor.hooks.handlers import (
     _dispatch,
     _event_name,
@@ -203,7 +204,7 @@ class TestDispatch:
             h.assert_not_called()
 
     def test_no_backend_send_fails_gracefully(self, monkeypatch):
-        """send_span failure doesn't crash — IDE defers root to afterAgentResponse and LLM to stop."""
+        """send_span failure doesn't crash — the IDE turn is emitted entirely at stop."""
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.send_span", return_value=False) as send_mock,
@@ -223,13 +224,14 @@ class TestDispatch:
                     "response": "done",
                 },
             )
-            # afterAgentResponse sends the deferred root User Prompt only; LLM is deferred to stop.
-            assert send_mock.call_count == 1
+            # Nothing yet: the root is held so stop can close it with the real
+            # end time, otherwise its children outlive it.
+            assert send_mock.call_count == 0
             _dispatch(
                 "stop",
                 {"hook_event_name": "stop", "conversation_id": "c1", "generation_id": "g1"},
             )
-            # stop flushes the deferred LLM span (Agent Response) and emits Agent Stop.
+            # stop closes the root, flushes the deferred LLM span, emits Agent Stop.
             assert send_mock.call_count == 3
 
 
@@ -246,7 +248,11 @@ class TestHandleBeforeSubmitPrompt:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="aabb" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_save") as save_mock,
+            # wraps, not a stub: the later events read back the id this saves.
+            mock.patch(
+                "tracing.cursor.hooks.handlers.gen_root_span_save",
+                wraps=handlers_mod.gen_root_span_save,
+            ) as save_mock,
         ):
             _dispatch(
                 "beforeSubmitPrompt",
@@ -298,8 +304,8 @@ class TestHandleBeforeSubmitPrompt:
         assert llm_attrs["output.value"]["stringValue"] == "I fixed the bug"
         assert llm_attrs["session.id"]["stringValue"] == "conv-1"
 
-    def test_ide_payload_defers_root_chain_to_after_response(self, captured_spans, monkeypatch):
-        """IDE payload (hook_event_name): root CHAIN at afterAgentResponse; LLM deferred to stop."""
+    def test_ide_payload_emits_whole_turn_at_stop(self, captured_spans, monkeypatch):
+        """IDE payload (hook_event_name): nothing is sent until stop closes the turn."""
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
@@ -330,17 +336,10 @@ class TestHandleBeforeSubmitPrompt:
                 },
             )
 
-        # Only the deferred root User Prompt CHAIN is sent at afterAgentResponse.
-        names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
-        assert names == ["User Prompt"]
-        root = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        root_attrs = {a["key"]: a["value"] for a in root["attributes"]}
-        assert root_attrs["input.value"]["stringValue"] == "fix the bug"
-        assert root_attrs["output.value"]["stringValue"] == "I fixed the bug"
-        assert root["startTimeUnixNano"].startswith("5000")
-        assert root["endTimeUnixNano"].startswith("9000")
+        # Still nothing: the root is held so its end time can cover the spans
+        # stop is about to emit, instead of ending before its own children.
+        assert len(captured_spans) == 0
 
-        # Agent Response LLM span appears at stop, carrying the same input/output.
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=10000):
             _dispatch(
                 "stop",
@@ -349,11 +348,25 @@ class TestHandleBeforeSubmitPrompt:
 
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
         assert names == ["User Prompt", "Agent Response", "Agent Stop"]
+
+        root = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        root_attrs = {a["key"]: a["value"] for a in root["attributes"]}
+        assert root_attrs["input.value"]["stringValue"] == "fix the bug"
+        assert root_attrs["output.value"]["stringValue"] == "I fixed the bug"
+        assert root["startTimeUnixNano"].startswith("5000")
+        assert root["endTimeUnixNano"].startswith("10000")
+
         llm = captured_spans[1]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         llm_attrs = {a["key"]: a["value"] for a in llm["attributes"]}
         assert llm_attrs["openinference.span.kind"]["stringValue"] == "LLM"
         assert llm_attrs["input.value"]["stringValue"] == "fix the bug"
         assert llm_attrs["output.value"]["stringValue"] == "I fixed the bug"
+
+        # Every child must close no later than the root that contains it.
+        root_end = int(root["endTimeUnixNano"])
+        for captured in captured_spans[1:]:
+            child = captured["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+            assert int(child["endTimeUnixNano"]) <= root_end
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +382,7 @@ class TestHandleAfterAgentResponse:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ccdd" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent123"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="82e3edf5f5f3a46b"),
         ):
             _dispatch(
                 "afterAgentResponse",
@@ -387,7 +400,7 @@ class TestHandleAfterAgentResponse:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="eeff" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent123"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="82e3edf5f5f3a46b"),
         ):
             _dispatch(
                 "stop",
@@ -401,14 +414,14 @@ class TestHandleAfterAgentResponse:
         attrs = {a["key"]: a["value"] for a in llm_span["attributes"]}
         assert attrs["openinference.span.kind"]["stringValue"] == "LLM"
         assert attrs["output.value"]["stringValue"] == "I found the issue"
-        assert llm_span["parentSpanId"] == "parent123"
+        assert llm_span["parentSpanId"] == "82e3edf5f5f3a46b"
 
     def test_defers_llm_span_with_full_attributes(self, captured_spans, monkeypatch):
         """Deferred LLM span carries input, output, session.id, model_name when flushed at stop."""
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=4000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parentX"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="f108f23139cc05c7"),
         ):
             _dispatch(
                 "beforeSubmitPrompt",
@@ -433,7 +446,7 @@ class TestHandleAfterAgentResponse:
 
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=8000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parentX"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="f108f23139cc05c7"),
         ):
             _dispatch("stop", {"conversation_id": "conv-9", "generation_id": "gen-9"})
 
@@ -475,7 +488,9 @@ class TestHandleAfterAgentResponse:
         )
         # start_ms recorded at afterAgentResponse (2500), not at stop (9999).
         assert llm_span["startTimeUnixNano"] == "2500000000"
-        assert llm_span["endTimeUnixNano"] == "2500000000"
+        # ...and ends at stop, so the span has a real duration. It used to end
+        # at its own start, rendering every response as a 0 ms bar.
+        assert llm_span["endTimeUnixNano"] == "9999000000"
 
     def test_no_gen_id_sends_llm_span_immediately(self, captured_spans, monkeypatch):
         """Without gen_id state can't be keyed, so the LLM span is sent immediately (fallback)."""
@@ -512,7 +527,7 @@ class TestHandleAfterShellExecution:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="eeff" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=popped),
         ):
             _dispatch(
@@ -598,7 +613,7 @@ class TestHandleStop:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="3de0c6d1959ece55"),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation") as cleanup,
         ):
             _dispatch(
@@ -697,7 +712,7 @@ class TestHandleAfterAgentThought:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="abcd" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1") as get_mock,
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c") as get_mock,
         ):
             _dispatch(
                 "afterAgentThought",
@@ -712,7 +727,7 @@ class TestHandleAfterAgentThought:
         assert attrs["output.value"]["stringValue"] == "thinking about the problem"
         assert attrs["session.id"]["stringValue"] == "conv-1"
         assert span["name"] == "Agent Thinking"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
 
 # ---------------------------------------------------------------------------
@@ -784,7 +799,7 @@ class TestHandleAfterMcpExecution:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="ffaa" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
             mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=popped),
         ):
             _dispatch(
@@ -800,7 +815,7 @@ class TestHandleAfterMcpExecution:
         assert attrs["input.value"]["stringValue"] == '{"query": "test"}'
         assert attrs["output.value"]["stringValue"] == "found 3 items"
         assert span["name"] == "MCP: search"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
     def test_no_popped_state_uses_input(self, captured_spans, monkeypatch):
         """Without popped state, span still created from input_json fields."""
@@ -836,7 +851,7 @@ class TestHandleBeforeReadFile:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="1122" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
         ):
             _dispatch(
                 "beforeReadFile",
@@ -850,7 +865,7 @@ class TestHandleBeforeReadFile:
         assert attrs["tool.name"]["stringValue"] == "read_file"
         assert attrs["input.value"]["stringValue"] == "/foo/bar.py"
         assert span["name"] == "Read File"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
 
 # ---------------------------------------------------------------------------
@@ -866,7 +881,7 @@ class TestHandleAfterFileEdit:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="3344" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
         ):
             _dispatch(
                 "afterFileEdit",
@@ -885,7 +900,7 @@ class TestHandleAfterFileEdit:
         assert attrs["tool.name"]["stringValue"] == "edit_file"
         assert attrs["input.value"]["stringValue"] == "/foo/bar.py: +added line"
         assert span["name"] == "File Edit"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
     def test_no_diff_uses_path_only(self, captured_spans, monkeypatch):
         """Without diff, input.value is just the file path."""
@@ -920,7 +935,7 @@ class TestHandleBeforeTabFileRead:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="5566" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
         ):
             _dispatch(
                 "beforeTabFileRead",
@@ -934,7 +949,7 @@ class TestHandleBeforeTabFileRead:
         assert attrs["tool.name"]["stringValue"] == "read_file_tab"
         assert attrs["input.value"]["stringValue"] == "/src/main.ts"
         assert span["name"] == "Tab Read File"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
 
 # ---------------------------------------------------------------------------
@@ -950,7 +965,7 @@ class TestHandleAfterTabFileEdit:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="7788" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"),
         ):
             _dispatch(
                 "afterTabFileEdit",
@@ -969,7 +984,7 @@ class TestHandleAfterTabFileEdit:
         assert attrs["tool.name"]["stringValue"] == "edit_file_tab"
         assert attrs["input.value"]["stringValue"] == "/src/main.ts: replaced function"
         assert span["name"] == "Tab File Edit"
-        assert span["parentSpanId"] == "parent1"
+        assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
     def test_no_edits_uses_path_only(self, captured_spans, monkeypatch):
         """Without edits, input.value is just the file path."""
@@ -1154,22 +1169,31 @@ class TestEventName:
 
 class TestTraceIdFromEvent:
 
-    def test_prefers_gen_id(self):
+    def test_prefers_conversation_id(self):
         result = _trace_id_from_event("gen-1", "conv-1")
         assert result  # non-empty
-        from tracing.cursor.hooks.adapter import trace_id_from_generation
+        from tracing.cursor.hooks.adapter import trace_id_from_seed
 
-        assert result == trace_id_from_generation("gen-1")
+        assert result == trace_id_from_seed("conv-1")
 
-    def test_falls_back_to_conversation_id(self):
-        result = _trace_id_from_event("", "conv-1")
+    def test_retried_generations_share_one_trace(self):
+        """Cursor mints a new generation id per retry/continuation. Keying the
+        trace on the generation split a single exchange across several traces."""
+        assert _trace_id_from_event("gen-1", "conv-1") == _trace_id_from_event("gen-2", "conv-1")
+
+    def test_falls_back_to_generation_id(self):
+        result = _trace_id_from_event("gen-1", "")
         assert result
-        from tracing.cursor.hooks.adapter import trace_id_from_generation
+        from tracing.cursor.hooks.adapter import trace_id_from_seed
 
-        assert result == trace_id_from_generation("conv-1")
+        assert result == trace_id_from_seed("gen-1")
 
-    def test_returns_empty_when_both_empty(self):
-        assert _trace_id_from_event("", "") == ""
+    def test_generates_a_valid_id_when_both_empty(self):
+        """An empty trace id is rejected by the receiver, and one rejected span
+        fails the whole request rather than just itself."""
+        result = _trace_id_from_event("", "")
+        assert len(result) == 32
+        int(result, 16)
 
 
 # ---------------------------------------------------------------------------
@@ -1317,7 +1341,7 @@ class TestHandlePostToolUse:
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=3000),
             mock.patch("tracing.cursor.hooks.handlers.span_id_16", return_value="pt11" * 4),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="parent-pt"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a601931ba4e1e4bd"),
         ):
             _dispatch(
                 "postToolUse",
@@ -1339,7 +1363,7 @@ class TestHandlePostToolUse:
         assert attrs["input.value"]["stringValue"] == '{"query": "main function"}'
         assert attrs["output.value"]["stringValue"] == "<search results>"
         assert attrs["session.id"]["stringValue"] == "conv-pt"
-        assert span["parentSpanId"] == "parent-pt"
+        assert span["parentSpanId"] == "a601931ba4e1e4bd"
 
     def test_post_tool_use_unknown_tool_uses_command_field_when_present(self, captured_spans, monkeypatch):
         """Non-deduped shell-like tool uses 'command' field as input.value fallback."""
@@ -1453,7 +1477,7 @@ class TestHandleStopTokenCounts:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root1"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="3de0c6d1959ece55"),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1544,7 +1568,7 @@ class TestHandleSessionEnd:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root-se"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="bdf65c1875530a79"),
             mock.patch("tracing.cursor.hooks.handlers.state_cleanup_generation"),
         ):
             _dispatch(
@@ -1567,7 +1591,7 @@ class TestHandleSessionEnd:
         assert attrs["cursor.session.final_status"]["stringValue"] == "completed"
         assert attrs["cursor.session.reason"]["stringValue"] == "window_close"
         assert attrs["session.id"]["stringValue"] == "conv-end"
-        assert span["parentSpanId"] == "root-se"
+        assert span["parentSpanId"] == "bdf65c1875530a79"
 
     def test_session_end_cleans_up_generation(self, captured_spans, monkeypatch):
         """sessionEnd calls state_cleanup_generation with the gen_id."""
@@ -1710,7 +1734,7 @@ class TestIdeSafety:
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root-ide"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="c2432f0e9cbf4c78"),
         ):
             _dispatch(
                 "beforeShellExecution",
@@ -1728,7 +1752,7 @@ class TestIdeSafety:
 
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000),
-            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="root-ide"),
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="c2432f0e9cbf4c78"),
         ):
             _dispatch(
                 "afterShellExecution",
@@ -1856,7 +1880,12 @@ class TestDeferredLlmSpan:
 
         assert len(captured_spans) == 0
 
-        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=4000):
+        with (
+            mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=4000),
+            # A turn Agent Stop can close: with no root it is dropped rather
+            # than sent as its own parentless trace.
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
+        ):
             _dispatch(
                 "stop",
                 {"conversation_id": "conv-1", "generation_id": "gen-1", "input_tokens": 10, "output_tokens": 5},
@@ -1983,8 +2012,11 @@ class TestDeferredLlmSpan:
         assert llm_attrs["llm.token_count.prompt_details.cache_write"]["intValue"] == 0
         assert llm_attrs["llm.token_count.total"]["intValue"] == 0
 
-    def test_session_end_token_routing_unchanged(self, captured_spans, monkeypatch):
-        """sessionEnd is NOT affected — tokens still attach to the Session End CHAIN span."""
+    def test_session_end_tokens_are_not_counted_as_llm_tokens(self, captured_spans, monkeypatch):
+        """sessionEnd reports session cumulative totals, which every turn in the
+        session has already reported for itself. Under `llm.token_count.*` they
+        would be summed a second time and roughly double the session's cost, so
+        they go under a session namespace the cost model does not read."""
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with (
             mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000),
@@ -1999,9 +2031,9 @@ class TestDeferredLlmSpan:
         names = [s["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] for s in captured_spans]
         assert names == ["Session End"]
         attrs = _attrs(captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0])
-        assert attrs["llm.token_count.prompt"]["intValue"] == 200
-        assert attrs["llm.token_count.completion"]["intValue"] == 75
-        assert attrs["llm.token_count.total"]["intValue"] == 275
+        assert attrs["cursor.session.tokens.prompt"]["intValue"] == 200
+        assert attrs["cursor.session.tokens.completion"]["intValue"] == 75
+        assert not [k for k in attrs if k.startswith("llm.token_count.")]
 
     def test_deferred_llm_uses_recorded_parent_and_start_time_at_stop(self, captured_spans, monkeypatch):
         """The flushed LLM span uses the parent and start_ms recorded at afterAgentResponse."""
@@ -2046,7 +2078,8 @@ class TestDeferredLlmSpan:
         llm_span = spans["Agent Response"][0]
         assert llm_span["parentSpanId"] == root_span_id
         assert llm_span["startTimeUnixNano"] == "2500000000"
-        assert llm_span["endTimeUnixNano"] == "2500000000"
+        # Ends at stop, giving the span a real duration rather than a 0 ms bar.
+        assert llm_span["endTimeUnixNano"] == "99999000000"
 
     def test_multiple_deferred_llms_only_most_recent_gets_token_counts(self, captured_spans, monkeypatch):
         """Two afterAgentResponse events in one generation: each becomes an LLM span;
@@ -2130,3 +2163,79 @@ class TestDeferredLlmSpan:
         assert llm_attrs["session.id"]["stringValue"] == "conv-abc"
         assert llm_attrs["cursor.conversation.id"]["stringValue"] == "conv-abc"
         assert llm_attrs["user.id"]["stringValue"] == "alice@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Noise suppression: events that have no turn to attach to
+# ---------------------------------------------------------------------------
+
+
+class TestOrphanSpansAreDropped:
+    """A span with no root becomes a trace of its own — a Traces-page row with
+    no prompt, no response and no tokens. Every handler must decline instead."""
+
+    @pytest.mark.parametrize(
+        "event,payload",
+        [
+            ("beforeTabFileRead", {"file_path": "/a.py"}),
+            ("afterTabFileEdit", {"file_path": "/a.py", "edits": "x"}),
+            ("beforeReadFile", {"file_path": "/a.py"}),
+            ("afterFileEdit", {"file_path": "/a.py"}),
+            ("afterAgentThought", {"thought": "hmm"}),
+            ("stop", {"input_tokens": 10, "output_tokens": 5}),
+        ],
+    )
+    def test_no_span_without_a_root(self, captured_spans, monkeypatch, event, payload):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value=""):
+            _dispatch(event, dict(payload))
+        assert captured_spans == []
+
+    def test_tab_events_are_not_registered_at_install(self):
+        """Cursor Tab is inline autocomplete, not agent activity: it fires while
+        the user types and carries no conversation or generation id."""
+        from tracing.cursor.constants import HOOK_EVENTS
+
+        assert "beforeTabFileRead" not in HOOK_EVENTS
+        assert "afterTabFileEdit" not in HOOK_EVENTS
+
+
+class TestPostToolUseDeduplication:
+    """postToolUse overlaps the dedicated before*/after* pairs. Matching the
+    exact name missed every spelling Cursor actually sends, so one shell command
+    produced both a `Shell` span and a `Tool: runTerminalCmd` span."""
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "runTerminalCmd",
+            "run_terminal_cmd",
+            "search_replace",
+            "apply_patch",
+            "MultiEdit",
+            "str_replace_editor",
+            "read_file",
+            "mcp_atlassian_getJiraIssue",
+        ],
+    )
+    def test_duplicate_of_a_dedicated_handler_is_skipped(self, captured_spans, monkeypatch, tool_name):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16):
+            _dispatch(
+                "postToolUse",
+                {"conversation_id": "c1", "generation_id": "g1", "tool_name": tool_name},
+            )
+        assert captured_spans == []
+
+    @pytest.mark.parametrize("tool_name", ["todo_write", "codebase_search", "list_dir"])
+    def test_tool_without_a_dedicated_handler_is_still_traced(self, captured_spans, monkeypatch, tool_name):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16):
+            _dispatch(
+                "postToolUse",
+                {"conversation_id": "c1", "generation_id": "g1", "tool_name": tool_name},
+            )
+        assert len(captured_spans) == 1
+        assert _attrs(captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0])["tool.name"][
+            "stringValue"
+        ] == tool_name

@@ -55,16 +55,6 @@
         "command": "${CURSOR_PLUGIN_ROOT}/scripts/run-hook"
       }
     ],
-    "beforeTabFileRead": [
-      {
-        "command": "${CURSOR_PLUGIN_ROOT}/scripts/run-hook"
-      }
-    ],
-    "afterTabFileEdit": [
-      {
-        "command": "${CURSOR_PLUGIN_ROOT}/scripts/run-hook"
-      }
-    ],
     "stop": [
       {
         "command": "${CURSOR_PLUGIN_ROOT}/scripts/run-hook"

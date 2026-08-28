@@ -1097,6 +1097,29 @@ def strip_system_reminders(text: str) -> str:
     return text.strip() if removed else text
 
 
+#: Per-attribute character cap. A single span carrying a large diff or a
+#: verbose command's stdout can exceed a receiver's body limit on its own, and
+#: the whole POST is rejected rather than that one value truncated.
+MAX_ATTR_CHARS = int(os.environ.get("ATATUS_TRACE_MAX_ATTR_CHARS", "100000"))
+
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _is_valid_hex_id(value: object, length: int) -> bool:
+    """True when *value* is exactly *length* lowercase-hex characters."""
+    if not isinstance(value, str) or len(value) != length:
+        return False
+    return all(c in _HEX_DIGITS for c in value.lower())
+
+
+def truncate_attr(value: str, max_chars: "int | None" = None) -> str:
+    """Truncate *value*, marking it so a reader knows the tail is missing."""
+    limit = MAX_ATTR_CHARS if max_chars is None else max_chars
+    if limit <= 0 or len(value) <= limit:
+        return value
+    return value[:limit] + f"... [truncated {len(value) - limit} chars]"
+
+
 def _apply_hygiene(attrs: dict) -> dict:
     """Normalize model ids and clean prompt text on an outgoing attribute set."""
     model = attrs.get("llm.model_name")
@@ -1121,6 +1144,10 @@ def _apply_hygiene(attrs: dict) -> dict:
         cleaned = strip_system_reminders(val)
         if cleaned != val:
             attrs[key] = cleaned
+
+    for key, val in list(attrs.items()):
+        if isinstance(val, str):
+            attrs[key] = truncate_attr(val)
     return attrs
 
 
@@ -1152,6 +1179,20 @@ def build_span(
     attrs = {} if attrs is None else dict(attrs)
     for k, v in env.custom_attributes(service_name).items():
         attrs.setdefault(k, v)
+
+    # A malformed id fails the receiver's hex decode and takes the whole
+    # request down with it, so one bad span would silently drop every span
+    # batched alongside it. Replacing it keeps the span, and the warning keeps
+    # the upstream bug visible.
+    if not _is_valid_hex_id(trace_id, 32):
+        log(f"invalid trace id {trace_id!r} on span {name!r}; generated a replacement")
+        trace_id = generate_trace_id()
+    if not _is_valid_hex_id(span_id, 16):
+        log(f"invalid span id {span_id!r} on span {name!r}; generated a replacement")
+        span_id = generate_span_id()
+    if parent_span_id and not _is_valid_hex_id(parent_span_id, 16):
+        log(f"invalid parent span id {parent_span_id!r} on span {name!r}; dropping the parent link")
+        parent_span_id = ""
 
     start = int(start_ms) if start_ms else 0
     end = int(end_ms) if end_ms else start

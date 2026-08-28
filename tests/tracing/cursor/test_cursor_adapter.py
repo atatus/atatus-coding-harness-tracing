@@ -3,6 +3,7 @@
 import hashlib
 import json
 import threading
+import time
 
 import pytest
 
@@ -20,29 +21,31 @@ def _patch_state_dir(tmp_path, monkeypatch):
     return state_dir
 
 
-# ── trace_id_from_generation ──────────────────────────────────────────────
+# ── trace_id_from_seed ────────────────────────────────────────────────────
 
 
-class TestTraceIdFromGeneration:
+class TestTraceIdFromSeed:
     def test_returns_32_hex(self):
-        result = adapter.trace_id_from_generation("gen-abc")
+        result = adapter.trace_id_from_seed("conv-abc")
         assert len(result) == 32
         int(result, 16)  # must be valid hex
 
     def test_deterministic(self):
-        a = adapter.trace_id_from_generation("gen-abc")
-        b = adapter.trace_id_from_generation("gen-abc")
+        """Separate hook processes share no memory, so the same seed must map
+        to the same trace in each of them."""
+        a = adapter.trace_id_from_seed("conv-abc")
+        b = adapter.trace_id_from_seed("conv-abc")
         assert a == b
 
     def test_different_inputs_differ(self):
-        a = adapter.trace_id_from_generation("gen-abc")
-        b = adapter.trace_id_from_generation("gen-xyz")
+        a = adapter.trace_id_from_seed("conv-abc")
+        b = adapter.trace_id_from_seed("conv-xyz")
         assert a != b
 
-    def test_matches_md5(self):
-        """Verify output matches: echo -n 'gen-abc' | md5sum | cut -c1-32"""
-        expected = hashlib.md5(b"gen-abc").hexdigest()[:32]
-        assert adapter.trace_id_from_generation("gen-abc") == expected
+    def test_uses_sha256_not_md5(self):
+        """MD5 raises on a host running OpenSSL in FIPS mode."""
+        assert adapter.trace_id_from_seed("conv-abc") == hashlib.sha256(b"conv-abc").hexdigest()[:32]
+        assert adapter.trace_id_from_seed("conv-abc") != hashlib.md5(b"conv-abc").hexdigest()[:32]
 
 
 # ── span_id_16 ────────────────────────────────────────────────────────────
@@ -255,3 +258,89 @@ class TestCheckRequirements:
     def test_disabled(self, monkeypatch):
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "false")
         assert adapter.check_requirements() is False
+
+
+# ── stale state garbage collection ────────────────────────────────────────
+
+
+class TestGcStaleStateFiles:
+    """A cancelled turn, or one whose stop hook carried a different generation
+    id, leaves state nothing will ever pop. Cursor's keys hold no pid, so age is
+    the only signal available."""
+
+    def _age(self, path, seconds):
+        import os
+
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    def test_removes_state_older_than_the_cutoff(self, _patch_state_dir):
+        stale = _patch_state_dir / "root_gen-old.stack.json"
+        stale.write_text("[]")
+        self._age(stale, 60 * 60 * 24)
+
+        adapter.gc_stale_state_files()
+        assert not stale.exists()
+
+    def test_keeps_state_from_a_live_turn(self, _patch_state_dir):
+        fresh = _patch_state_dir / "root_gen-new.stack.json"
+        fresh.write_text("[]")
+
+        adapter.gc_stale_state_files()
+        assert fresh.exists()
+
+    def test_removes_stale_lock_files_not_just_directories(self, _patch_state_dir):
+        """FileLock only makes a directory in its mkdir fallback; with fcntl or
+        msvcrt available — which is every platform we run on — it makes a plain
+        file, and the old cleanup skipped those entirely."""
+        lock_file = _patch_state_dir / ".lock_root_gen-old"
+        lock_file.write_text("")
+        lock_dir = _patch_state_dir / ".lock_root_gen-older"
+        lock_dir.mkdir()
+        for path in (lock_file, lock_dir):
+            self._age(path, 60 * 60 * 24)
+
+        adapter.gc_stale_state_files()
+        assert not lock_file.exists()
+        assert not lock_dir.exists()
+
+    def test_leaves_unrelated_files_alone(self, _patch_state_dir):
+        other = _patch_state_dir / "notes.txt"
+        other.write_text("keep me")
+        self._age(other, 60 * 60 * 24)
+
+        adapter.gc_stale_state_files()
+        assert other.exists()
+
+    def test_no_state_directory_is_not_an_error(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(adapter, "STATE_DIR", tmp_path / "absent")
+        adapter.gc_stale_state_files()
+
+
+class TestStateCleanupGenerationLocks:
+    def test_removes_lock_files(self, _patch_state_dir):
+        lock_file = _patch_state_dir / ".lock_root_gen-1"
+        lock_file.write_text("")
+        adapter.state_cleanup_generation("gen-1")
+        assert not lock_file.exists()
+
+    def test_blank_generation_id_is_a_no_op(self, _patch_state_dir):
+        """A blank id makes the glob '**', which Path.glob rejects outright."""
+        keep = _patch_state_dir / "root_gen-1.stack.json"
+        keep.write_text("[]")
+        adapter.state_cleanup_generation("")
+        assert keep.exists()
+
+
+class TestGenRootSpanSave:
+    def test_write_is_atomic(self, _patch_state_dir):
+        """One process per hook event runs concurrently; a reader that caught a
+        plain write half-done would use a truncated span id as a parent."""
+        adapter.gen_root_span_save("gen-1", "a" * 16)
+        assert adapter.gen_root_span_get("gen-1") == "a" * 16
+        assert not list(_patch_state_dir.glob("*.tmp.*"))
+
+    def test_overwrite_leaves_no_partial_state(self, _patch_state_dir):
+        adapter.gen_root_span_save("gen-1", "a" * 16)
+        adapter.gen_root_span_save("gen-1", "b" * 16)
+        assert adapter.gen_root_span_get("gen-1") == "b" * 16

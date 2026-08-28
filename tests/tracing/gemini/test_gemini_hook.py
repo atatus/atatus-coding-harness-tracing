@@ -218,8 +218,8 @@ class TestSessionEnd:
 
     def test_failsafe_closes_pending_turn(self, mock_resolve, state, captured_spans):
         """If trace state is still set, session_end closes it as a CHAIN root span."""
-        state.set("current_trace_id", "t" * 32)
-        state.set("current_trace_span_id", "s" * 16)
+        state.set("current_trace_id", "c" * 32)
+        state.set("current_trace_span_id", "d" * 16)
         state.set("current_trace_start_time", "1000")
         with (
             mock.patch("tracing.gemini.hooks.handlers.log"),
@@ -231,8 +231,8 @@ class TestSessionEnd:
         assert attrs["openinference.span.kind"]["stringValue"] == "CHAIN"
         assert "closed by SessionEnd fail-safe" in attrs.get("output.value", {}).get("stringValue", "")
         span = _get_span(captured_spans[0])
-        assert span["traceId"] == "t" * 32
-        assert span["spanId"] == "s" * 16
+        assert span["traceId"] == "c" * 32
+        assert span["spanId"] == "d" * 16
         assert "parentSpanId" not in span
         # State must be cleared so SessionEnd's own bookkeeping doesn't re-emit
         assert state.get("current_trace_id") is None
@@ -284,8 +284,8 @@ class TestBeforeAgent:
         emits a CHAIN closure span for it before starting the new turn — so child spans
         from the prior turn aren't orphaned."""
         # Simulate a turn that started but never closed
-        state.set("current_trace_id", "p" * 32)
-        state.set("current_trace_span_id", "q" * 16)
+        state.set("current_trace_id", "e" * 32)
+        state.set("current_trace_span_id", "f" * 16)
         state.set("current_trace_start_time", "1000")
         state.set("current_trace_prompt", "prior prompt")
 
@@ -297,15 +297,15 @@ class TestBeforeAgent:
         assert attrs["openinference.span.kind"]["stringValue"] == "CHAIN"
         assert "closed by BeforeAgent fail-safe" in attrs["output.value"]["stringValue"]
         span = _get_span(captured_spans[0])
-        assert span["traceId"] == "p" * 32
-        assert span["spanId"] == "q" * 16
+        assert span["traceId"] == "e" * 32
+        assert span["spanId"] == "f" * 16
         assert "parentSpanId" not in span
 
         # New turn's IDs must be different (fresh trace)
         new_trace = state.get("current_trace_id")
         new_span = state.get("current_trace_span_id")
-        assert new_trace != "p" * 32
-        assert new_span != "q" * 16
+        assert new_trace != "e" * 32
+        assert new_span != "f" * 16
         assert state.get("current_trace_prompt") == "new prompt"
 
 

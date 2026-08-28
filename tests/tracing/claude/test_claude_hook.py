@@ -156,7 +156,7 @@ class TestPostToolUse:
     def test_builds_tool_span(self, mock_resolve, state, captured_spans):
         """post_tool_use builds a TOOL span with correct attributes."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {
                 "tool_name": "Read",
@@ -175,7 +175,7 @@ class TestPostToolUse:
     def test_bash_tool_sets_command(self, mock_resolve, state, captured_spans):
         """Bash tool sets tool.command attr and description is command[:200]."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {
                 "tool_name": "Bash",
@@ -193,7 +193,7 @@ class TestPostToolUse:
     def test_grep_tool_sets_query_and_path(self, mock_resolve, state, captured_spans):
         """Grep tool sets both tool.query and tool.file_path, description prefixed 'grep: '."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {
                 "tool_name": "Grep",
@@ -211,7 +211,7 @@ class TestPostToolUse:
     def test_webfetch_tool_sets_url(self, mock_resolve, state, captured_spans):
         """WebFetch tool sets tool.url attr."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {
                 "tool_name": "WebFetch",
@@ -227,7 +227,7 @@ class TestPostToolUse:
     def test_unknown_tool_description_is_input(self, mock_resolve, state, captured_spans):
         """Unknown tool_name → description is first 200 chars of input."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {"tool_name": "CustomTool", "tool_use_id": "t5", "tool_input": {"data": "hello"}, "tool_response": "result"}
         )
@@ -241,7 +241,7 @@ class TestPostToolUse:
     def test_uses_pre_tool_start_time(self, mock_resolve, state, captured_spans):
         """Timing uses pre_tool_use start time if available in state."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         state.set("tool_t7_start", "1000000")
         _handle_post_tool_use(
             {"tool_name": "Read", "tool_use_id": "t7", "tool_input": {"file_path": "/a.py"}, "tool_response": "content"}
@@ -1232,7 +1232,7 @@ class TestContentRedaction:
 
     def test_post_tool_use_redacts_content_and_details_by_default(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {
                 "tool_name": "Read",
@@ -1250,7 +1250,7 @@ class TestContentRedaction:
     def test_post_tool_use_no_zero_redacted_for_empty_optional_fields(self, mock_resolve, state, captured_spans):
         """Non-Bash tools should not emit a `<redacted (0 chars)>` tool.command attr."""
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": "/foo.py"}, "tool_response": "x"}
         )
@@ -1276,7 +1276,7 @@ class TestContentRedaction:
 
     def test_permission_request_redacts_tool_input(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_permission_request({"permission": "ask", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}})
         attrs = _attrs(captured_spans[0])
         assert attrs["input.value"]["stringValue"].startswith("<redacted (")
@@ -1284,7 +1284,7 @@ class TestContentRedaction:
     def test_notification_redacts_message_when_prompts_off(self, mock_resolve, state, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-parent")
+        state.set("current_trace_span_id", "parentparentpare")
         _handle_notification({"message": "hi", "title": "alert", "type": "info"})
         attrs = _attrs(captured_spans[0])
         assert attrs["notification.message"]["stringValue"].startswith("<redacted (")

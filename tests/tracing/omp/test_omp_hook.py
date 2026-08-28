@@ -260,8 +260,8 @@ class TestBeforeAgentStart:
 
     def test_force_closes_prior_open_trace(self, mock_resolve, mock_ensure, state, captured_spans):
         """A still-open prior trace is force-closed (CHAIN emitted) before the new one opens."""
-        state.set("current_trace_id", "p" * 32)
-        state.set("current_trace_span_id", "q" * 16)
+        state.set("current_trace_id", "e" * 32)
+        state.set("current_trace_span_id", "f" * 16)
         state.set("current_trace_start_time", "500")
         state.set("current_trace_prompt", "prior prompt")
         state.set("current_final_output", "")
@@ -271,11 +271,11 @@ class TestBeforeAgentStart:
         chains = _by_kind(captured_spans, "CHAIN")
         assert len(chains) == 1
         span = _get_span(chains[0])
-        assert span["traceId"] == "p" * 32
-        assert span["spanId"] == "q" * 16
+        assert span["traceId"] == "e" * 32
+        assert span["spanId"] == "f" * 16
         assert "parentSpanId" not in span
         # New trace has fresh ids and the new prompt.
-        assert state.get("current_trace_id") != "p" * 32
+        assert state.get("current_trace_id") != "e" * 32
         assert state.get("current_trace_prompt") == "list files and edit main.py"
 
 

@@ -8,11 +8,26 @@
 #
 # Requires CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA env vars
 # (set automatically by Claude Code for plugin hooks).
+#
+# Any failure exits 0 so tracing never blocks the agent.
 set -e
 
-HOOK_NAME="${1:?usage: run-hook <entry-point-name>}"
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:?CLAUDE_PLUGIN_ROOT not set}"
-DATA_DIR="${CLAUDE_PLUGIN_DATA:?CLAUDE_PLUGIN_DATA not set}"
+HOOK_NAME="${1:-}"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+DATA_DIR="${CLAUDE_PLUGIN_DATA:-}"
+
+# Only Claude Code sets both of these. Other agents read the same
+# .claude/settings.json and honour its enabledPlugins — Cursor sets
+# CLAUDE_PLUGIN_ROOT but has no per-plugin data dir to set, so it leaves
+# CLAUDE_PLUGIN_DATA empty. Aborting here would exit non-zero, which those
+# hosts treat as the hook refusing the request: the user cannot send a prompt
+# at all. Leave quietly instead. Tracing a Cursor session from here would be
+# wrong anyway — Cursor has its own harness, and these spans would land in the
+# Claude Code project.
+if [ -z "$HOOK_NAME" ] || [ -z "$PLUGIN_ROOT" ] || [ -z "$DATA_DIR" ]; then
+    exit 0
+fi
+
 VENV_DIR="$DATA_DIR/venv"
 MARKER="$DATA_DIR/.pyproject.sha256"
 

@@ -9,6 +9,12 @@ import pytest
 import core.setup as _setup
 import tracing.copilot.install as _install
 from core.common import DEFAULT_OTLP_ENDPOINT
+from tracing.copilot.constants import (
+    HOOK_CONFIG_VERSION,
+    HOOKS_FILE_NAME,
+    LEGACY_HOOKS_DIR,
+    LEGACY_HOOKS_FILE_NAME,
+)
 
 install = _install.install
 uninstall = _install.uninstall
@@ -73,8 +79,13 @@ def _mock_prompts(monkeypatch, backend=None):
 
 @pytest.fixture
 def cwd_tmp(tmp_path, monkeypatch):
-    """Set cwd to tmp_path and patch core.setup paths for isolation."""
+    """Set cwd to tmp_path and patch core.setup paths for isolation.
+
+    Hooks are user-level now, so COPILOT_HOME is redirected too: without it the
+    installer would write into the developer's real ~/.copilot.
+    """
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / ".copilot"))
 
     import core.setup as setup_mod
 
@@ -100,8 +111,16 @@ def cwd_tmp(tmp_path, monkeypatch):
 
 @pytest.fixture
 def hooks_dir(cwd_tmp):
-    """Return the .github/hooks directory under the temp cwd."""
-    return cwd_tmp / ".github" / "hooks"
+    """Return the user-level hooks directory under the temp COPILOT_HOME.
+
+    Hooks used to be written to ``<cwd>/.github/hooks``, which traced only the
+    one project the installer happened to be run from.
+    """
+    from tracing.copilot.constants import hooks_dir as _hooks_dir
+
+    resolved = _hooks_dir()
+    assert resolved == cwd_tmp / ".copilot" / "hooks"
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -133,23 +152,26 @@ class TestInstallFreshWritesFlatHarnessEntry:
         # No collector for copilot
         assert "collector" not in entry
 
-    def test_hooks_json_created(self, hooks_dir, monkeypatch):
+    def test_hooks_file_created_at_user_level(self, hooks_dir, cwd_tmp, monkeypatch):
         _mock_prompts(monkeypatch)
         install()
-        assert (hooks_dir / "hooks.json").is_file()
+        assert (hooks_dir / HOOKS_FILE_NAME).is_file()
+        # Not project-local: an install must trace every project, not just this one.
+        assert not (cwd_tmp / ".github" / "hooks").exists()
 
-    def test_hooks_json_structure(self, hooks_dir, monkeypatch):
-        """hooks.json must follow the VS Code Copilot Chat schema:
-        {"hooks": {"<EventName>": [{"type": "command", "command": "<cmd>"}]}}
+    def test_hooks_file_structure(self, hooks_dir, monkeypatch):
+        """The hooks file must follow the Copilot schema:
+        {"version": 1, "hooks": {"<EventName>": [{"type": "command", "command": "<cmd>"}]}}
         """
         _mock_prompts(monkeypatch)
         install()
-        data = json.loads((hooks_dir / "hooks.json").read_text())
+        data = json.loads((hooks_dir / HOOKS_FILE_NAME).read_text())
         assert set(data["hooks"].keys()) == {
             "SessionStart",
             "UserPromptSubmit",
             "PreToolUse",
             "PostToolUse",
+            "PostToolUseFailure",
             "Stop",
             "SubagentStop",
         }
@@ -158,12 +180,32 @@ class TestInstallFreshWritesFlatHarnessEntry:
             assert entries[0]["type"] == "command"
             assert "atatus-hook-copilot-" in entries[0]["command"]
 
-    def test_only_hooks_json_written(self, hooks_dir, monkeypatch):
+    def test_hooks_file_declares_schema_version(self, hooks_dir, monkeypatch):
+        """Copilot rejects a hooks file that omits the schema version."""
+        _mock_prompts(monkeypatch)
+        install()
+        data = json.loads((hooks_dir / HOOKS_FILE_NAME).read_text())
+        assert data["version"] == HOOK_CONFIG_VERSION
+
+    def test_owns_a_dedicated_file(self, hooks_dir, monkeypatch):
+        """Copilot reads every *.json here, so we write only our own file."""
         _mock_prompts(monkeypatch)
         install()
         json_files = list(hooks_dir.glob("*.json"))
         assert len(json_files) == 1
-        assert json_files[0].name == "hooks.json"
+        assert json_files[0].name == HOOKS_FILE_NAME
+
+    def test_leaves_a_foreign_hooks_file_alone(self, hooks_dir, monkeypatch):
+        """A hooks file the user wrote is neither read nor rewritten."""
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        other = hooks_dir / "my-own-hooks.json"
+        other.write_text(json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "/bin/mine"}]}}))
+        original = other.read_text()
+
+        _mock_prompts(monkeypatch)
+        install()
+
+        assert other.read_text() == original
 
 
 class TestInstallSecondHarnessOffersCopyFrom:
@@ -273,9 +315,27 @@ class TestIdempotent:
         _mock_prompts(monkeypatch)
         install()
         install()
-        data = json.loads((hooks_dir / "hooks.json").read_text())
+        data = json.loads((hooks_dir / HOOKS_FILE_NAME).read_text())
         for event, entries in data["hooks"].items():
             assert len(entries) == 1, f"Duplicate entries for event {event}"
+
+    def test_moved_venv_does_not_stack_duplicates(self, hooks_dir, monkeypatch):
+        """Our previous entry is matched by prefix, not by absolute path."""
+        _mock_prompts(monkeypatch)
+        install()
+
+        hf = hooks_dir / HOOKS_FILE_NAME
+        data = json.loads(hf.read_text())
+        for entries in data["hooks"].values():
+            entries[0]["command"] = "/old/venv/bin/" + entries[0]["command"].rsplit("/", 1)[-1]
+        hf.write_text(json.dumps(data, indent=2) + "\n")
+
+        install()
+
+        data = json.loads(hf.read_text())
+        for event, entries in data["hooks"].items():
+            assert len(entries) == 1, f"Duplicate entries for event {event}"
+            assert not entries[0]["command"].startswith("/old/venv/")
 
 
 # ---------------------------------------------------------------------------
@@ -296,12 +356,12 @@ class TestUninstallRemovesHarnessEntry:
             harnesses = config.get("harnesses", {})
             assert "copilot" not in harnesses
 
-    def test_hooks_json_removed(self, hooks_dir, monkeypatch):
+    def test_hooks_file_removed(self, hooks_dir, monkeypatch):
         _mock_prompts(monkeypatch)
         install()
-        assert (hooks_dir / "hooks.json").is_file()
+        assert (hooks_dir / HOOKS_FILE_NAME).is_file()
         uninstall()
-        assert not (hooks_dir / "hooks.json").exists()
+        assert not (hooks_dir / HOOKS_FILE_NAME).exists()
 
     def test_uninstall_is_idempotent(self, cwd_tmp, monkeypatch):
         """Running uninstall twice succeeds without error."""
@@ -318,7 +378,7 @@ class TestUninstallRemovesHarnessEntry:
 
 
 class TestUninstallPreservesUserHooks:
-    """Uninstall on a pre-populated hooks.json preserves unrelated user hooks."""
+    """Uninstall on a pre-populated hooks file preserves unrelated user hooks."""
 
     def test_preserves_user_hooks(self, hooks_dir, monkeypatch):
         _mock_prompts(monkeypatch)
@@ -326,7 +386,7 @@ class TestUninstallPreservesUserHooks:
 
         # Add user-defined entries: a brand-new event, plus an extra command
         # alongside ours under SessionStart.
-        hf = hooks_dir / "hooks.json"
+        hf = hooks_dir / HOOKS_FILE_NAME
         data = json.loads(hf.read_text())
         data["hooks"]["CustomEvent"] = [{"type": "command", "command": "/usr/local/bin/my-hook"}]
         data["hooks"]["SessionStart"].append({"type": "command", "command": "/usr/local/bin/user-session"})
@@ -338,6 +398,45 @@ class TestUninstallPreservesUserHooks:
         remaining = json.loads(hf.read_text())
         assert remaining["hooks"]["CustomEvent"] == [{"type": "command", "command": "/usr/local/bin/my-hook"}]
         assert remaining["hooks"]["SessionStart"] == [{"type": "command", "command": "/usr/local/bin/user-session"}]
+
+
+# ---------------------------------------------------------------------------
+# Legacy project-local hooks
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyProjectLocalHooks:
+    """Hooks left by a pre-user-level install would double-fire inside that project."""
+
+    def _write_legacy(self, cwd_tmp, entries):
+        path = cwd_tmp / LEGACY_HOOKS_DIR / LEGACY_HOOKS_FILE_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"hooks": {"SessionStart": entries}}, indent=2) + "\n")
+        return path
+
+    def test_install_removes_superseded_project_local_hooks(self, cwd_tmp, monkeypatch):
+        legacy = self._write_legacy(
+            cwd_tmp, [{"type": "command", "command": "/old/bin/atatus-hook-copilot-session-start"}]
+        )
+        _mock_prompts(monkeypatch)
+        install()
+        assert not legacy.exists()
+
+    def test_uninstall_removes_superseded_project_local_hooks(self, cwd_tmp, monkeypatch):
+        _mock_prompts(monkeypatch)
+        install()
+        legacy = self._write_legacy(
+            cwd_tmp, [{"type": "command", "command": "/old/bin/atatus-hook-copilot-session-start"}]
+        )
+        uninstall()
+        assert not legacy.exists()
+
+    def test_legacy_file_without_our_entries_is_untouched(self, cwd_tmp, monkeypatch):
+        legacy = self._write_legacy(cwd_tmp, [{"type": "command", "command": "/usr/local/bin/user-hook"}])
+        original = legacy.read_text()
+        _mock_prompts(monkeypatch)
+        install()
+        assert legacy.read_text() == original
 
 
 # ---------------------------------------------------------------------------

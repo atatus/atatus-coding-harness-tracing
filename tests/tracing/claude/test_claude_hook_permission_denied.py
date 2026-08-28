@@ -71,7 +71,7 @@ def _span_meta(span):
 class TestPermissionDenied:
     def test_emits_chain_span(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         assert len(captured_spans) == 1
         attrs = _span_attrs(captured_spans[0])
@@ -80,14 +80,14 @@ class TestPermissionDenied:
 
     def test_sets_denied_attribute(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])
         assert attrs["permission.denied"] == "true"
 
     def test_sets_tool_attribute(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])
         assert attrs["permission.tool"] == "Bash"
@@ -96,7 +96,7 @@ class TestPermissionDenied:
         """When the payload carries a `permission` field, surface it as
         `permission.type` (mirrors _handle_permission_request)."""
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         payload = _base_input()
         payload["permission"] = "execute"
         _handle_permission_denied(payload)
@@ -105,7 +105,7 @@ class TestPermissionDenied:
 
     def test_sets_input_value_from_tool_input(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])
         assert '"command": "rm -rf /"' in attrs["input.value"]
@@ -113,7 +113,7 @@ class TestPermissionDenied:
     def test_redacts_tool_input_when_disabled(self, mock_resolve, captured_spans, state, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])
         assert "<redacted" in attrs["input.value"]
@@ -124,16 +124,16 @@ class TestPermissionDenied:
         assert len(captured_spans) == 0
 
     def test_attaches_to_current_turn(self, mock_resolve, captured_spans, state):
-        state.set("current_trace_id", "trace-abc")
-        state.set("current_trace_span_id", "span-def")
+        state.set("current_trace_id", "abcd" * 8)
+        state.set("current_trace_span_id", "defdefdefdefdefd")
         _handle_permission_denied(_base_input())
         meta = _span_meta(captured_spans[0])
-        assert meta["traceId"] == "trace-abc"
-        assert meta["parentSpanId"] == "span-def"
+        assert meta["traceId"] == "abcd" * 8
+        assert meta["parentSpanId"] == "defdefdefdefdefd"
 
     def test_includes_user_id_when_set(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
-        state.set("current_trace_span_id", "span-1")
+        state.set("current_trace_span_id", "1111111111111111")
         state.set("user_id", "u-42")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])

@@ -1030,8 +1030,8 @@ class TestPendingTurnFailSafe:
         triggers a force-close of the pending turn (emits a CHAIN with the
         '(closed by reconcile fail-safe)' output)."""
         # Pre-set state as if a prior turn is mid-flight.
-        state.set("current_trace_id", "p" * 32)
-        state.set("current_trace_span_id", "q" * 16)
+        state.set("current_trace_id", "e" * 32)
+        state.set("current_trace_span_id", "f" * 16)
         state.set("current_trace_start_time", "500")
         state.set("current_trace_prompt", "prior prompt")
         state.set("current_user_message_id", "msg_user_prior")
@@ -1046,12 +1046,12 @@ class TestPendingTurnFailSafe:
         attrs = _get_attrs(chains[0])
         assert "fail-safe" in attrs["output.value"]["stringValue"]
         span = _get_span(chains[0])
-        assert span["traceId"] == "p" * 32
-        assert span["spanId"] == "q" * 16
+        assert span["traceId"] == "e" * 32
+        assert span["spanId"] == "f" * 16
         assert "parentSpanId" not in span
 
         # New turn must have fresh ids
-        assert state.get("current_trace_id") != "p" * 32
+        assert state.get("current_trace_id") != "e" * 32
         assert state.get("current_user_message_id") == "msg_user_1"
 
     def test_same_user_message_id_does_not_force_close(self, mock_resolve, mock_ensure, state, captured_spans):
@@ -1220,8 +1220,8 @@ class TestMultiTurnSnapshotDedup:
         """A turn closed via fail-safe must also be marked closed, so a later
         replay of that user message doesn't open yet another phantom turn."""
         # Pre-set: a pending turn keyed on msg_user_prior.
-        state.set("current_trace_id", "p" * 32)
-        state.set("current_trace_span_id", "q" * 16)
+        state.set("current_trace_id", "e" * 32)
+        state.set("current_trace_span_id", "f" * 16)
         state.set("current_trace_start_time", "500")
         state.set("current_trace_prompt", "prior prompt")
         state.set("current_user_message_id", "msg_user_prior")

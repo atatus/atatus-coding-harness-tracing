@@ -94,7 +94,7 @@ class TestUserPromptExpansion:
 class TestStopWithCommandMetadata:
     def _setup_trace_state(self, state):
         state.set("current_trace_id", "trace-aaa")
-        state.set("current_trace_span_id", "span-bbb")
+        state.set("current_trace_span_id", "bbbbbbbbbbbbbbbb")
         state.set("current_trace_start_time", "1000000")
         state.set("current_trace_prompt", "expanded prompt text")
         state.set("trace_count", "1")

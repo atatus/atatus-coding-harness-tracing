@@ -50,6 +50,7 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-copilot-user-prompt": "tracing.copilot.hooks.handlers:user_prompt_submitted",
     "atatus-hook-copilot-pre-tool": "tracing.copilot.hooks.handlers:pre_tool_use",
     "atatus-hook-copilot-post-tool": "tracing.copilot.hooks.handlers:post_tool_use",
+    "atatus-hook-copilot-post-tool-failure": "tracing.copilot.hooks.handlers:post_tool_use_failure",
     "atatus-hook-copilot-stop": "tracing.copilot.hooks.handlers:stop",
     "atatus-hook-copilot-subagent-stop": "tracing.copilot.hooks.handlers:subagent_stop",
     # Gemini hooks

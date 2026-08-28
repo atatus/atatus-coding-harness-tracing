@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for tracing.copilot.hooks.adapter — single-mode session resolution, init, GC, requirements."""
+
 import json
 import os
 import subprocess
@@ -28,6 +29,60 @@ def disable_env_vars(monkeypatch):
     monkeypatch.delenv("ATATUS_PROJECT_NAME", raising=False)
     monkeypatch.delenv("ATATUS_USER_ID", raising=False)
     monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+
+
+# ── payload_get tests ────────────────────────────────────────────────────────
+
+
+class TestPayloadGet:
+    """Copilot emits camelCase natively and snake_case in editor-compat mode.
+
+    Reading only one spelling silently yields empty fields for half the installs,
+    so every field read must accept both.
+    """
+
+    @pytest.mark.parametrize(
+        "name,key",
+        [
+            ("session_id", "session_id"),
+            ("session_id", "sessionId"),
+            ("transcript_path", "transcript_path"),
+            ("transcript_path", "transcriptPath"),
+            ("tool_name", "tool_name"),
+            ("tool_name", "toolName"),
+            ("text_result_for_llm", "text_result_for_llm"),
+            ("text_result_for_llm", "textResultForLlm"),
+        ],
+    )
+    def test_both_spellings_read(self, name, key):
+        assert adapter.payload_get({key: "value"}, name) == "value"
+
+    def test_first_named_field_wins(self):
+        """Names are tried in order, so the caller's preferred field wins."""
+        payload = {"tool_args": {"a": 1}, "tool_input": {"b": 2}}
+        assert adapter.payload_get(payload, "tool_args", "tool_input") == {"a": 1}
+
+    def test_falls_through_to_later_name(self):
+        payload = {"toolInput": {"b": 2}}
+        assert adapter.payload_get(payload, "tool_args", "tool_input") == {"b": 2}
+
+    def test_empty_value_is_skipped(self):
+        """An empty string is "not provided", so the next spelling gets a turn."""
+        assert adapter.payload_get({"tool_name": "", "toolName": "bash"}, "tool_name") == "bash"
+
+    def test_default_returned_when_absent(self):
+        assert adapter.payload_get({"other": 1}, "tool_name", default="unknown") == "unknown"
+
+    def test_non_dict_payload_returns_default(self):
+        assert adapter.payload_get(None, "tool_name", default="unknown") == "unknown"
+
+    def test_single_word_name_is_unchanged_by_camel_casing(self):
+        assert adapter.payload_get({"prompt": "hi"}, "prompt") == "hi"
+
+    def test_falsy_but_present_values_survive(self):
+        """Zero and False are real values, unlike "" — they must not be skipped."""
+        assert adapter.payload_get({"outputTokens": 0}, "output_tokens", default=-1) == 0
+        assert adapter.payload_get({"enabled": False}, "enabled", default=None) is False
 
 
 # ── resolve_session tests ────────────────────────────────────────────────────
@@ -80,12 +135,16 @@ class TestResolveSession:
         sm = adapter.resolve_session({"cwd": "/tmp/project"})
         assert sm.state_file == copilot_state_dir / "state_12345.json"
 
-    def test_camel_case_session_id_not_used(self, copilot_state_dir, disable_env_vars, monkeypatch):
-        """Old camelCase sessionId is NOT recognized — triggers PID fallback."""
+    def test_camel_case_session_id_used_as_key(self, copilot_state_dir, disable_env_vars, monkeypatch):
+        """camelCase sessionId is Copilot's native spelling and must be honoured.
+
+        Ignoring it sent every native-mode session to the PID fallback, so two
+        sessions under the same Copilot process shared one state file.
+        """
         monkeypatch.setattr(adapter, "_get_grandparent_pid", lambda: "77777")
         sm = adapter.resolve_session({"sessionId": "camel-case-id", "hookEventName": "SessionStart"})
-        # Should NOT use "camel-case-id"; should fall back to PID
-        assert sm.state_file == copilot_state_dir / "state_77777.json"
+        assert sm.state_file == copilot_state_dir / "state_camel-case-id.json"
+        assert sm.state_file.exists()
 
 
 # ── ensure_session_initialized tests ─────────────────────────────────────────
@@ -144,14 +203,15 @@ class TestEnsureSessionInitialized:
         assert len(sid) == 32
         int(sid, 16)  # should not raise
 
-    def test_camel_case_session_id_not_used(self, copilot_state_dir, disable_env_vars):
-        """Old camelCase sessionId is NOT recognized — generates new ID."""
-        sm = self._make_state(copilot_state_dir, "camel-ignore")
+    def test_camel_case_session_id_used(self, copilot_state_dir, disable_env_vars):
+        """camelCase sessionId is honoured, not replaced by a generated id.
+
+        Copilot emits camelCase natively; generating an id instead meant the
+        session's spans carried an id nothing else in the transcript shared.
+        """
+        sm = self._make_state(copilot_state_dir, "camel-honoured")
         adapter.ensure_session_initialized(sm, {"sessionId": "camel-case-id"})
-        sid = sm.get("session_id")
-        assert sid != "camel-case-id"
-        assert len(sid) == 32
-        int(sid, 16)
+        assert sm.get("session_id") == "camel-case-id"
 
     def test_counters_start_at_zero(self, copilot_state_dir, disable_env_vars):
         """trace_count and tool_count start at '0'."""

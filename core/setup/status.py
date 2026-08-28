@@ -30,11 +30,6 @@ from core.setup import CONFIG_FILE, INSTALL_DIR, VENV_DIR
 # Where each harness registers itself, as (module, constant names). Every
 # candidate is checked — a harness may register through any one of them. Kept
 # declarative so a new harness is one line rather than a bespoke check.
-#
-# Note on copilot: its HOOKS_FILE is a *project-local relative* path
-# (`.github/hooks/hooks.json`), so its registration only resolves when status is
-# run from the repo it was installed into. Reported as not-registered elsewhere,
-# which matches how the harness itself behaves.
 _REGISTRATION = {
     "antigravity": ("tracing.antigravity.constants", ("SETTINGS_FILE",)),
     "claude-code": ("tracing.claude_code.constants", ("SETTINGS_FILE",)),
@@ -42,7 +37,9 @@ _REGISTRATION = {
     # resolved per call. It yields the home directory, which _references_install
     # scans — the same treatment Kiro's agents directory gets.
     "codex": ("tracing.codex.constants", ("get_codex_home",)),
-    "copilot": ("tracing.copilot.constants", ("HOOKS_FILE",)),
+    # A callable for the same reason as Codex: Copilot honours COPILOT_HOME, so
+    # the hooks file location is resolved per call rather than at import.
+    "copilot": ("tracing.copilot.constants", ("hooks_file",)),
     "cursor": ("tracing.cursor.constants", ("HOOKS_FILE",)),
     "devin": ("tracing.devin.constants", ("CONFIG_FILE",)),
     "gemini": ("tracing.gemini.constants", ("SETTINGS_FILE",)),
