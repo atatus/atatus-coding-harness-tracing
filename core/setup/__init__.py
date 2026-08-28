@@ -8,7 +8,6 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass
-from getpass import getpass
 from pathlib import Path
 from typing import Optional
 
@@ -165,10 +164,10 @@ def prompt_backend(
     # --- credential prompts ---
     print("")
     if stored_key:
-        api_key = getpass(f"Atatus License Key [keep existing {_mask_secret(stored_key)}]: ").strip()
+        api_key = input(f"Atatus License Key [keep existing {_mask_secret(stored_key)}]: ").strip()
         api_key = api_key or stored_key
     else:
-        api_key = getpass("Atatus License Key: ").strip()
+        api_key = input("Atatus License Key: ").strip()
 
     if not api_key:
         err("A license key is required.")
