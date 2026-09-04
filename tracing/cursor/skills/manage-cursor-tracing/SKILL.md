@@ -160,7 +160,7 @@ If the user already has a `.cursor/hooks.json` with other hooks, merge the Atatu
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Hooks active**:
    - **Manual install**: verify `.cursor/hooks.json` exists in the project root and contains the Atatus hook entries.
    - **Plugin install**: no project-level `.cursor/hooks.json` is needed — the plugin registers hooks itself. Confirm `cursor-tracing` is listed as installed in Cursor.
@@ -268,7 +268,7 @@ Common issues and fixes:
 |---------|-----|
 | Traces not appearing | Verify config exists: `cat ~/.atatus/harness/config.json`. Check hook log: `tail -20 ~/.atatus/harness/logs/cursor.log` |
 | Config missing | Run the installer or create `~/.atatus/harness/config.json` manually (include `harnesses.cursor` section) |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Hooks not firing (manual install) | Verify `.cursor/hooks.json` exists in the project root and paths are correct (use absolute paths) |
 | Hooks not firing (plugin install) | Verify `cursor-tracing` is enabled in Cursor, start a fresh Cursor session after installing, and check `~/.atatus/harness/logs/cursor.log` for errors |
 | Duplicate spans / every event traced twice | A plugin install *plus* manual `.cursor/hooks.json` entries pointing at `atatus-hook-cursor` fires each hook twice. Remove the manual entries and keep one install path. |

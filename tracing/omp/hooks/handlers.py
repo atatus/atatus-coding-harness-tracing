@@ -25,6 +25,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.omp.hooks.adapter import (
     SCOPE_NAME,
@@ -47,55 +48,10 @@ def _read_stdin() -> dict:
         return {}
 
 
-def _send_span_async(span_dict: dict) -> None:
-    """Send a span without blocking the host process."""
-    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
-        send_span(span_dict)
-        return
-    if not hasattr(os, "fork"):
-        send_span(span_dict)
-        return
-
-    try:
-        pid = os.fork()
-    except OSError:
-        send_span(span_dict)
-        return
-
-    if pid > 0:
-        try:
-            os.waitpid(pid, 0)
-        except OSError:
-            # Best-effort reap: failure here should not interrupt the caller.
-            pass
-        return
-
-    try:
-        if os.fork() > 0:
-            os._exit(0)
-    except OSError:
-        os._exit(0)
-
-    try:
-        devnull = os.open(os.devnull, os.O_RDWR)
-        for fd in (0, 1, 2):
-            try:
-                os.dup2(devnull, fd)
-            except OSError:
-                # Best-effort stdio detachment in child process; ignore per-fd dup failures.
-                pass
-        os.close(devnull)
-    except OSError as exc:
-        # Best-effort stdio detachment in forked child; ignore failures to avoid
-        # impacting host execution, but emit debug context for diagnostics.
-        debug_dump("send_span", {"event": "omp_stdio_detach_failed", "error": str(exc)})
-
-    try:
-        send_span(span_dict)
-    except Exception:
-        # Best-effort tracing in detached child: never propagate failures.
-        pass
-    os._exit(0)
+def _send_span_async(span_dict: dict, on_success=None) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span, on_success=on_success)
 
 
 def _assistant_text(message: Any) -> str:

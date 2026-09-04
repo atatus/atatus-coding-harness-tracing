@@ -137,7 +137,7 @@ Uninstall removes the shim's path from the `extensions` array, deletes the hook 
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials under `harnesses.omp`.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Hook installed**: Verify `~/.omp/extensions/atatus-tracing.ts` exists and starts with the Atatus header marker.
 4. **Hook registered**: Verify the shim's absolute path appears in the `extensions` array of `~/.omp/agent/settings.json` (omp does not auto-discover — registration is required).
 5. **Handler entry point**: Verify the handler binary exists at `~/.atatus/harness/venv/bin/atatus-hook-omp` (or `~/.atatus/harness/venv/Scripts/atatus-hook-omp.exe` on Windows). The shim spawns this binary by absolute path — it does not rely on PATH resolution. `install.sh` installs it as a venv entry point.
@@ -185,7 +185,7 @@ Common issues and fixes for omp:
 | Handler entry point missing | The shim spawns the handler by absolute path; verify the binary exists at `~/.atatus/harness/venv/bin/atatus-hook-omp` (or `~/.atatus/harness/venv/Scripts/atatus-hook-omp.exe` on Windows). Rerun `./install.sh omp` to reinstall the venv entry point. |
 | Missing LLM or tool spans | Spans emit on `turn_end` (one LLM span per model call, one TOOL span per tool result). If a turn hasn't completed yet, its spans won't appear until the event fires. Wait for the agent run to finish (`agent_end`). |
 | Trace missing the final answer | `output.value` on the `Turn` span comes from the final assistant message. Confirm the run reached `agent_end`. |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching omp |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching omp |
 | Want raw event payloads for inspection | Set `ATATUS_TRACE_DEBUG=true` env var; payloads land under `~/.atatus/harness/state/debug/` as `omp_before_agent_start_<ts>.json` / `omp_turn_end_<ts>.json` / `omp_agent_end_<ts>.json` / `omp_session_shutdown_<ts>.json` |

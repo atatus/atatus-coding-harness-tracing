@@ -138,7 +138,7 @@ echo '{}' > .claude/settings.local.json
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 
 ### Confirm
 
@@ -274,7 +274,7 @@ Common issues and fixes:
 |---------|-----|
 | Traces not appearing | Check `ATATUS_TRACE_ENABLED` is `"true"` in Claude settings, and verify config exists: `cat ~/.atatus/harness/config.json` |
 | Config missing | Run the installer or create `~/.atatus/harness/config.json` manually (include `harnesses` section) |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | No output in terminal | Hook stderr is discarded by Claude Code; check `~/.atatus/harness/logs/claude-code.log` |
 | Want to test without sending | Set `ATATUS_DRY_RUN` to `"true"` in env config |
 | Want verbose logging | Set `ATATUS_VERBOSE` to `"true"` in env config |

@@ -1716,6 +1716,62 @@ class TestSendSpanAsync:
             send_span_async({"x": 3}, sender=sender)
         sender.assert_called_once_with({"x": 3})
 
+    def test_the_detached_send_leaves_the_hooks_process_group(self, tmp_path, monkeypatch):
+        """Otherwise a group-wide signal — the harness reaping a timed-out hook,
+        a Ctrl-C, a SIGHUP on terminal close — kills the send mid-flight."""
+        monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
+        if not hasattr(os, "fork") or not hasattr(os, "setsid"):
+            pytest.skip("POSIX sessions unavailable on this platform")
+
+        report = tmp_path / "sid"
+
+        def record(_span):
+            report.write_text(f"{os.getsid(0)} {os.getpgid(0)}")
+            return True
+
+        send_span_async({"x": 8}, sender=record)
+
+        deadline = time.monotonic() + 5
+        while not report.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        child_sid, child_pgid = report.read_text().split()
+        assert child_sid != str(os.getsid(0))
+        assert child_pgid != str(os.getpgid(0))
+
+    def test_on_success_runs_only_when_the_collector_accepted_the_span(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
+
+        settled = mock.Mock()
+        send_span_async({"x": 5}, sender=lambda _s: True, on_success=settled)
+        settled.assert_called_once_with()
+
+        settled.reset_mock()
+        send_span_async({"x": 6}, sender=lambda _s: False, on_success=settled)
+        settled.assert_not_called()
+
+    def test_on_success_settles_inside_the_detached_child(self, tmp_path, monkeypatch):
+        """The delivery-gated side effect travels into the fork rather than the
+        decision coming back out — that is what keeps the caller unblocked."""
+        monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
+        if not hasattr(os, "fork"):
+            pytest.skip("fork() unavailable on this platform")
+
+        marker = tmp_path / "acked"
+
+        def slow_send(_span):
+            time.sleep(0.4)
+            return True
+
+        started = time.monotonic()
+        send_span_async({"x": 7}, sender=slow_send, on_success=lambda: marker.write_text("ok"))
+        assert time.monotonic() - started < 0.2
+        assert not marker.exists()
+
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert marker.read_text() == "ok"
+
     def test_the_caller_is_not_blocked_by_a_hanging_collector(self, monkeypatch):
         """The point of the double fork: hook latency must not track the POST."""
         monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)

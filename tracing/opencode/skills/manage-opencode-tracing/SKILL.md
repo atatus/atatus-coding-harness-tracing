@@ -130,7 +130,7 @@ Uninstall deletes the plugin file at `~/.config/opencode/plugin/atatus-tracing.t
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials under `harnesses.opencode`.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Plugin installed**: Verify `~/.config/opencode/plugin/atatus-tracing.ts` exists and starts with the Atatus header marker.
 4. **Reconciler entry point**: Verify the reconciler binary exists at `~/.atatus/harness/venv/bin/atatus-hook-opencode` (or `~/.atatus/harness/venv/Scripts/atatus-hook-opencode.exe` on Windows). The shim spawns this binary by absolute path — it does not rely on PATH resolution. `install.sh` installs it as a venv entry point.
 
@@ -179,7 +179,7 @@ Common issues and fixes for opencode:
 | Spans appear partial / missing tool spans | Snapshots are pulled on `message.updated` (assistant complete) and `session.idle`. Pending or running tool parts won't emit a span until they reach `completed` or `error` state. Wait for the turn to finish. |
 | Duplicate spans | The reconciler dedupes by message id and tool `callID`. If you still see duplicates, set `ATATUS_VERBOSE=true` and check `~/.atatus/harness/logs/opencode.log` for dedup hits to confirm state tracking is working. |
 | Sub-agent (`task` tool) trace not linked to parent | Wait for the parent session to reach `session.idle`. Linking needs a completed `task` part carrying `state.metadata.sessionId` plus a child session whose `Session.parentID` matches the requesting session; mismatched or foreign snapshots are rejected. A session already running when the plugin was upgraded may need restarting. |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching opencode |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching opencode |
 | Want raw snapshot payloads for inspection | Set `ATATUS_TRACE_DEBUG=true` env var; payloads land under `~/.atatus/harness/state/debug/` as `opencode_reconcile_<ts>.json` / `opencode_close_<ts>.json` |

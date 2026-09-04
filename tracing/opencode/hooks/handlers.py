@@ -36,6 +36,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.opencode.hooks.adapter import (
     SCOPE_NAME,
@@ -62,55 +63,10 @@ def _read_stdin() -> dict:
         return {}
 
 
-def _send_span_async(span_dict: dict) -> None:
-    """Send a span without blocking the host. Double-fork detached unless
-    ATATUS_DISABLE_FORK=true (tests) or fork() is unavailable (Windows)."""
-    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
-        send_span(span_dict)
-        return
-    if not hasattr(os, "fork"):
-        send_span(span_dict)
-        return
-
-    try:
-        pid = os.fork()
-    except OSError:
-        send_span(span_dict)
-        return
-
-    if pid > 0:
-        try:
-            os.waitpid(pid, 0)
-        except OSError:
-            # Best-effort detach: failure to reap here must not impact host flow.
-            pass
-        return
-
-    try:
-        if os.fork() > 0:
-            os._exit(0)
-    except OSError:
-        os._exit(0)
-
-    try:
-        devnull = os.open(os.devnull, os.O_RDWR)
-        for fd in (0, 1, 2):
-            try:
-                os.dup2(devnull, fd)
-            except OSError:
-                # Best-effort stdio redirection in detached child; continue if remap fails.
-                pass
-        os.close(devnull)
-    except OSError:
-        # Best-effort stdio detachment; if this fails, continue and still emit the span.
-        pass
-    try:
-        send_span(span_dict)
-    except Exception as _exc:
-        # Intentionally suppress all errors in the detached child process:
-        # span export is best-effort and must never impact the host process.
-        pass
-    os._exit(0)
+def _send_span_async(span_dict: dict, on_success=None) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span, on_success=on_success)
 
 
 # ---------------------------------------------------------------------------

@@ -41,8 +41,15 @@ from core.common import (
     redact_content,
 )
 from core.common import send_span as send_span_to_backend
+from core.common import send_span_async
 from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file
+
+def _send_span_async(span_dict: dict, on_success=None) -> None:
+    """Detached span send. ``sender`` keeps this module's own backend binding on
+    the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span_to_backend, on_success=on_success)
+
 
 # Root of Codex's per-session rollout transcripts, when CODEX_HOME is unset.
 _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
@@ -530,10 +537,10 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
     else:
         payload = parent_span
 
-    if not send_span_to_backend(payload):
-        error("Failed to send span to backend")
-    else:
-        log(f"Turn sent (thread={thread_id}, turn={turn_id}, children={len(child_spans)})")
+    _send_span_async(
+        payload,
+        on_success=lambda: log(f"Turn sent (thread={thread_id}, turn={turn_id}, children={len(child_spans)})"),
+    )
 
 
 def _send_legacy_single_span(thread_id: str, turn_id: str, input_json: dict) -> None:
@@ -607,10 +614,10 @@ def _send_legacy_single_span(thread_id: str, turn_id: str, input_json: dict) -> 
         SCOPE_NAME,
     )
     debug_dump(f"notify_fallback_{thread_id}_{turn_id}_span", parent_span)
-    if not send_span_to_backend(parent_span):
-        error("Failed to send fallback span to backend")
-    else:
-        log(f"Turn sent via fallback (thread={thread_id}, turn={turn_id})")
+    _send_span_async(
+        parent_span,
+        on_success=lambda: log(f"Turn sent via fallback (thread={thread_id}, turn={turn_id})"),
+    )
 
 
 # ---------------------------------------------------------------------------

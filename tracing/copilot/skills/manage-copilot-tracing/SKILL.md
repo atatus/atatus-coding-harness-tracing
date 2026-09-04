@@ -122,7 +122,7 @@ All `command` values should be absolute paths to the venv binary (e.g. `~/.atatu
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Hooks active**: Verify `.github/hooks/hooks.json` exists in the project root and each `command` path is the absolute venv binary path.
 4. **Quick dry-run test** (optional):
    ```bash
@@ -171,7 +171,7 @@ All other handlers print `{"continue": true}`.
 | Hooks not firing | Verify `.github/hooks/hooks.json` exists in the project root and each `command` path is the absolute venv binary path |
 | `PreToolUse` blocking tools | Check the handler prints the correct permission JSON. Test: `echo '{"hookEventName":"PreToolUse","tool_name":"test"}' \| atatus-hook-copilot-pre-tool` |
 | Config missing | Run the installer or create `~/.atatus/harness/config.json` manually (include `harnesses.copilot` section) |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Copilot |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching Copilot |
 | Wrong project name | Set `harnesses.copilot.project_name` in `~/.atatus/harness/config.json` (default: `"copilot"`) |

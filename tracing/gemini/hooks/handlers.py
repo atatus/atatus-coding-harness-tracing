@@ -22,6 +22,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.gemini.hooks.adapter import (
     SCOPE_NAME,
@@ -113,64 +114,10 @@ def _extract_tokens(input_json: dict) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _send_span_async(span_dict: dict) -> None:
-    """Send a span without blocking the hook process.
-
-    Gemini invokes hooks synchronously and waits for the subprocess to exit
-    before resuming its own response stream. The slowest part of a hook is
-    the OTLP POST in send_span (up to ~10s). Double-fork detaches a
-    grandchild that's reparented to init/launchd; the parent returns
-    immediately so the hook exits in milliseconds.
-
-    Falls back to synchronous send when fork() is unavailable (Windows) or
-    when ATATUS_DISABLE_FORK=true (used by tests so spans are visible to
-    captured_spans fixtures in the parent process).
-    """
-    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
-        send_span(span_dict)
-        return
-    if not hasattr(os, "fork"):
-        send_span(span_dict)
-        return
-
-    try:
-        pid = os.fork()
-    except OSError:
-        send_span(span_dict)
-        return
-
-    if pid > 0:
-        # Parent: reap the immediate child quickly (it forks-and-exits).
-        try:
-            os.waitpid(pid, 0)
-        except OSError:
-            pass
-        return
-
-    # First child: fork again and exit so the grandchild has no parent.
-    try:
-        if os.fork() > 0:
-            os._exit(0)
-    except OSError:
-        os._exit(0)
-
-    # Grandchild: redirect stdio so we can't pollute Gemini's pipes,
-    # then perform the actual network send.
-    try:
-        devnull = os.open(os.devnull, os.O_RDWR)
-        for fd in (0, 1, 2):
-            try:
-                os.dup2(devnull, fd)
-            except OSError:
-                pass
-        os.close(devnull)
-    except OSError:
-        pass
-    try:
-        send_span(span_dict)
-    except Exception:
-        pass
-    os._exit(0)
+def _send_span_async(span_dict: dict, on_success=None) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span, on_success=on_success)
 
 
 # ---------------------------------------------------------------------------

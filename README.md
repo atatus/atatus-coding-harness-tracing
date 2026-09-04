@@ -153,7 +153,10 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
 | `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture tool names and arguments (file paths, commands, queries). |
 | `ATATUS_LOG_TOOL_CONTENT` | **`false`** | Capture tool *output* — file bodies, shell stdout, search results. Off by default: this is the broadest of the three, and it is where file contents and anything pasted into a session end up. Opt in explicitly. |
-| `ATATUS_DISABLE_FORK` | `false` | Testing only. Stops the opencode handler forking a background process so hooks run synchronously. |
+| `ATATUS_DISABLE_FORK` | `false` | Testing only. Hooks normally hand the OTLP POST to a detached background process so the harness is never kept waiting on it; this sends inline instead, which is what makes emitted spans observable to an in-process test. |
+| `ATATUS_OTLP_TIMEOUT` | `5` | Socket timeout in seconds for the OTLP POST. |
+| `ATATUS_EGRESS_FAILURE_THRESHOLD` | `2` | Consecutive transport failures against one collector URL before sends to it are skipped. A response of any status counts as reachable — only refused/timeout/DNS/TLS failures count. |
+| `ATATUS_EGRESS_COOLDOWN` | `60` | Seconds to skip sends to an unreachable collector before trying it again. |
 | `OTEL_RESOURCE_ATTRIBUTES` | — | Standard OTel attribute string (`team=payments,environment=prod`) added to every span. Overrides `config.json` `attributes`/`harnesses.<name>.attributes` on key collision; set per-harness by placing it in that harness's settings env block. |
 
 **Backend overrides** (set if you want env to take priority over `config.json` for a single run):

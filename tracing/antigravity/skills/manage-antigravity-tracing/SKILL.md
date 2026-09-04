@@ -114,7 +114,7 @@ The installer registers a top-level `"atatus-tracing"` block in `~/.gemini/confi
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials under `harnesses.antigravity`.
-2. **Atatus**: Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus**: Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Hooks active**: Verify `~/.gemini/config/hooks.json` contains a top-level `"atatus-tracing"` entry with `PreInvocation` and `Stop` handler lists.
 4. **Quick dry-run test** (optional):
    ```bash
@@ -167,7 +167,7 @@ Common issues and fixes for Antigravity:
 | Hooks not firing | Verify `~/.gemini/config/hooks.json` contains a top-level `"atatus-tracing"` block with `PreInvocation` and `Stop` entries pointing at absolute venv binary paths |
 | Agent loops or won't exit | Check that the Stop handler is printing exactly `{}` on stdout -- a stray `{"decision": "continue"}` will force re-entry. Inspect `~/.atatus/harness/logs/antigravity.log`. |
 | Config missing | Run `./install.sh antigravity` or create `~/.atatus/harness/config.json` manually (include `harnesses.antigravity` section) |
-| Endpoint unreachable | Verify connectivity: `curl -sf <endpoint>/v1/traces` |
+| Endpoint unreachable | Verify connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Antigravity |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching Antigravity |
 | Wrong project name | Set `harnesses.antigravity.project_name` in `~/.atatus/harness/config.json` (default: `"antigravity"`) |

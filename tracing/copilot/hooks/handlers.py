@@ -36,10 +36,10 @@ from tracing.copilot.hooks.transcript import parse_transcript
 # ---------------------------------------------------------------------------
 
 
-def _send_span_async(span_dict: dict) -> None:
+def _send_span_async(span_dict: dict, on_success=None) -> None:
     """Detached span send. ``sender`` keeps this module's ``send_span`` binding
     on the synchronous fallback path so test doubles still intercept it."""
-    send_span_async(span_dict, sender=send_span)
+    send_span_async(span_dict, sender=send_span, on_success=on_success)
 
 
 def _read_stdin(event: str) -> dict:

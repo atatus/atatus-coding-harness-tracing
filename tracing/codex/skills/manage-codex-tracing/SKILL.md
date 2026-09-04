@@ -217,7 +217,7 @@ source ~/.codex/atatus-env.sh && echo "ATATUS_TRACE_ENABLED=$ATATUS_TRACE_ENABLE
 
 4. **Collector connectivity**:
 ```bash
-curl -sf ${ATATUS_OTLP_ENDPOINT}/v1/traces >/dev/null && echo "collector reachable" || echo "collector not reachable"
+curl -sf --connect-timeout 3 --max-time 5 ${ATATUS_OTLP_ENDPOINT}/v1/traces >/dev/null && echo "collector reachable" || echo "collector not reachable"
 ```
 
 5. **Dry run test:**
@@ -261,7 +261,7 @@ Common issues and fixes:
 | Traces not appearing | Check `ATATUS_TRACE_ENABLED` is `true` in `~/.codex/atatus-env.sh` |
 | Hooks not firing | Run `codex` → `/hooks` and confirm each `atatus-hook-codex-*` entry is trusted. If they aren't listed at all, re-run the installer. |
 | `notify` hook not firing | Verify `notify` line in `~/.codex/config.toml` points to correct path |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | No output in terminal | Hooks run in background; check `~/.atatus/harness/logs/codex.log` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` in env or `export ATATUS_DRY_RUN=true` |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` in env or `export ATATUS_VERBOSE=true` |

@@ -50,10 +50,10 @@ from tracing.claude_code.hooks.adapter import (
 # ---------------------------------------------------------------------------
 
 
-def _send_span_async(span_dict: dict) -> None:
+def _send_span_async(span_dict: dict, on_success=None) -> None:
     """Detached span send. ``sender`` keeps this module's ``send_span`` binding
     on the synchronous fallback path so test doubles still intercept it."""
-    send_span_async(span_dict, sender=send_span)
+    send_span_async(span_dict, sender=send_span, on_success=on_success)
 
 
 def _read_stdin() -> dict:
@@ -1043,10 +1043,16 @@ def _handle_stop(input_json: dict) -> None:
                 extra_attributes={root_event.event_id: root_attrs},
                 common_attributes=common_attrs,
             )
-            if send_span(payload) is False:
-                return
-            _acknowledge_exported_turn(state, trace_id, matched_observations, matched_subagents)
-            _periodic_gc(trace_count)
+            # The ack travels into the detached send rather than the delivery
+            # decision coming back out — the turn stays un-acked, and so retries
+            # on the next Stop, unless the collector actually took it. Safe to
+            # run late: _acknowledge_exported_turn re-checks current_trace_id
+            # under the state lock and bails if a newer turn has started.
+            def _settle() -> None:
+                _acknowledge_exported_turn(state, trace_id, matched_observations, matched_subagents)
+                _periodic_gc(trace_count)
+
+            _send_span_async(payload, on_success=_settle)
             return
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into

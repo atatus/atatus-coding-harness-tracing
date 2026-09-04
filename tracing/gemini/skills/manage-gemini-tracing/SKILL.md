@@ -113,7 +113,7 @@ The installer registers all 8 hook events (`SessionStart`, `SessionEnd`, `Before
 ### Validate
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the config file exists and has correct backend credentials under `harnesses.gemini`.
-2. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+2. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 3. **Hooks active**: Verify `~/.gemini/settings.json` contains 8 hook entries with `name: atatus-tracing`.
 4. **Quick dry-run test** (optional):
    ```bash
@@ -157,7 +157,7 @@ Common issues and fixes for Gemini CLI:
 | Traces not appearing | Verify config exists: `cat ~/.atatus/harness/config.json`. Check hook log: `tail -20 ~/.atatus/harness/logs/gemini.log` |
 | Hooks not firing | Verify `~/.gemini/settings.json` contains the 8 hook entries with `name: atatus-tracing` for all events |
 | Config missing | Run `./install.sh gemini` or create `~/.atatus/harness/config.json` manually (include `harnesses.gemini` section) |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Gemini CLI |
 | Want verbose logging | Set `ATATUS_VERBOSE=true` env var before launching Gemini CLI |
 | Wrong project name | Set `harnesses.gemini.project_name` in `~/.atatus/harness/config.json` (default: `"gemini"`) |

@@ -747,13 +747,22 @@ def send_span(span_dict: dict) -> bool:
         return False
 
 
-def send_span_async(span_dict: dict, sender=None) -> None:
+def send_span_async(span_dict: dict, sender=None, on_success=None) -> None:
     """Send a span without blocking the host.
 
     Hooks are invoked synchronously: the harness waits for the hook process to
     exit before it resumes, so the OTLP POST sits directly in the turn loop. The
-    double fork leaves a grandchild reparented to init, letting the hook exit in
-    milliseconds regardless of how the collector behaves.
+    double fork leaves a grandchild reparented to init (or the nearest subreaper),
+    letting the hook exit in milliseconds regardless of how the collector behaves.
+    The middle child calls setsid() so the grandchild also leaves the hook's
+    process group and survives a group-wide signal.
+
+    ``on_success`` runs in whichever process performed the send, and only when
+    the collector accepted it. That is how a caller keeps a delivery-gated side
+    effect — acknowledging an exported turn, say — without waiting for the POST:
+    the callback travels into the detached child rather than the decision coming
+    back out. It must therefore be safe to run after the hook has already exited,
+    and safe to skip entirely if the machine dies mid-send.
 
     Falls back to a synchronous send when fork() is unavailable (Windows) or when
     ATATUS_DISABLE_FORK=true, which tests use so spans stay visible in-process.
@@ -761,17 +770,23 @@ def send_span_async(span_dict: dict, sender=None) -> None:
     ``send_span`` binding, which is what test doubles replace.
     """
     send = sender or send_span
+
+    def _send_and_settle() -> None:
+        ok = send(span_dict)
+        if ok is not False and on_success is not None:
+            on_success()
+
     if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
-        send(span_dict)
+        _send_and_settle()
         return
     if not hasattr(os, "fork"):
-        send(span_dict)
+        _send_and_settle()
         return
 
     try:
         pid = os.fork()
     except OSError:
-        send(span_dict)
+        _send_and_settle()
         return
 
     if pid > 0:
@@ -780,6 +795,16 @@ def send_span_async(span_dict: dict, sender=None) -> None:
         except OSError:
             pass
         return
+
+    # New session before the second fork: the grandchild leaves the hook's
+    # process group, so a group-wide signal — the harness reaping a timed-out
+    # hook, a Ctrl-C, a SIGHUP when the terminal closes — cannot kill a send
+    # that is already in flight. Forking after it means the grandchild is not a
+    # session leader and can never reacquire a controlling terminal.
+    try:
+        os.setsid()
+    except (OSError, AttributeError):
+        pass
 
     try:
         if os.fork() > 0:
@@ -798,7 +823,7 @@ def send_span_async(span_dict: dict, sender=None) -> None:
     except OSError:
         pass
     try:
-        send(span_dict)
+        _send_and_settle()
     except Exception:
         pass
     os._exit(0)

@@ -54,6 +54,7 @@ from core.common import (
     log,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.antigravity.hooks.adapter import (
     SCOPE_NAME,
@@ -123,64 +124,10 @@ def _print_response() -> None:
     print(json.dumps({}))
 
 
-def _send_payload_async(payload: dict) -> None:
-    """Send one OTLP payload without blocking the hook process.
-
-    Antigravity invokes hooks synchronously and waits for the subprocess to
-    exit before resuming. The slowest part of the hook is the OTLP POST in
-    send_span (up to ~10s). Double-fork detaches a grandchild reparented to
-    init/launchd; the parent returns immediately so the hook exits in
-    milliseconds.
-
-    Falls back to synchronous send when ``fork()`` is unavailable (Windows)
-    or when ``ATATUS_DISABLE_FORK=true`` (used by tests so spans are visible
-    to ``captured_spans`` fixtures in the parent process).
-    """
-    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
-        send_span(payload)
-        return
-    if not hasattr(os, "fork"):
-        send_span(payload)
-        return
-
-    try:
-        pid = os.fork()
-    except OSError:
-        send_span(payload)
-        return
-
-    if pid > 0:
-        try:
-            os.waitpid(pid, 0)
-        except OSError:
-            # Best-effort reap: if the child is already gone/reaped, continue.
-            pass
-        return
-
-    try:
-        if os.fork() > 0:
-            os._exit(0)
-    except OSError:
-        os._exit(0)
-
-    try:
-        devnull = os.open(os.devnull, os.O_RDWR)
-        for fd in (0, 1, 2):
-            try:
-                os.dup2(devnull, fd)
-            except OSError:
-                # Best-effort stdio redirection in detached child; continue even if one fd cannot be remapped.
-                pass
-        os.close(devnull)
-    except OSError:
-        # Best-effort stdio detachment; continue even if /dev/null setup fails.
-        pass
-    try:
-        send_span(payload)
-    except Exception as exc:
-        # Detached grandchild must never raise into the hook path; log and exit.
-        error(f"[hooks] async span send failed in detached child: {exc}")
-    os._exit(0)
+def _send_payload_async(payload: dict, on_success=None) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(payload, sender=send_span, on_success=on_success)
 
 
 def _dispatch_spans(spans: list[dict]) -> None:

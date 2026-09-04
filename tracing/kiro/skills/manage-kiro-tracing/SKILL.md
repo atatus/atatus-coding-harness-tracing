@@ -162,7 +162,7 @@ kiro-cli chat --agent atatus-traced
 
 1. **Config exists**: Run `cat ~/.atatus/harness/config.json` to verify the file contains the `harnesses.kiro` block.
 2. **Agent file exists**: Run `cat ~/.kiro/agents/<agent>.json` to verify the `hooks` block has all five events pointing at `atatus-hook-kiro`.
-3. **Atatus** (if applicable): Run `curl -sf <endpoint>/v1/traces >/dev/null` to check connectivity.
+3. **Atatus** (if applicable): Run `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces >/dev/null` to check connectivity.
 4. **Kiro accepts the agent config** (optional, requires `kiro-cli` on PATH): `kiro-cli agent validate --path ~/.kiro/agents/<agent>.json`.
 
 ### Confirm
@@ -232,7 +232,7 @@ Common issues and fixes:
 | Hooks not firing | Verify the agent JSON has all five hooks under `hooks` and that each `command` resolves to the `atatus-hook-kiro` venv binary. Run `kiro-cli agent validate --path ~/.kiro/agents/<agent>.json` if `kiro-cli` is on PATH |
 | Wrong agent in use | Either pass `--agent <name>` to `kiro-cli chat`, or set the agent as default: `kiro-cli agent set-default <name>` |
 | Config missing | Run `./install.sh kiro` or create `~/.atatus/harness/config.json` manually with a `harnesses.kiro` section |
-| Collector unreachable | Check connectivity: `curl -sf <endpoint>/v1/traces` |
+| Collector unreachable | Check connectivity: `curl -sf --connect-timeout 3 --max-time 5 <endpoint>/v1/traces` |
 | LLM spans missing model name / cost | The session sidecar at `~/.kiro/sessions/cli/<session_id>.json` was unavailable when `stop` fired. Confirm the sidecar exists for the session — enrichment is fail-soft so the span is emitted without those attributes |
 | Tool spans mismatched or orphaned | Concurrent tool execution can break the FIFO match. The handler emits an "orphan" TOOL span when the stack is empty — search the hook log for `no pending tool slot` |
 | Want to test without sending | Set `ATATUS_DRY_RUN=true` env var before launching Kiro |
