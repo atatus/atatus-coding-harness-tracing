@@ -21,6 +21,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.cursor.hooks.adapter import (
     SCOPE_NAME,
@@ -40,6 +41,12 @@ from tracing.cursor.hooks.adapter import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _send_span_async(span_dict: dict) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span)
 
 
 def _print_permissive(event: str) -> None:
@@ -245,7 +252,7 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(root_span)
+    _send_span_async(root_span)
     log(f"beforeSubmitPrompt: root span {sid} (trace={trace_id})")
 
 
@@ -325,7 +332,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterAgentResponse: child span {sid} (no gen_id, sent inline)")
 
 
@@ -367,7 +374,7 @@ def _handle_after_agent_thought(input_json, conversation_id, gen_id, trace_id, n
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterAgentThought: span {sid}")
 
 
@@ -452,7 +459,7 @@ def _handle_after_shell_execution(input_json, conversation_id, gen_id, trace_id,
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterShellExecution: span {sid} (merged)")
 
 
@@ -537,7 +544,7 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterMCPExecution: span {sid} (merged, tool={tool_name})")
 
 
@@ -580,7 +587,7 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"beforeReadFile: span {sid}")
 
 
@@ -624,7 +631,7 @@ def _handle_after_file_edit(input_json, conversation_id, gen_id, trace_id, now_m
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterFileEdit: span {sid}")
 
 
@@ -667,7 +674,7 @@ def _handle_before_tab_file_read(input_json, conversation_id, gen_id, trace_id, 
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"beforeTabFileRead: span {sid}")
 
 
@@ -709,7 +716,7 @@ def _handle_after_tab_file_edit(input_json, conversation_id, gen_id, trace_id, n
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"afterTabFileEdit: span {sid}")
 
 
@@ -779,7 +786,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         if root_model:
             root_attrs["llm.model_name"] = root_model
 
-        send_span(
+        _send_span_async(
             build_span(
                 "User Prompt",
                 "CHAIN",
@@ -839,7 +846,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
             SERVICE_NAME,
             SCOPE_NAME,
         )
-        send_span(llm_span)
+        _send_span_async(llm_span)
 
     attrs = {
         "openinference.span.kind": "CHAIN",
@@ -875,7 +882,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
             SERVICE_NAME,
             SCOPE_NAME,
         )
-        send_span(span)
+        _send_span_async(span)
     else:
         # No prompt ever opened this turn, so there is nothing for the marker to
         # close. Sent anyway it becomes its own trace: a row carrying token
@@ -918,7 +925,7 @@ def _handle_session_start(input_json, conversation_id, gen_id, trace_id, now_ms)
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
     if gen_id:
         gen_root_span_save(gen_id, sid)
@@ -991,7 +998,7 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
     if gen_id:
         state_cleanup_generation(gen_id)
@@ -1108,7 +1115,7 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"postToolUse: span {sid} (tool={tool_name})")
 
 

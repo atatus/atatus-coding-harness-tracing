@@ -18,6 +18,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.copilot.hooks.adapter import (
     SCOPE_NAME,
@@ -33,6 +34,12 @@ from tracing.copilot.hooks.transcript import parse_transcript
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _send_span_async(span_dict: dict) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span)
 
 
 def _read_stdin(event: str) -> dict:
@@ -237,7 +244,7 @@ def _emit_tool_span(
         status_code,
         status_message,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_post_tool_use(input_json: dict) -> None:
@@ -311,7 +318,7 @@ def _handle_stop(input_json: dict) -> None:
     )
 
     # Root before child: a strict backend wants the parent to exist first.
-    send_span(
+    _send_span_async(
         build_span(
             "User Prompt",
             "CHAIN",
@@ -340,7 +347,7 @@ def _handle_stop(input_json: dict) -> None:
     if output_tokens:
         llm_attrs["llm.token_count.completion"] = output_tokens
 
-    send_span(
+    _send_span_async(
         build_span(
             "Agent Response",
             "LLM",
@@ -415,7 +422,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 # ---------------------------------------------------------------------------

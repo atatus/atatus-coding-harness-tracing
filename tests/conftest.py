@@ -88,6 +88,18 @@ def isolate_setup_resolver(monkeypatch):
     _setup._reset_dotenv_cache()
 
 
+@pytest.fixture(autouse=True)
+def isolated_egress_breaker(tmp_path, monkeypatch):
+    """Keep the egress breaker's state file out of the real ~/.atatus tree.
+
+    A test that exercises a failing send would otherwise trip the breaker on the
+    developer's own machine and silence their tracing for the cooldown.
+    """
+    import core.common as _common
+
+    monkeypatch.setattr(_common, "_breaker_file", lambda: tmp_path / "egress-breaker.json")
+
+
 @pytest.fixture
 def tmp_harness_dir(tmp_path, monkeypatch):
     """Create the full ~/.atatus/harness directory tree in a temp location.

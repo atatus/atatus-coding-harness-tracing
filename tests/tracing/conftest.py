@@ -25,3 +25,14 @@ def capture_tool_content(monkeypatch):
     env.invalidate_caches()
     yield
     env.invalidate_caches()
+
+
+@pytest.fixture(autouse=True)
+def synchronous_span_send(monkeypatch):
+    """Keep span emission in-process so ``send_span`` doubles still intercept it.
+
+    Handlers detach the OTLP POST into a double-forked grandchild, which would
+    put every emitted span out of reach of the assertions below. Tests that
+    exercise the fork paths themselves re-set this env var.
+    """
+    monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")

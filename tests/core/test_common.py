@@ -3,6 +3,7 @@
 
 import io
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -10,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+import core.common as common
 from core.common import (
     DEFAULT_OTLP_ENDPOINT,
     FileLock,
@@ -29,6 +31,7 @@ from core.common import (
     resolve_backend,
     restore_stderr_from_log_file,
     send_span,
+    send_span_async,
 )
 
 
@@ -1572,6 +1575,159 @@ class TestSendSpanEdgeCases:
         assert not hasattr(mod.env, "collector_port")
         assert not hasattr(mod.env, "collector_url")
         assert not hasattr(mod.env, "direct_send")
+
+
+# ── Egress breaker and detached send ─────────────────────────────────────
+
+
+class TestEgressBreaker:
+    """An unreachable collector must stop costing every hook a connect timeout."""
+
+    _SAMPLE_SPAN = {
+        "resourceSpans": [
+            {
+                "resource": {"attributes": []},
+                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
+            }
+        ]
+    }
+
+    _BACKEND = {
+        "target": "atatus",
+        "endpoint": DEFAULT_OTLP_ENDPOINT,
+        "api_key": "k",
+        "project_name": "default",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _quiet(self, monkeypatch):
+        monkeypatch.delenv("ATATUS_DRY_RUN", raising=False)
+        monkeypatch.delenv("ATATUS_VERBOSE", raising=False)
+
+    @staticmethod
+    def _ok_response():
+        resp = mock.MagicMock()
+        resp.status = 200
+        resp.__enter__ = mock.Mock(return_value=resp)
+        resp.__exit__ = mock.Mock(return_value=False)
+        return resp
+
+    @mock.patch("core.common.resolve_backend")
+    @mock.patch("core.common.urllib.request.urlopen")
+    def test_repeated_transport_failures_stop_the_socket_calls(self, mock_urlopen, mock_resolve):
+        mock_resolve.return_value = self._BACKEND
+        mock_urlopen.side_effect = urllib.error.URLError("connection refused")
+
+        for _ in range(common.EGRESS_FAILURE_THRESHOLD):
+            assert send_span(self._SAMPLE_SPAN) is False
+        attempts = mock_urlopen.call_count
+
+        assert send_span(self._SAMPLE_SPAN) is False
+        assert mock_urlopen.call_count == attempts
+
+    @mock.patch("core.common.resolve_backend")
+    @mock.patch("core.common.urllib.request.urlopen")
+    def test_cooldown_expiry_lets_one_probe_through(self, mock_urlopen, mock_resolve):
+        mock_resolve.return_value = self._BACKEND
+        mock_urlopen.side_effect = urllib.error.URLError("connection refused")
+
+        for _ in range(common.EGRESS_FAILURE_THRESHOLD):
+            send_span(self._SAMPLE_SPAN)
+        attempts = mock_urlopen.call_count
+
+        breaker = common._breaker_file()
+        state = json.loads(breaker.read_text(encoding="utf-8"))
+        for entry in state.values():
+            entry["open_until"] = time.time() - 1
+        breaker.write_text(json.dumps(state), encoding="utf-8")
+
+        send_span(self._SAMPLE_SPAN)
+        assert mock_urlopen.call_count == attempts + 1
+
+    @mock.patch("core.common.resolve_backend")
+    @mock.patch("core.common.urllib.request.urlopen")
+    def test_a_success_clears_the_failure_count(self, mock_urlopen, mock_resolve):
+        mock_resolve.return_value = self._BACKEND
+
+        mock_urlopen.side_effect = urllib.error.URLError("blip")
+        send_span(self._SAMPLE_SPAN)
+
+        mock_urlopen.side_effect = None
+        mock_urlopen.return_value = self._ok_response()
+        assert send_span(self._SAMPLE_SPAN) is True
+
+        mock_urlopen.side_effect = urllib.error.URLError("blip")
+        for _ in range(common.EGRESS_FAILURE_THRESHOLD - 1):
+            send_span(self._SAMPLE_SPAN)
+        attempts = mock_urlopen.call_count
+        send_span(self._SAMPLE_SPAN)
+        assert mock_urlopen.call_count == attempts + 1
+
+    @mock.patch("core.common.resolve_backend")
+    @mock.patch("core.common.urllib.request.urlopen")
+    def test_an_http_error_never_trips_the_breaker(self, mock_urlopen, mock_resolve):
+        """The collector answered, so the route is healthy — one rejected payload
+        must not mute the rest of the session."""
+        mock_resolve.return_value = self._BACKEND
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "http://x/v1/traces", 400, "Bad Request", {}, None
+        )
+
+        for _ in range(common.EGRESS_FAILURE_THRESHOLD + 2):
+            assert send_span(self._SAMPLE_SPAN) is False
+        assert mock_urlopen.call_count == common.EGRESS_FAILURE_THRESHOLD + 2
+
+
+    @mock.patch("core.common.resolve_backend")
+    @mock.patch("core.common.urllib.request.urlopen")
+    def test_one_dead_collector_does_not_mute_a_live_one(self, mock_urlopen, mock_resolve):
+        """The breaker is keyed by URL — harnesses can point at different collectors."""
+        mock_resolve.return_value = dict(self._BACKEND, endpoint="http://dead.invalid")
+        mock_urlopen.side_effect = urllib.error.URLError("connection refused")
+        for _ in range(common.EGRESS_FAILURE_THRESHOLD):
+            send_span(self._SAMPLE_SPAN)
+        assert send_span(self._SAMPLE_SPAN) is False
+        blocked = mock_urlopen.call_count
+
+        mock_resolve.return_value = dict(self._BACKEND, endpoint="http://live.invalid")
+        mock_urlopen.side_effect = None
+        mock_urlopen.return_value = self._ok_response()
+        assert send_span(self._SAMPLE_SPAN) is True
+        assert mock_urlopen.call_count == blocked + 1
+
+
+class TestSendSpanAsync:
+    def test_disable_fork_sends_synchronously(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
+        with mock.patch("core.common.send_span") as send_mock:
+            send_span_async({"x": 1})
+        send_mock.assert_called_once_with({"x": 1})
+
+    def test_sender_override_is_used_on_the_fallback_path(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
+        sender = mock.Mock()
+        send_span_async({"x": 2}, sender=sender)
+        sender.assert_called_once_with({"x": 2})
+
+    def test_fork_oserror_falls_back_to_a_synchronous_send(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "false")
+        sender = mock.Mock()
+        with mock.patch("core.common.os.fork", side_effect=OSError("EAGAIN")):
+            send_span_async({"x": 3}, sender=sender)
+        sender.assert_called_once_with({"x": 3})
+
+    def test_the_caller_is_not_blocked_by_a_hanging_collector(self, monkeypatch):
+        """The point of the double fork: hook latency must not track the POST."""
+        monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
+        if not hasattr(os, "fork"):
+            pytest.skip("fork() unavailable on this platform")
+
+        def hang(_span):
+            time.sleep(5)
+
+        started = time.monotonic()
+        send_span_async({"x": 4}, sender=hang)
+        assert time.monotonic() - started < 1.0
 
 
 # ── Additional FileLock coverage (mkdir fallback) ─────────────────────────

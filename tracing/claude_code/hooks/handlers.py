@@ -22,6 +22,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from core.event_model import (
     AgentEvent,
@@ -47,6 +48,12 @@ from tracing.claude_code.hooks.adapter import (
 # ---------------------------------------------------------------------------
 # Shared helper
 # ---------------------------------------------------------------------------
+
+
+def _send_span_async(span_dict: dict) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span)
 
 
 def _read_stdin() -> dict:
@@ -226,7 +233,7 @@ def _handle_post_tool_use(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_post_tool_use_failure(input_json: dict) -> None:
@@ -367,7 +374,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         status_code=2,
         status_message=error_text or "tool_failure",
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_user_prompt_expansion(input_json: dict) -> None:
@@ -431,7 +438,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
             status_code=2,
             status_message="Turn did not complete: Stop hook never fired",
         )
-        send_span(failsafe_span)
+        _send_span_async(failsafe_span)
         state.delete("current_trace_id")
         state.delete("current_trace_span_id")
         state.delete("current_trace_start_time")
@@ -1088,7 +1095,7 @@ def _handle_stop(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
     # Clean up state
     state.delete("current_trace_id")
@@ -1210,7 +1217,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
     # Clean up per-agent state keys
     if agent_id:
@@ -1269,7 +1276,7 @@ def _handle_stop_failure(input_json: dict) -> None:
         status_code=2,
         status_message=error_type or "turn_failure",
     )
-    send_span(span)
+    _send_span_async(span)
 
     state.delete("current_trace_id")
     state.delete("current_trace_span_id")
@@ -1320,7 +1327,7 @@ def _handle_notification(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_permission_request(input_json: dict) -> None:
@@ -1362,7 +1369,7 @@ def _handle_permission_request(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_permission_denied(input_json: dict) -> None:
@@ -1403,7 +1410,7 @@ def _handle_permission_denied(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
 
 def _handle_session_end(input_json: dict) -> None:
@@ -1487,7 +1494,7 @@ def _handle_post_compact(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
 
     state.delete("compact_start_time")
     state.delete("compact_trigger")

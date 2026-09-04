@@ -27,6 +27,7 @@ from core.common import (
     read_stdin_text,
     redact_content,
     send_span,
+    send_span_async,
 )
 from tracing.kiro.hooks.adapter import (
     SCOPE_NAME,
@@ -42,6 +43,12 @@ from tracing.kiro.hooks.adapter import (
 # ---------------------------------------------------------------------------
 # Event handlers
 # ---------------------------------------------------------------------------
+
+
+def _send_span_async(span_dict: dict) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span)
 
 
 def _handle_agent_spawn(input_json: dict, state: StateManager) -> None:
@@ -136,7 +143,7 @@ def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"postToolUse: emitted TOOL span {pending_span_id}")
 
     # Clear the pending slot
@@ -198,7 +205,7 @@ def _handle_stop(input_json: dict, state: StateManager) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(span)
+    _send_span_async(span)
     log(f"stop: emitted LLM span {span_id}")
 
     # Clear pending turn keys

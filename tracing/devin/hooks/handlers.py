@@ -23,7 +23,7 @@ import os
 import sys
 from typing import Any
 
-from core.common import build_span, env, generate_span_id, generate_trace_id, log, redact_content, send_span
+from core.common import build_span, env, generate_span_id, generate_trace_id, log, redact_content, send_span, send_span_async
 from tracing.devin.constants import SCOPE_NAME, SERVICE_NAME, SESSIONS_DB
 from tracing.devin.hooks.adapter import already_emitted, check_requirements, mark_emitted
 from tracing.devin.session_db import (
@@ -38,6 +38,12 @@ from tracing.devin.session_db import (
 # Events that trigger a flush of newly-appeared generations. Stop is the
 # per-turn trigger; SessionEnd is a final safety-net flush.
 _TRIGGER_EVENTS = ("Stop", "SessionEnd")
+
+
+def _send_span_async(span_dict: dict) -> None:
+    """Detached span send. ``sender`` keeps this module's ``send_span`` binding
+    on the synchronous fallback path so test doubles still intercept it."""
+    send_span_async(span_dict, sender=send_span)
 
 
 def _token_attrs(prompt: int, completion: int, cache_read: int = 0, cache_write: int = 0) -> dict:
@@ -109,7 +115,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
         SERVICE_NAME,
         SCOPE_NAME,
     )
-    send_span(root_span)
+    _send_span_async(root_span)
 
     for step_number, step in enumerate(steps, start=1):
         step_span_id = generate_span_id()
@@ -149,7 +155,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
             SERVICE_NAME,
             SCOPE_NAME,
         )
-        send_span(step_span)
+        _send_span_async(step_span)
 
         for tc in step.tool_calls:
             tool_attrs: dict[str, Any] = {
@@ -173,7 +179,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
                 SERVICE_NAME,
                 SCOPE_NAME,
             )
-            send_span(tool_span)
+            _send_span_async(tool_span)
 
 
 def flush_session(project_dir: str) -> int:

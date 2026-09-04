@@ -439,6 +439,89 @@ def debug_dump(label: str, data: object) -> None:
 DEFAULT_OTLP_ENDPOINT = "https://otel-rx.atatus.com"
 
 
+def _env_float(name: str, default: float, minimum: float) -> float:
+    try:
+        return max(minimum, float(os.environ.get(name, "") or default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, "") or default))
+    except (TypeError, ValueError):
+        return default
+
+
+#: Socket timeout for the OTLP POST. Hooks run inline in the host's turn loop, so
+#: this is a latency budget, not a delivery guarantee.
+OTLP_TIMEOUT_SECONDS = _env_float("ATATUS_OTLP_TIMEOUT", 5.0, 0.5)
+
+#: Consecutive transport failures that trip the egress breaker.
+EGRESS_FAILURE_THRESHOLD = _env_int("ATATUS_EGRESS_FAILURE_THRESHOLD", 2, 1)
+
+#: How long the breaker stays open before one probe is let through.
+EGRESS_COOLDOWN_SECONDS = _env_float("ATATUS_EGRESS_COOLDOWN", 60.0, 1.0)
+
+
+def _breaker_file() -> Path:
+    from core.constants import STATE_BASE_DIR
+
+    return STATE_BASE_DIR / "egress-breaker.json"
+
+
+def _breaker_read() -> dict:
+    try:
+        state = json.loads(_breaker_file().read_text(encoding="utf-8"))
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _breaker_is_open(url: str) -> bool:
+    """True when recent sends to ``url`` failed at the transport level and the
+    cooldown still holds.
+
+    An unreachable collector otherwise costs every hook a full connect timeout,
+    which the host waits on before it runs the next tool. Keyed by URL so a
+    harness pointed at a dead collector cannot mute one pointed at a live one.
+    """
+    entry = _breaker_read().get(url)
+    if not isinstance(entry, dict):
+        return False
+    try:
+        return time.time() < float(entry.get("open_until") or 0)
+    except (ValueError, TypeError):
+        return False
+
+
+def _breaker_record(url: str, success: bool) -> None:
+    path = _breaker_file()
+    try:
+        state = _breaker_read()
+        if success:
+            if state.pop(url, None) is None:
+                return
+        else:
+            entry = state.get(url)
+            failures = 1
+            if isinstance(entry, dict):
+                try:
+                    failures = int(entry.get("failures") or 0) + 1
+                except (ValueError, TypeError):
+                    pass
+            state[url] = {
+                "failures": failures,
+                "open_until": time.time() + EGRESS_COOLDOWN_SECONDS if failures >= EGRESS_FAILURE_THRESHOLD else 0,
+            }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
 def get_target() -> str:
     """Detect backend target from env vars.
 
@@ -630,6 +713,10 @@ def send_span(span_dict: dict) -> bool:
         else:
             url = f"https://{endpoint}/v1/traces"
 
+        if _breaker_is_open(url):
+            log(f"{url} unreachable recently; skipping send until the cooldown expires")
+            return False
+
         body = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -638,9 +725,13 @@ def send_span(span_dict: dict) -> bool:
         }
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=OTLP_TIMEOUT_SECONDS) as resp:
+                _breaker_record(url, True)
                 return 200 <= resp.status < 300
         except urllib.error.HTTPError as e:
+            # The collector answered, so the route is healthy — a 4xx/5xx must not
+            # trip the breaker or a single bad payload would mute the whole session.
+            _breaker_record(url, True)
             try:
                 detail = e.read().decode("utf-8", errors="replace")
             except Exception:
@@ -648,11 +739,69 @@ def send_span(span_dict: dict) -> bool:
             error(f"Atatus send failed: HTTP {e.code}: {detail or e.reason}")
             return False
         except Exception as e:
+            _breaker_record(url, False)
             error(f"Atatus send failed: {e}")
             return False
     except Exception as e:
         error(f"send_span failed: {e}")
         return False
+
+
+def send_span_async(span_dict: dict, sender=None) -> None:
+    """Send a span without blocking the host.
+
+    Hooks are invoked synchronously: the harness waits for the hook process to
+    exit before it resumes, so the OTLP POST sits directly in the turn loop. The
+    double fork leaves a grandchild reparented to init, letting the hook exit in
+    milliseconds regardless of how the collector behaves.
+
+    Falls back to a synchronous send when fork() is unavailable (Windows) or when
+    ATATUS_DISABLE_FORK=true, which tests use so spans stay visible in-process.
+    ``sender`` lets a harness route the fallback through its own module-level
+    ``send_span`` binding, which is what test doubles replace.
+    """
+    send = sender or send_span
+    if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
+        send(span_dict)
+        return
+    if not hasattr(os, "fork"):
+        send(span_dict)
+        return
+
+    try:
+        pid = os.fork()
+    except OSError:
+        send(span_dict)
+        return
+
+    if pid > 0:
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+        return
+
+    try:
+        if os.fork() > 0:
+            os._exit(0)
+    except OSError:
+        os._exit(0)
+
+    try:
+        devnull = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            try:
+                os.dup2(devnull, fd)
+            except OSError:
+                pass
+        os.close(devnull)
+    except OSError:
+        pass
+    try:
+        send(span_dict)
+    except Exception:
+        pass
+    os._exit(0)
 
 
 # --- Platform-specific lock implementation detection ---
