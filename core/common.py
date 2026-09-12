@@ -1357,7 +1357,7 @@ def build_span(
     # A malformed id fails the receiver's hex decode and takes the whole
     # request down with it, so one bad span would silently drop every span
     # batched alongside it. Replacing it keeps the span, and the warning keeps
-    # the upstream bug visible.
+    # the source bug visible.
     if not _is_valid_hex_id(trace_id, 32):
         log(f"invalid trace id {trace_id!r} on span {name!r}; generated a replacement")
         trace_id = generate_trace_id()

@@ -182,4 +182,4 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for develop
 
 ## License
 
-[Apache 2.0](LICENSE). Attribution for the upstream work this is derived from is in [NOTICE](NOTICE), as section 4 of the licence requires.
+[Apache 2.0](LICENSE). Attribution for the original work this is derived from is in [NOTICE](NOTICE), as section 4 of the licence requires.
