@@ -92,3 +92,18 @@ HARNESSES: dict[str, HarnessMetadata] = {
         "default_log_file": LOG_DIR / "omp.log",
     },
 }
+
+# model-name substring -> OpenInference llm.system well-known value
+# (see the OpenInference semantic-conventions spec's llm.system table)
+MODEL_FAMILY_SYSTEMS: tuple[tuple[str, str], ...] = (
+    ("codex", "openai"),
+    ("gpt-", "openai"),
+    ("claude", "anthropic"),
+    ("llama", "meta"),
+    ("deepseek", "deepseek"),
+    ("mixtral", "mistralai"),
+    ("mistral", "mistralai"),
+    ("gemini", "vertexai"),
+    ("grok", "xai"),
+    ("command-", "cohere"),
+)

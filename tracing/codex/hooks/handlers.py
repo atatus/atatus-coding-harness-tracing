@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,7 @@ from core.common import (
 )
 from core.common import send_span as send_span_to_backend
 from core.common import send_span_async
+from core.constants import MODEL_FAMILY_SYSTEMS
 from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file
 
@@ -160,16 +162,17 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     if not turn_id or not rollout_path.is_file():
         return None
 
-    fields = (
+    codex_token_count_fields = (
         "input_tokens",
         "output_tokens",
         "total_tokens",
         "cached_input_tokens",
-        "non_cached_input_tokens",
+        "cache_write_input_tokens",
         "reasoning_output_tokens",
     )
-    token_sums: dict = {k: 0 for k in fields}
-    saw_tokens = False
+    token_sums: dict = {k: 0 for k in codex_token_count_fields}
+    observed_fields: set = set()
+    prev_total_token_usage: "dict | None" = None
 
     in_turn = False
     trace_count = 0
@@ -182,6 +185,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     user_messages: list = []
     assistant_output = ""
     model = ""
+    model_provider: "str | None" = None
     cwd = ""
     permission_mode = ""
     sandbox_mode = ""
@@ -206,6 +210,13 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 payload = obj.get("payload") or {}
                 ptype = payload.get("type") if isinstance(payload, dict) else None
                 ts_ms = _iso_to_ms(obj.get("timestamp", ""))
+
+                # session_meta is the rollout's first record and carries the authoritative
+                # provider id for the whole session. It arrives before any task_started, so
+                # it must be read outside the in_turn gate below.
+                if outer == "session_meta" and isinstance(payload, dict):
+                    model_provider = payload.get("model_provider")
+                    continue
 
                 # turn_context records carry per-turn settings (model, cwd, sandbox).
                 # They live at the outer level (no payload.type).
@@ -286,12 +297,19 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
 
                 # Token counts -- sum per-call deltas
                 if outer == "event_msg" and ptype == "token_count":
-                    last = (payload.get("info") or {}).get("last_token_usage") or {}
-                    for k in fields:
+                    info = payload.get("info") or {}
+                    total = info.get("total_token_usage")
+                    # rate-limit-only rebroadcasts repeat the prior snapshot (openai/codex#14489)
+                    if isinstance(total, dict) and total == prev_total_token_usage:
+                        continue
+                    if isinstance(total, dict):
+                        prev_total_token_usage = total
+                    last = info.get("last_token_usage") or {}
+                    for k in codex_token_count_fields:
                         v = last.get(k)
                         if isinstance(v, int):
                             token_sums[k] += v
-                            saw_tokens = True
+                            observed_fields.add(k)
                     continue
 
                 # Shell / apply_patch tool call
@@ -398,16 +416,26 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
         user_prompt = user_messages[-1]
 
     token_usage: "dict | None" = None
-    if saw_tokens:
-        token_usage = {
-            "prompt_tokens": token_sums["input_tokens"] or None,
-            "completion_tokens": token_sums["output_tokens"] or None,
-            "total_tokens": token_sums["total_tokens"] or None,
-            "cached_input_tokens": token_sums["cached_input_tokens"],
-            "non_cached_input_tokens": token_sums["non_cached_input_tokens"],
-            "reasoning_output_tokens": token_sums["reasoning_output_tokens"],
-            "model": model or "",
+    if observed_fields:
+        token_usage = {"model": model or ""}
+        codex_token_count_to_token_usage = {
+            "input_tokens": "prompt_tokens",
+            "output_tokens": "completion_tokens",
+            "total_tokens": "total_tokens",
+            "cached_input_tokens": "cached_input_tokens",
+            "cache_write_input_tokens": "cache_write_input_tokens",
+            "reasoning_output_tokens": "reasoning_output_tokens",
         }
+        for field, key in codex_token_count_to_token_usage.items():
+            if field in observed_fields:
+                token_usage[key] = token_sums[field]
+        # Codex derives non_cached_input_tokens rather than serializing it; we do the same,
+        # but only when both input and cached are observed, else we'd fabricate a number
+        # from unknown cache data.
+        if "input_tokens" in observed_fields and "cached_input_tokens" in observed_fields:
+            token_usage["non_cached_input_tokens"] = max(
+                token_sums["input_tokens"] - token_sums["cached_input_tokens"], 0
+            )
 
     return {
         "trace_count": trace_count,
@@ -417,6 +445,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
         "user_prompt": user_prompt,
         "assistant_output": assistant_output,
         "model": model,
+        "model_provider": model_provider,
         "cwd": cwd,
         "permission_mode": permission_mode,
         "sandbox_mode": sandbox_mode,
@@ -428,6 +457,56 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
 # ---------------------------------------------------------------------------
 # Span assembly
 # ---------------------------------------------------------------------------
+
+# o1/o3/o4 only as a whole model-name token (o1, o1-preview, ...), not as a
+# substring of an unrelated word.
+_O_SERIES_MODEL_RE = re.compile(r"^o[134](\b|-|$)")
+
+
+def _llm_identity(model: "object", provider: "object") -> "tuple[str, str | None]":
+    """Derive OpenInference ``llm.system``/``llm.provider`` for a Codex turn.
+
+    ``llm.system`` is the AI product/model family; ``llm.provider`` is the hosting
+    provider -- kept distinct because e.g. DeepSeek models can be hosted on Azure.
+
+    Per OpenInference, a well-known ``llm.system`` value MUST be used when one applies:
+    a model-family match on the model name, else the provider when it is ``openai``/
+    ``azure``, else ``"openai"`` when the provider is absent (session_meta's default),
+    else the provider id itself as a spec-permitted custom value.
+    """
+    model_str = model if isinstance(model, str) else ""
+    provider_str = provider if isinstance(provider, str) else None
+
+    model_lower = model_str.lower()
+    provider_lower = provider_str.lower() if provider_str else None
+
+    llm_system: "str | None" = None
+    model_id = model_lower.rsplit("/", 1)[-1]
+    if _O_SERIES_MODEL_RE.match(model_id):
+        llm_system = "openai"
+    else:
+        for substr, system in MODEL_FAMILY_SYSTEMS:
+            if substr in model_lower:
+                llm_system = system
+                break
+
+    if llm_system is None:
+        if provider_lower in ("openai", "azure"):
+            llm_system = "openai"
+        elif provider_lower is None:
+            llm_system = "openai"
+        else:
+            llm_system = provider_lower
+
+    return llm_system, provider_lower
+
+
+def _put_indexed_message(attrs: dict, prefix: str, role: str, content: str) -> None:
+    """Write one OpenInference indexed message attribute pair at index 0."""
+    if not content:
+        return
+    attrs[f"{prefix}.0.message.role"] = role
+    attrs[f"{prefix}.0.message.content"] = content
 
 
 def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
@@ -467,14 +546,28 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
         attrs["codex.sandbox_mode"] = turn["sandbox_mode"]
     if turn.get("duration_ms") is not None:
         attrs["codex.turn.duration_ms"] = turn["duration_ms"]
-    if assistant_output:
-        attrs["llm.output_messages"] = json.dumps([{"message.role": "assistant", "message.content": assistant_output}])
+
+    llm_system, llm_provider = _llm_identity(turn.get("model"), turn.get("model_provider"))
+    attrs["llm.system"] = llm_system
+    if llm_provider:
+        attrs["llm.provider"] = llm_provider
+
+    _put_indexed_message(attrs, "llm.input_messages", "user", user_prompt)
+    _put_indexed_message(attrs, "llm.output_messages", "assistant", assistant_output)
 
     usage = turn.get("token_usage") or {}
     for src, dst in (
         ("prompt_tokens", "llm.token_count.prompt"),
         ("completion_tokens", "llm.token_count.completion"),
         ("total_tokens", "llm.token_count.total"),
+    ):
+        v = usage.get(src)
+        if isinstance(v, int):
+            attrs[dst] = v
+    for src, dst in (
+        ("cached_input_tokens", "llm.token_count.prompt_details.cache_read"),
+        ("cache_write_input_tokens", "llm.token_count.prompt_details.cache_write"),
+        ("reasoning_output_tokens", "llm.token_count.completion_details.reasoning"),
     ):
         v = usage.get(src)
         if isinstance(v, int):
@@ -499,6 +592,7 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
         if workspace:
             tool_attrs["codex.workspace"] = workspace
         if entry.get("call_id"):
+            tool_attrs["tool.id"] = entry["call_id"]
             tool_attrs["codex.tool.call_id"] = entry["call_id"]
         child_start = entry.get("start_ts") or turn["turn_start_ms"]
         child_end = entry.get("end_ts") or child_start
@@ -594,12 +688,14 @@ def _send_legacy_single_span(thread_id: str, turn_id: str, input_json: dict) -> 
         "codex.thread_id": thread_id,
         "codex.turn_id": turn_id,
         "codex.notify_fallback": "true",
+        # No rollout here, so the real model/provider is unknown.
+        "llm.system": "codex",
     }
     user_id = env.get_user_id(SERVICE_NAME)
     if user_id:
         attrs["user.id"] = user_id
-    if assistant_output:
-        attrs["llm.output_messages"] = json.dumps([{"message.role": "assistant", "message.content": assistant_output}])
+    _put_indexed_message(attrs, "llm.input_messages", "user", user_prompt)
+    _put_indexed_message(attrs, "llm.output_messages", "assistant", assistant_output)
 
     parent_span = build_span(
         "Turn",

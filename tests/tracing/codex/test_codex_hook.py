@@ -15,6 +15,7 @@ from tracing.codex.hooks.handlers import (
     _find_rollout_file,
     _handle_notify,
     _iso_to_ms,
+    _llm_identity,
     _send_legacy_single_span,
     notify,
 )
@@ -256,6 +257,74 @@ class TestExtractTurnFromRollout:
         assert usage["cached_input_tokens"] == 80
         assert usage["reasoning_output_tokens"] == 5
 
+    def test_non_cached_input_tokens_derived_only_when_both_observed(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _evt(
+                {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 100,
+                            "cached_input_tokens": 30,
+                            "cache_write_input_tokens": 10,
+                        }
+                    },
+                }
+            ),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        usage = turn["token_usage"]
+        assert usage["non_cached_input_tokens"] == 70
+        assert usage["cache_write_input_tokens"] == 10
+
+    def test_token_count_rebroadcast_not_double_counted(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _evt(
+                {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": {"input_tokens": 100},
+                        "last_token_usage": {"input_tokens": 100},
+                    },
+                }
+            ),
+            # rate-limit-only rebroadcast: same total_token_usage snapshot
+            _evt(
+                {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": {"input_tokens": 100},
+                        "last_token_usage": {"input_tokens": 100},
+                    },
+                }
+            ),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        assert turn["token_usage"]["prompt_tokens"] == 100
+
+    def test_session_meta_supplies_model_provider(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            {
+                "timestamp": "2026-05-20T00:00:00Z",
+                "type": "session_meta",
+                "payload": {"model_provider": "anthropic"},
+            },
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        turn = _extract_turn_from_rollout(path, "t1")
+        assert turn["model_provider"] == "anthropic"
+
     def test_function_call_pairs_with_output_by_call_id(self, tmp_path):
         path = _write_rollout(
             tmp_path,
@@ -462,10 +531,14 @@ class TestBuildAndSendSpans:
             "cwd": "/x/workspace",
             "permission_mode": "on-request",
             "sandbox_mode": "workspace-write",
+            "model_provider": "openai",
             "token_usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 5,
                 "total_tokens": 15,
+                "cached_input_tokens": 4,
+                "cache_write_input_tokens": 2,
+                "reasoning_output_tokens": 1,
                 "model": "gpt-5.5"
             },
             "tool_calls": [
@@ -498,9 +571,19 @@ class TestBuildAndSendSpans:
         assert parent_attrs["codex.cwd"]["stringValue"] == "/x/workspace"
         assert parent_attrs["codex.workspace"]["stringValue"] == "workspace"
         assert parent_attrs["llm.token_count.total"]["intValue"] == 15
+        assert parent_attrs["llm.token_count.prompt_details.cache_read"]["intValue"] == 4
+        assert parent_attrs["llm.token_count.prompt_details.cache_write"]["intValue"] == 2
+        assert parent_attrs["llm.token_count.completion_details.reasoning"]["intValue"] == 1
+        assert parent_attrs["llm.system"]["stringValue"] == "openai"
+        assert parent_attrs["llm.provider"]["stringValue"] == "openai"
+        assert parent_attrs["llm.input_messages.0.message.role"]["stringValue"] == "user"
+        assert parent_attrs["llm.input_messages.0.message.content"]["stringValue"] == "hi"
+        assert parent_attrs["llm.output_messages.0.message.role"]["stringValue"] == "assistant"
+        assert parent_attrs["llm.output_messages.0.message.content"]["stringValue"] == "hello"
 
         child_attrs = _attrs_of_span(spans[1])
         assert child_attrs["tool.name"]["stringValue"] == "exec_command"
+        assert child_attrs["tool.id"]["stringValue"] == "c1"
         assert child_attrs["codex.tool.call_id"]["stringValue"] == "c1"
         assert child_attrs["codex.cwd"]["stringValue"] == "/x/workspace"
         assert child_attrs["codex.workspace"]["stringValue"] == "workspace"
@@ -678,3 +761,26 @@ class TestSendLegacySingleSpan:
         assert attrs["codex.notify_fallback"]["stringValue"] == "true"
         assert attrs["input.value"]["stringValue"] == "yo"
         assert attrs["output.value"]["stringValue"] == "hi"
+        assert attrs["llm.system"]["stringValue"] == "codex"
+        assert "llm.provider" not in attrs
+        assert attrs["llm.input_messages.0.message.content"]["stringValue"] == "yo"
+        assert attrs["llm.output_messages.0.message.content"]["stringValue"] == "hi"
+
+
+class TestLlmIdentity:
+
+    def test_model_family_match_wins_over_provider(self):
+        assert _llm_identity("claude-sonnet-5", "some-custom-provider") == ("anthropic", "some-custom-provider")
+
+    def test_o_series_model_id_is_openai(self):
+        assert _llm_identity("o3-mini", None) == ("openai", None)
+        assert _llm_identity("openrouter/o1-preview", "openrouter") == ("openai", "openrouter")
+
+    def test_no_family_match_falls_back_to_openai_or_azure_provider(self):
+        assert _llm_identity("some-unknown-model", "azure") == ("openai", "azure")
+
+    def test_absent_provider_defaults_to_openai(self):
+        assert _llm_identity("some-unknown-model", None) == ("openai", None)
+
+    def test_unknown_provider_is_used_as_is_never_fabricated(self):
+        assert _llm_identity("some-unknown-model", "together") == ("together", "together")
