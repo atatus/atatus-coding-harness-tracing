@@ -301,9 +301,7 @@ class TestLoadSessionSidecar:
         assert turns[-1].get("metering_usage")
         assert len(sleeps) == 2  # two polls before the flush landed
 
-    def test_returns_partial_sidecar_when_metering_never_arrives(
-        self, sidecar_dir, sidecar_complete, monkeypatch
-    ):
+    def test_returns_partial_sidecar_when_metering_never_arrives(self, sidecar_dir, sidecar_complete, monkeypatch):
         """Timing out must still yield the model name and token counts we did read."""
         no_metering = copy.deepcopy(sidecar_complete)
         del no_metering["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]["metering_usage"]
@@ -317,9 +315,7 @@ class TestLoadSessionSidecar:
         assert isinstance(result, dict)
         assert "session_state" in result
 
-    def test_malformed_read_after_a_good_one_keeps_the_good_one(
-        self, sidecar_dir, sidecar_complete, monkeypatch
-    ):
+    def test_malformed_read_after_a_good_one_keeps_the_good_one(self, sidecar_dir, sidecar_complete, monkeypatch):
         """A truncated re-read mid-flush must not throw away what we already parsed."""
         no_metering = copy.deepcopy(sidecar_complete)
         del no_metering["session_state"]["conversation_metadata"]["user_turn_metadatas"][0]["metering_usage"]

@@ -16,15 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from core.setup import (
-    configure_harness,
-    dry_run,
-    info,
-    remove_harness_entry,
-    symlink_skills,
-    unlink_skills,
-    venv_bin,
-)
+from core.setup import configure_harness, dry_run, info, remove_harness_entry, symlink_skills, unlink_skills, venv_bin
 from tracing.codex._toml import _toml_load_strict, _toml_write
 from tracing.codex.constants import (
     DISPLAY_NAME,

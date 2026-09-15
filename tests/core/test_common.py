@@ -492,7 +492,7 @@ class TestResolveKind:
             ("chain", 1),
             ("INTERNAL", 1),
             ("internal", 1),
-            ("", 1)
+            ("", 1),
         ],
     )
     def test_internal_kinds(self, kind, expected):
@@ -508,7 +508,7 @@ class TestResolveKind:
             ("PRODUCER", 4),
             ("producer", 4),
             ("CONSUMER", 5),
-            ("consumer", 5)
+            ("consumer", 5),
         ],
     )
     def test_other_kinds(self, kind, expected):
@@ -928,11 +928,19 @@ class TestStripSystemReminders:
 class TestRedactedPlaceholder:
     def test_literal_redacted_is_dropped_not_stored(self):
         span = build_span(
-            "t", "LLM", "a" * 16, "b" * 32, "", 1, 2,
+            "t",
+            "LLM",
+            "a" * 16,
+            "b" * 32,
+            "",
+            1,
+            2,
             {"input.value": "<REDACTED>", "output.value": "real output"},
         )
-        attrs = {a["key"]: list(a["value"].values())[0]
-                 for a in span["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]}
+        attrs = {
+            a["key"]: list(a["value"].values())[0]
+            for a in span["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        }
         assert "input.value" not in attrs
         assert attrs["output.value"] == "real output"
 
@@ -1053,13 +1061,13 @@ class TestSendSpan:
                                 "endTimeUnixNano": "2000000000",
                                 "attributes": [
                                     {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}},
-                                    {"key": "input.value", "value": {"stringValue": "hello"}}
+                                    {"key": "input.value", "value": {"stringValue": "hello"}},
                                 ],
-                                "status": {"code": 1}
+                                "status": {"code": 1},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             }
         ]
     }
@@ -1070,7 +1078,7 @@ class TestSendSpan:
             "resourceSpans": [
                 {
                     "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service_name}}]},
-                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
+                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}],
                 }
             ]
         }
@@ -1099,7 +1107,7 @@ class TestSendSpan:
             "target": "atatus",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
-            "project_name": "test-proj"
+            "project_name": "test-proj",
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1109,7 +1117,6 @@ class TestSendSpan:
 
         assert send_span(self._SAMPLE_SPAN) is True
         mock_resolve.assert_called_once_with(self._SAMPLE_SPAN)
-
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
@@ -1122,7 +1129,7 @@ class TestSendSpan:
             "target": "atatus",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
-            "project_name": "default"
+            "project_name": "default",
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1145,7 +1152,7 @@ class TestSendSpan:
             "target": "atatus",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
-            "project_name": "default"
+            "project_name": "default",
         }
         mock_urlopen.side_effect = Exception("connection refused")
 
@@ -1162,7 +1169,7 @@ class TestSendSpan:
             "target": "atatus",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
-            "project_name": "default"
+            "project_name": "default",
         }
         mock_urlopen.side_effect = urllib.error.HTTPError(
             f"{DEFAULT_OTLP_ENDPOINT}/v1/traces",
@@ -1186,7 +1193,7 @@ class TestSendSpan:
             "target": "atatus",
             "api_key": "my-key",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
-            "project_name": "proj"
+            "project_name": "proj",
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 200
@@ -1263,13 +1270,12 @@ class TestResolveBackend:
             "resourceSpans": [
                 {
                     "resource": {"attributes": attrs},
-                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "s"}]}]
+                    "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "s"}]}],
                 }
             ]
         }
 
     # ── Config-only paths ──────────────────────────────────────────────────
-
 
     def test_atatus_from_config(self, monkeypatch):
         """A config harness entry with an atatus target resolves fully."""
@@ -1279,7 +1285,7 @@ class TestResolveBackend:
                     "project_name": "claude-code",
                     "target": "atatus",
                     "endpoint": DEFAULT_OTLP_ENDPOINT,
-                    "api_key": "ak-xxx"
+                    "api_key": "ak-xxx",
                 }
             }
         }
@@ -1330,11 +1336,7 @@ class TestResolveBackend:
         monkeypatch.setenv("ATATUS_API_KEY", "ph-env-key")
         cfg = {
             "harnesses": {
-                "opencode": {
-                    "target": "atatus",
-                    "endpoint": DEFAULT_OTLP_ENDPOINT,
-                    "api_key": "ph-config-key"
-                }
+                "opencode": {"target": "atatus", "endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ph-config-key"}
             }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
@@ -1356,15 +1358,7 @@ class TestResolveBackend:
     def test_project_name_env_override(self, monkeypatch):
         """ATATUS_PROJECT_NAME overrides config project_name."""
         monkeypatch.setenv("ATATUS_PROJECT_NAME", "from-env")
-        cfg = {
-            "harnesses": {
-                "claude-code": {
-                    "project_name": "from-config",
-                    "target": "atatus",
-                    "api_key": "ak"
-                }
-            }
-        }
+        cfg = {"harnesses": {"claude-code": {"project_name": "from-config", "target": "atatus", "api_key": "ak"}}}
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
@@ -1375,14 +1369,7 @@ class TestResolveBackend:
     def test_env_atatus_overrides_config_atatus(self, monkeypatch):
         """Env-set atatus creds win even when config configures atatus."""
         monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
-        cfg = {
-            "harnesses": {
-                "claude-code": {
-                    "target": "atatus",
-                    "endpoint": DEFAULT_OTLP_ENDPOINT
-                }
-            }
-        }
+        cfg = {"harnesses": {"claude-code": {"target": "atatus", "endpoint": DEFAULT_OTLP_ENDPOINT}}}
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
         result = resolve_backend(self._make_span("claude-code"))
@@ -1394,11 +1381,7 @@ class TestResolveBackend:
         monkeypatch.setenv("ATATUS_API_KEY", "ak-env")
         cfg = {
             "harnesses": {
-                "claude-code": {
-                    "target": "atatus",
-                    "endpoint": DEFAULT_OTLP_ENDPOINT,
-                    "api_key": "ak-config"
-                }
+                "claude-code": {"target": "atatus", "endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": "ak-config"}
             }
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
@@ -1469,9 +1452,9 @@ class TestResolveBackend:
         cfg = {
             "backend": {
                 "target": "atatus",
-                "atatus": {"endpoint": "https://global.example.com", "api_key": "global-key"}
+                "atatus": {"endpoint": "https://global.example.com", "api_key": "global-key"},
             },
-            "harnesses": {}
+            "harnesses": {},
         }
         monkeypatch.setattr("core.config.load_config", lambda: cfg)
 
@@ -1508,7 +1491,7 @@ class TestSendSpanEdgeCases:
         "resourceSpans": [
             {
                 "resource": {"attributes": []},
-                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
+                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}],
             }
         ]
     }
@@ -1528,7 +1511,7 @@ class TestSendSpanEdgeCases:
             "target": "atatus",
             "endpoint": DEFAULT_OTLP_ENDPOINT,
             "api_key": "",
-            "project_name": "default"
+            "project_name": "default",
         }
         mock_resp = mock.MagicMock()
         mock_resp.status = 500
@@ -1557,7 +1540,7 @@ class TestSendSpanEdgeCases:
             "resourceSpans": [
                 {
                     "resource": {"attributes": []},
-                    "scopeSpans": [{"scope": {"name": "t"}, "spans": [{"name": "my-operation"}]}]
+                    "scopeSpans": [{"scope": {"name": "t"}, "spans": [{"name": "my-operation"}]}],
                 }
             ]
         }
@@ -1587,7 +1570,7 @@ class TestEgressBreaker:
         "resourceSpans": [
             {
                 "resource": {"attributes": []},
-                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}]
+                "scopeSpans": [{"scope": {"name": "test"}, "spans": [{"name": "test-span"}]}],
             }
         ]
     }
@@ -1669,14 +1652,11 @@ class TestEgressBreaker:
         """The collector answered, so the route is healthy — one rejected payload
         must not mute the rest of the session."""
         mock_resolve.return_value = self._BACKEND
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            "http://x/v1/traces", 400, "Bad Request", {}, None
-        )
+        mock_urlopen.side_effect = urllib.error.HTTPError("http://x/v1/traces", 400, "Bad Request", {}, None)
 
         for _ in range(common.EGRESS_FAILURE_THRESHOLD + 2):
             assert send_span(self._SAMPLE_SPAN) is False
         assert mock_urlopen.call_count == common.EGRESS_FAILURE_THRESHOLD + 2
-
 
     @mock.patch("core.common.resolve_backend")
     @mock.patch("core.common.urllib.request.urlopen")
@@ -1926,7 +1906,7 @@ class TestCustomAttributes:
             monkeypatch,
             {
                 "attributes": {"team": "payments", "environment": "prod"},
-                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}}
+                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}},
             },
         )
         # Shared key (environment) overridden; non-shared keys from both layers survive.
@@ -1943,7 +1923,7 @@ class TestCustomAttributes:
             monkeypatch,
             {
                 "attributes": {"environment": "prod-global"},
-                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}}
+                "harnesses": {"claude-code": {"attributes": {"environment": "prod-claude"}}},
             },
         )
         monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "environment=staging")
@@ -2168,24 +2148,15 @@ class TestStampAtatusIdentity:
         return {
             "resourceSpans": [
                 {
-                    "resource": {
-                        "attributes": [
-                            {"key": "service.name", "value": {"stringValue": service_name}}
-                        ]
-                    },
-                    "scopeSpans": [
-                        {"scope": {"name": "atatus-claude-tracing"}, "spans": [{"name": "Turn 1"}]}
-                    ],
+                    "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service_name}}]},
+                    "scopeSpans": [{"scope": {"name": "atatus-claude-tracing"}, "spans": [{"name": "Turn 1"}]}],
                 }
             ]
         }
 
     @staticmethod
     def _attrs(payload):
-        return {
-            a["key"]: a["value"]["stringValue"]
-            for a in payload["resourceSpans"][0]["resource"]["attributes"]
-        }
+        return {a["key"]: a["value"]["stringValue"] for a in payload["resourceSpans"][0]["resource"]["attributes"]}
 
     def test_service_name_becomes_project_name(self):
         out = _stamp_atatus_identity(self._payload(), "ashif-claude-code")
@@ -2399,6 +2370,7 @@ class TestHookFileIoIsUtf8:
         import re as _re
 
         text = (pathlib.Path(__file__).parents[2] / path).read_text()
+
         # `encoding=` anywhere on the line counts — an inner call such as
         # json.dumps(...) puts a ')' between the opener and the kwarg, which a
         # lookahead bounded by [^)]* cannot see past.

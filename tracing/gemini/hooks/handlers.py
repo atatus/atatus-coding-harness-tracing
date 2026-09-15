@@ -7,7 +7,7 @@ in a try/except, and prints {} to stdout in finally.
 from __future__ import annotations
 
 import json
-import os
+import os  # noqa: F401
 import sys
 
 from core.common import (

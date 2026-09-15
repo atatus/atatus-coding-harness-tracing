@@ -42,16 +42,22 @@ def _tool_result(tool_use_id, content="ok", ts="2026-08-22T16:16:43.000Z", is_er
         "type": "user",
         "uuid": f"res-{tool_use_id}",
         "timestamp": ts,
-        "message": {"role": "user", "content": [
-            {"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": is_error}
-        ]},
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": is_error}],
+        },
     }
 
 
 def _root():
     return TurnEvent(
-        event_id="turn:1", session_id="s1", turn_id="1", sequence=0,
-        started_at_ms=0, ended_at_ms=0, status=EventStatus.COMPLETED,
+        event_id="turn:1",
+        session_id="s1",
+        turn_id="1",
+        sequence=0,
+        started_at_ms=0,
+        ended_at_ms=0,
+        status=EventStatus.COMPLETED,
     )
 
 
@@ -60,16 +66,30 @@ class TestOneModelCallPerMessageId:
 
     def test_split_records_collapse_to_a_single_model_call(self, tmp_path):
         # Same message.id, three records: thinking, text, tool_use.
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [{"type": "thinking", "thinking": "hmm"}],
-                       usage={"input_tokens": 10, "output_tokens": 1, "cache_read_input_tokens": 100}),
-            _assistant("u2", "msg_A", [{"type": "text", "text": "hello"}],
-                       usage={"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 100}),
-            _assistant("u3", "msg_A", [{"type": "tool_use", "id": "toolu_1", "name": "Bash",
-                                        "input": {"command": "ls"}}],
-                       usage={"input_tokens": 10, "output_tokens": 9, "cache_read_input_tokens": 100}),
-            _tool_result("toolu_1"),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [{"type": "thinking", "thinking": "hmm"}],
+                    usage={"input_tokens": 10, "output_tokens": 1, "cache_read_input_tokens": 100},
+                ),
+                _assistant(
+                    "u2",
+                    "msg_A",
+                    [{"type": "text", "text": "hello"}],
+                    usage={"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 100},
+                ),
+                _assistant(
+                    "u3",
+                    "msg_A",
+                    [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}}],
+                    usage={"input_tokens": 10, "output_tokens": 9, "cache_read_input_tokens": 100},
+                ),
+                _tool_result("toolu_1"),
+            ],
+        )
         graph = parse_claude_transcript(transcript, _root())
         calls = [e for e in graph.events if isinstance(e, ModelCallEvent)]
         tools = [e for e in graph.events if isinstance(e, ToolEvent)]
@@ -82,24 +102,34 @@ class TestOneModelCallPerMessageId:
         assert calls[0].usage.cache_read_tokens == 100
 
     def test_distinct_message_ids_stay_distinct(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [{"type": "text", "text": "a"}]),
-            _assistant("u2", "msg_B", [{"type": "text", "text": "b"}]),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant("u1", "msg_A", [{"type": "text", "text": "a"}]),
+                _assistant("u2", "msg_B", [{"type": "text", "text": "b"}]),
+            ],
+        )
         graph = parse_claude_transcript(transcript, _root())
         assert len([e for e in graph.events if isinstance(e, ModelCallEvent)]) == 2
 
 
 class TestToolParentage:
     def test_every_tool_hangs_off_its_model_call_not_the_turn(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [
-                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}},
-                {"type": "tool_use", "id": "toolu_2", "name": "Read", "input": {"file_path": "/x"}},
-            ]),
-            _tool_result("toolu_1"),
-            _tool_result("toolu_2"),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [
+                        {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}},
+                        {"type": "tool_use", "id": "toolu_2", "name": "Read", "input": {"file_path": "/x"}},
+                    ],
+                ),
+                _tool_result("toolu_1"),
+                _tool_result("toolu_2"),
+            ],
+        )
         root = _root()
         graph = parse_claude_transcript(transcript, root)
         call = next(e for e in graph.events if isinstance(e, ModelCallEvent))
@@ -111,23 +141,37 @@ class TestToolParentage:
 
     def test_a_tool_with_no_hook_report_is_still_captured(self, tmp_path):
         """The reason coverage went 19/21 -> 21/21: hooks miss tools, transcripts do not."""
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [
-                {"type": "tool_use", "id": "toolu_1", "name": "WebFetch", "input": {"url": "http://x"}},
-            ]),
-            _tool_result("toolu_1"),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [
+                        {"type": "tool_use", "id": "toolu_1", "name": "WebFetch", "input": {"url": "http://x"}},
+                    ],
+                ),
+                _tool_result("toolu_1"),
+            ],
+        )
         graph = parse_claude_transcript(transcript, _root())
         tools = [e for e in graph.events if isinstance(e, ToolEvent)]
         assert [t.tool_name for t in tools] == ["WebFetch"]
 
     def test_failed_tool_result_marks_the_event_failed(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [
-                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "nope"}},
-            ]),
-            _tool_result("toolu_1", content="boom", is_error=True),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [
+                        {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "nope"}},
+                    ],
+                ),
+                _tool_result("toolu_1", content="boom", is_error=True),
+            ],
+        )
         graph = parse_claude_transcript(transcript, _root())
         tool = next(e for e in graph.events if isinstance(e, ToolEvent))
         assert tool.status is EventStatus.FAILED
@@ -136,14 +180,23 @@ class TestToolParentage:
 
 class TestUsageContract:
     def test_prompt_is_cache_inclusive_and_the_one_hour_split_survives(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [{"type": "text", "text": "x"}], usage={
-                "input_tokens": 10, "output_tokens": 497,
-                "cache_read_input_tokens": 37086,
-                "cache_creation_input_tokens": 297,
-                "cache_creation": {"ephemeral_1h_input_tokens": 297},
-            }),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [{"type": "text", "text": "x"}],
+                    usage={
+                        "input_tokens": 10,
+                        "output_tokens": 497,
+                        "cache_read_input_tokens": 37086,
+                        "cache_creation_input_tokens": 297,
+                        "cache_creation": {"ephemeral_1h_input_tokens": 297},
+                    },
+                ),
+            ],
+        )
         graph = parse_claude_transcript(transcript, _root())
         usage = next(e for e in graph.events if isinstance(e, ModelCallEvent)).usage
         # Matches Arize's LLM call 1 for this trace exactly.
@@ -159,30 +212,45 @@ class TestRenderedShape:
 
     @pytest.fixture
     def sent(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", [
-            _assistant("u1", "msg_A", [
-                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}},
-            ], usage={"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 100}),
-            _tool_result("toolu_1"),
-            _assistant("u2", "msg_B", [{"type": "text", "text": "done"}],
-                       usage={"input_tokens": 12, "output_tokens": 7}),
-        ])
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [
+                        {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}},
+                    ],
+                    usage={"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 100},
+                ),
+                _tool_result("toolu_1"),
+                _assistant(
+                    "u2", "msg_B", [{"type": "text", "text": "done"}], usage={"input_tokens": 12, "output_tokens": 7}
+                ),
+            ],
+        )
         state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
         state.init_state()
         for key, value in {
-            "session_id": "s1", "user_id": "dg", "trace_count": "1",
-            "current_trace_id": "a" * 32, "current_trace_span_id": "b" * 16,
-            "current_trace_start_time": "1", "current_trace_prompt": "go",
+            "session_id": "s1",
+            "user_id": "dg",
+            "trace_count": "1",
+            "current_trace_id": "a" * 32,
+            "current_trace_span_id": "b" * 16,
+            "current_trace_start_time": "1",
+            "current_trace_prompt": "go",
             "trace_start_line": "0",
         }.items():
             state.set(key, value)
 
         captured = []
         payload = {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)}
-        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: state), \
-             mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True), \
-             mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None), \
-             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))):
+        with (
+            mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+            mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+            mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+        ):
             handlers.stop()
         assert captured, "Stop sent nothing"
         return captured[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
@@ -248,28 +316,45 @@ class TestLegacyFallback:
     def test_v1_transcript_falls_back_to_a_single_llm_span(self, tmp_path):
         # No `uuid` on the assistant record -> assistant-line-* ids -> gate fails.
         transcript = tmp_path / "t.jsonl"
-        transcript.write_text(json.dumps({
-            "type": "assistant", "timestamp": "2026-08-22T16:16:42.920Z",
-            "message": {"role": "assistant", "id": "msg_A", "model": "m",
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-08-22T16:16:42.920Z",
+                    "message": {
+                        "role": "assistant",
+                        "id": "msg_A",
+                        "model": "m",
                         "content": [{"type": "text", "text": "hi"}],
-                        "usage": {"input_tokens": 3, "output_tokens": 4}},
-        }) + "\n", encoding="utf-8")
+                        "usage": {"input_tokens": 3, "output_tokens": 4},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
         state.init_state()
         for key, value in {
-            "session_id": "s1", "trace_count": "1", "current_trace_id": "a" * 32,
-            "current_trace_span_id": "b" * 16, "current_trace_start_time": "1",
-            "current_trace_prompt": "go", "trace_start_line": "0",
+            "session_id": "s1",
+            "trace_count": "1",
+            "current_trace_id": "a" * 32,
+            "current_trace_span_id": "b" * 16,
+            "current_trace_start_time": "1",
+            "current_trace_prompt": "go",
+            "trace_start_line": "0",
         }.items():
             state.set(key, value)
 
         captured = []
         payload = {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)}
-        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: state), \
-             mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True), \
-             mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None), \
-             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))):
+        with (
+            mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+            mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+            mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+        ):
             handlers.stop()
 
         spans = captured[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
@@ -289,17 +374,22 @@ class TestFailSafeTurnIsNotASuccess:
         state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
         state.init_state()
         for key, value in {
-            "session_id": "s1", "trace_count": "1",
-            "current_trace_id": "a" * 32, "current_trace_span_id": "b" * 16,
-            "current_trace_start_time": "1", "current_trace_prompt": "go",
+            "session_id": "s1",
+            "trace_count": "1",
+            "current_trace_id": "a" * 32,
+            "current_trace_span_id": "b" * 16,
+            "current_trace_start_time": "1",
+            "current_trace_prompt": "go",
         }.items():
             state.set(key, value)
 
         captured = []
         payload = {"session_id": "s1", "prompt": "next turn", "cwd": str(tmp_path)}
-        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: state), \
-             mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True), \
-             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))):
+        with (
+            mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+            mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+        ):
             handlers.user_prompt_submit()
         assert captured, "fail-safe emitted nothing for the abandoned turn"
         return captured[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]

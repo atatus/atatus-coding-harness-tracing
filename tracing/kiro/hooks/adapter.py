@@ -81,7 +81,6 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     # users find a Kiro session in Atatus. NEVER substitute a fresh trace ID.
     session_id = input_json.get("session_id") or os.environ.get("KIRO_SESSION_ID") or ""
 
-
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
     state.set("trace_count", "0")

@@ -15,6 +15,10 @@ from core.common import DEFAULT_OTLP_ENDPOINT, LOG_CONFIG_VERSION, LOG_FLAG_DEFA
 from core.config import delete_value, load_config, save_config, set_value
 from core.constants import HARNESSES
 
+# Prompt for license key using input to keep prompt visible/interactive
+getpass = input
+
+
 # ---------------------------------------------------------------------------
 # Shared path constants
 # ---------------------------------------------------------------------------
@@ -164,10 +168,10 @@ def prompt_backend(
     # --- credential prompts ---
     print("")
     if stored_key:
-        api_key = input(f"Atatus License Key [keep existing {_mask_secret(stored_key)}]: ").strip()
+        api_key = getpass(f"Atatus License Key [keep existing {_mask_secret(stored_key)}]: ").strip()
         api_key = api_key or stored_key
     else:
-        api_key = input("Atatus License Key: ").strip()
+        api_key = getpass("Atatus License Key: ").strip()
 
     if not api_key:
         err("A license key is required.")

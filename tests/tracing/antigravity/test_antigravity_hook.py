@@ -1208,10 +1208,7 @@ class TestTokenCounts:
             kind = attrs["openinference.span.kind"]["stringValue"]
             has_tokens = any(k.startswith("llm.token_count") for k in attrs)
             assert has_tokens == (kind == "LLM"), f"{kind} span carried tokens: {has_tokens}"
-        totals = [
-            _get_span_attrs(c)["llm.token_count.total"]["intValue"]
-            for c in _by_kind(two_turn_spans, "LLM")
-        ]
+        totals = [_get_span_attrs(c)["llm.token_count.total"]["intValue"] for c in _by_kind(two_turn_spans, "LLM")]
         assert sum(totals) == (1010 + 2520) + (3030 + 4740)
 
     def test_absent_usage_emits_no_token_attributes_at_all(

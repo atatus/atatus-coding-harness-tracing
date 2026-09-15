@@ -231,4 +231,4 @@ def test_neither_installer_writes_into_the_install_dir():
     """The fresh copy must not land in the tree the update is rewriting, and
     INSTALL_DIR is a checkout, so a stray file would show up untracked there."""
     assert '"${TMPDIR:-/tmp}/atatus-install-update.sh"' in INSTALL_SH.read_text()
-    assert '%TEMP%\\atatus-install-update.bat' in INSTALL_BAT.read_text()
+    assert "%TEMP%\\atatus-install-update.bat" in INSTALL_BAT.read_text()

@@ -757,11 +757,13 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_roundtrips_quoted_section_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent("""\
+        toml_text = textwrap.dedent(
+            """\
             [mcp_servers."@scope/server"]
             command = "npx"
             args = ["-y", "@scope/server"]
-        """)
+        """
+        )
         p = tmp_path / "config.toml"
         p.write_text(toml_text)
 
@@ -775,10 +777,12 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_repairs_malformed_unquoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent("""\
+        toml_text = textwrap.dedent(
+            """\
             [plugins.@scope/server]
             enabled = true
-        """)
+        """
+        )
         p = tmp_path / "config.toml"
         p.write_text(toml_text)
 
@@ -817,10 +821,12 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_deeply_nested_quoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent("""\
+        toml_text = textwrap.dedent(
+            """\
             [a."b.c"."d/e"]
             x = 1
-        """)
+        """
+        )
         p = tmp_path / "deep.toml"
         p.write_text(toml_text)
 
@@ -834,13 +840,15 @@ class TestTomlFallbackQuoting:
 
     def test_fallback_multiple_sections_with_quoted_keys(self, tmp_path, monkeypatch):
         monkeypatch.setattr("tracing.codex._toml._tomllib", None)
-        toml_text = textwrap.dedent("""\
+        toml_text = textwrap.dedent(
+            """\
             [servers."@org/alpha"]
             port = 8080
 
             [servers."@org/beta"]
             port = 9090
-        """)
+        """
+        )
         p = tmp_path / "multi.toml"
         p.write_text(toml_text)
 

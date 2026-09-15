@@ -169,7 +169,7 @@ class TestExtractTurnFromRollout:
                     "turn_id": "t1",
                     "last_agent_message": "world",
                     "completed_at": 1010,
-                    "duration_ms": 10000
+                    "duration_ms": 10000,
                 }
             ),
         )
@@ -205,8 +205,8 @@ class TestExtractTurnFromRollout:
                     "model": "gpt-5.5",
                     "cwd": "/x",
                     "approval_policy": "on-request",
-                    "sandbox_policy": {"type": "workspace-write"}
-                }
+                    "sandbox_policy": {"type": "workspace-write"},
+                },
             },
             _evt({"type": "task_complete", "turn_id": "t1"}),
         )
@@ -230,21 +230,15 @@ class TestExtractTurnFromRollout:
                             "output_tokens": 20,
                             "total_tokens": 120,
                             "cached_input_tokens": 80,
-                            "reasoning_output_tokens": 5
+                            "reasoning_output_tokens": 5,
                         }
-                    }
+                    },
                 }
             ),
             _evt(
                 {
                     "type": "token_count",
-                    "info": {
-                        "last_token_usage": {
-                            "input_tokens": 50,
-                            "output_tokens": 10,
-                            "total_tokens": 60
-                        }
-                    }
+                    "info": {"last_token_usage": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60}},
                 }
             ),
             _evt({"type": "task_complete", "turn_id": "t1"}),
@@ -446,14 +440,14 @@ class TestExtractTurnFromRollout:
                 {
                     "type": "web_search_end",
                     "call_id": "ws_2",
-                    "action": {"type": "open_page", "url": "https://example.com"}
+                    "action": {"type": "open_page", "url": "https://example.com"},
                 }
             ),
             _resp(
                 {
                     "type": "web_search_call",
                     "status": "completed",
-                    "action": {"type": "open_page", "url": "https://example.com"}
+                    "action": {"type": "open_page", "url": "https://example.com"},
                 }
             ),
             _evt({"type": "task_complete", "turn_id": "t1"}),
@@ -539,7 +533,7 @@ class TestBuildAndSendSpans:
                 "cached_input_tokens": 4,
                 "cache_write_input_tokens": 2,
                 "reasoning_output_tokens": 1,
-                "model": "gpt-5.5"
+                "model": "gpt-5.5",
             },
             "tool_calls": [
                 {
@@ -549,9 +543,9 @@ class TestBuildAndSendSpans:
                     "call_id": "c1",
                     "start_ts": 1100,
                     "end_ts": 1200,
-                    "decision": None
+                    "decision": None,
                 }
-            ]
+            ],
         }
 
         sent, patcher = self._send_capture()
@@ -603,7 +597,7 @@ class TestBuildAndSendSpans:
             "permission_mode": "",
             "sandbox_mode": "",
             "token_usage": None,
-            "tool_calls": []
+            "tool_calls": [],
         }
         sent, patcher = self._send_capture()
         with patcher:
@@ -624,7 +618,7 @@ class TestBuildAndSendSpans:
             "permission_mode": "",
             "sandbox_mode": "",
             "token_usage": None,
-            "tool_calls": []
+            "tool_calls": [],
         }
         sent, patcher = self._send_capture()
         with patcher:
@@ -657,7 +651,7 @@ class TestHandleNotify:
                     "thread-id": "no-rollout-yet",
                     "turn-id": "t1",
                     "input-messages": [{"role": "user", "content": "hi"}],
-                    "last-assistant-message": "hello"
+                    "last-assistant-message": "hello",
                 }
             )
 
@@ -679,7 +673,7 @@ class TestHandleNotify:
             _evt(
                 {
                     "type": "token_count",
-                    "info": {"last_token_usage": {"input_tokens": 5, "output_tokens": 1, "total_tokens": 6}}
+                    "info": {"last_token_usage": {"input_tokens": 5, "output_tokens": 1, "total_tokens": 6}},
                 }
             ),
             _evt({"type": "task_complete", "turn_id": "turn-1", "last_agent_message": "done", "completed_at": 1010}),
@@ -690,13 +684,7 @@ class TestHandleNotify:
             "tracing.codex.hooks.handlers.send_span_to_backend",
             side_effect=lambda p: (sent.append(p), True)[1],
         ):
-            _handle_notify(
-                {
-                    "type": "agent-turn-complete",
-                    "thread-id": "sess-real",
-                    "turn-id": "turn-1"
-                }
-            )
+            _handle_notify({"type": "agent-turn-complete", "thread-id": "sess-real", "turn-id": "turn-1"})
 
         assert len(sent) == 1
         spans = sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]

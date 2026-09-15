@@ -93,7 +93,7 @@ class TestFunctionsDefined:
             "setup_venv",
             "harness_dir",
             "usage",
-            "main"
+            "main",
         ],
     )
     def test_function_defined(self, func):
@@ -414,7 +414,7 @@ class TestNonInteractiveFlags:
         self.bat = _read_install_bat()
 
     def test_sh_exports_noninteractive(self):
-        assert '--non-interactive|-y) export ATATUS_NONINTERACTIVE=1' in self.sh
+        assert "--non-interactive|-y) export ATATUS_NONINTERACTIVE=1" in self.sh
 
     def test_bat_exports_noninteractive(self):
         assert '"--non-interactive" ( set "ATATUS_NONINTERACTIVE=1"' in self.bat
@@ -543,7 +543,10 @@ class TestUpdateRefetchesItself:
         self.sh = _read_install_sh()
 
     def test_installer_url_is_branch_derived(self):
-        assert 'INSTALL_SH_URL="https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/${INSTALL_BRANCH}/install.sh"' in self.sh
+        assert (
+            'INSTALL_SH_URL="https://raw.githubusercontent.com/atatus/atatus-coding-harness-tracing/${INSTALL_BRANCH}/install.sh"'
+            in self.sh
+        )
 
     def test_branch_urls_are_set_in_one_place(self):
         """--branch must not update the tarball URL and miss the installer URL."""

@@ -2236,6 +2236,7 @@ class TestPostToolUseDeduplication:
                 {"conversation_id": "c1", "generation_id": "g1", "tool_name": tool_name},
             )
         assert len(captured_spans) == 1
-        assert _attrs(captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0])["tool.name"][
-            "stringValue"
-        ] == tool_name
+        assert (
+            _attrs(captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0])["tool.name"]["stringValue"]
+            == tool_name
+        )

@@ -135,21 +135,16 @@ def sample_config(tmp_harness_dir):
                 "project_name": "claude-code",
                 "target": "atatus",
                 "endpoint": DEFAULT_OTLP_ENDPOINT,
-                "api_key": ""
+                "api_key": "",
             },
             "codex": {
                 "project_name": "codex",
                 "target": "atatus",
                 "endpoint": DEFAULT_OTLP_ENDPOINT,
                 "api_key": "",
-                "collector": {"host": "127.0.0.1", "port": 4318}
+                "collector": {"host": "127.0.0.1", "port": 4318},
             },
-            "cursor": {
-                "project_name": "cursor",
-                "target": "atatus",
-                "endpoint": DEFAULT_OTLP_ENDPOINT,
-                "api_key": ""
-            }
+            "cursor": {"project_name": "cursor", "target": "atatus", "endpoint": DEFAULT_OTLP_ENDPOINT, "api_key": ""},
         }
     }
     config_path = tmp_harness_dir / "config.json"
@@ -236,7 +231,7 @@ def cursor_before_submit_input():
         "hook_event_name": "beforeSubmitPrompt",
         "conversation_id": "conv-1",
         "generation_id": "gen-1",
-        "prompt": "fix the bug"
+        "prompt": "fix the bug",
     }
 
 
@@ -249,7 +244,7 @@ def cursor_after_shell_input():
         "generation_id": "gen-1",
         "command": "ls -la",
         "output": "total 0",
-        "exit_code": "0"
+        "exit_code": "0",
     }
 
 
@@ -273,13 +268,13 @@ def golden_span():
                                 "endTimeUnixNano": "1711987201000000000",
                                 "attributes": [
                                     {"key": "session.id", "value": {"stringValue": "sess-1"}},
-                                    {"key": "input.value", "value": {"stringValue": "hello"}}
+                                    {"key": "input.value", "value": {"stringValue": "hello"}},
                                 ],
-                                "status": {"code": 1}
+                                "status": {"code": 1},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             }
         ]
     }
@@ -288,7 +283,7 @@ def golden_span():
 SAMPLE_TRANSCRIPT_LINES = [
     '{"type": "user", "message": {"role": "user", "content": "fix the bug"}}',
     '{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I found the issue."}], "model": "claude-sonnet-4-20250514", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 5}}}',
-    '{"type": "tool_use", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {"file": "main.py"}}]}}'
+    '{"type": "tool_use", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {"file": "main.py"}}]}}',
 ]
 
 

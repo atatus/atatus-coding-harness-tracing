@@ -9,12 +9,7 @@ import pytest
 import core.setup as _setup
 import tracing.copilot.install as _install
 from core.common import DEFAULT_OTLP_ENDPOINT
-from tracing.copilot.constants import (
-    HOOK_CONFIG_VERSION,
-    HOOKS_FILE_NAME,
-    LEGACY_HOOKS_DIR,
-    LEGACY_HOOKS_FILE_NAME,
-)
+from tracing.copilot.constants import HOOK_CONFIG_VERSION, HOOKS_FILE_NAME, LEGACY_HOOKS_DIR, LEGACY_HOOKS_FILE_NAME
 
 install = _install.install
 uninstall = _install.uninstall

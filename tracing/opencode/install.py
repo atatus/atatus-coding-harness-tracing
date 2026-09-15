@@ -16,14 +16,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from core.setup import (
-    configure_harness,
-    dry_run,
-    info,
-    remove_harness_entry,
-    symlink_skills,
-    unlink_skills,
-)
+from core.setup import configure_harness, dry_run, info, remove_harness_entry, symlink_skills, unlink_skills
 from tracing.opencode.constants import DISPLAY_NAME, HARNESS_BIN, HARNESS_HOME, HARNESS_NAME
 
 # Header-marker the installer writes into the shim and checks on uninstall so

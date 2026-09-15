@@ -47,6 +47,7 @@ from core.constants import MODEL_FAMILY_SYSTEMS
 from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
 from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file
 
+
 def _send_span_async(span_dict: dict, on_success=None) -> None:
     """Detached span send. ``sender`` keeps this module's own backend binding on
     the synchronous fallback path so test doubles still intercept it."""

@@ -24,17 +24,7 @@ from core.common import (
     send_span,
     send_span_async,
 )
-from core.event_model import (
-    AgentEvent,
-    EventStatus,
-    GraphDiagnostic,
-    ModelCallEvent,
-    ToolEvent,
-    TurnEvent,
-)
-from tracing.claude_code.hooks.span_renderer import render_event_graph
-from tracing.claude_code.hooks.tool_buffer import ToolBuffer, ToolObservation
-from tracing.claude_code.hooks.transcript import parse_claude_transcript
+from core.event_model import AgentEvent, EventStatus, GraphDiagnostic, ModelCallEvent, ToolEvent, TurnEvent
 from tracing.claude_code.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
@@ -44,6 +34,9 @@ from tracing.claude_code.hooks.adapter import (
     resolve_session,
     resolve_transcript_path,
 )
+from tracing.claude_code.hooks.span_renderer import render_event_graph
+from tracing.claude_code.hooks.tool_buffer import ToolBuffer, ToolObservation
+from tracing.claude_code.hooks.transcript import parse_claude_transcript
 
 # ---------------------------------------------------------------------------
 # Shared helper
@@ -409,7 +402,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
         prev_count = state.get("trace_count") or "?"
         failsafe_attrs = {
             "session.id": session_id,
-        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
+            **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
             "openinference.span.kind": "LLM",
             "input.value": redact_content(env.log_prompts, prev_prompt),
             "output.value": "(Turn closed by fail-safe: Stop hook did not fire)",
@@ -1043,6 +1036,7 @@ def _handle_stop(input_json: dict) -> None:
                 extra_attributes={root_event.event_id: root_attrs},
                 common_attributes=common_attrs,
             )
+
             # The ack travels into the detached send rather than the delivery
             # decision coming back out — the turn stays un-acked, and so retries
             # on the next Stop, unless the collector actually took it. Safe to

@@ -15,15 +15,7 @@ from __future__ import annotations
 import json
 import sys
 
-from core.setup import (
-    configure_harness,
-    dry_run,
-    info,
-    remove_harness_entry,
-    symlink_skills,
-    unlink_skills,
-    venv_bin,
-)
+from core.setup import configure_harness, dry_run, info, remove_harness_entry, symlink_skills, unlink_skills, venv_bin
 from tracing.gemini.constants import (
     DISPLAY_NAME,
     EVENTS,

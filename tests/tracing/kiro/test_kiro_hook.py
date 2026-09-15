@@ -635,11 +635,7 @@ class TestStopSidecarEnrichment:
 class TestMain:
     def test_unknown_event_no_crash_no_span(self, captured_spans):
         """Unknown hook_event_name returns 0, no spans emitted."""
-        payload = {
-            "hook_event_name": "unknown",
-            "session_id": SESSION_1,
-            "cwd": "/tmp"
-        }
+        payload = {"hook_event_name": "unknown", "session_id": SESSION_1, "cwd": "/tmp"}
         rc = _invoke_main(payload)
         assert rc == 0
         assert len(captured_spans) == 0

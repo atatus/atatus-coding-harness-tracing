@@ -18,18 +18,9 @@ from __future__ import annotations
 import json
 import sys
 
-from core.setup import (
-    configure_harness,
-    dry_run,
-)
+from core.setup import configure_harness, dry_run
 from core.setup import err as _err
-from core.setup import (
-    info,
-    remove_harness_entry,
-    symlink_skills,
-    unlink_skills,
-    venv_bin,
-)
+from core.setup import info, remove_harness_entry, symlink_skills, unlink_skills, venv_bin
 from tracing.antigravity import constants as _c
 
 # ---------------------------------------------------------------------------

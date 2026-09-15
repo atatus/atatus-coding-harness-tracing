@@ -82,7 +82,6 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     session_id = _session_key(input_json)
 
-
     state.set("session_id", session_id)
     state.set("session_start_time", str(get_timestamp_ms()))
     state.set("trace_count", "0")

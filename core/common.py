@@ -237,15 +237,11 @@ class _Env:
 
     @property
     def log_tool_details(self) -> bool:
-        return self._resolve_log_flag(
-            "ATATUS_LOG_TOOL_DETAILS", "tool_details", LOG_FLAG_DEFAULTS["tool_details"]
-        )
+        return self._resolve_log_flag("ATATUS_LOG_TOOL_DETAILS", "tool_details", LOG_FLAG_DEFAULTS["tool_details"])
 
     @property
     def log_tool_content(self) -> bool:
-        return self._resolve_log_flag(
-            "ATATUS_LOG_TOOL_CONTENT", "tool_content", LOG_FLAG_DEFAULTS["tool_content"]
-        )
+        return self._resolve_log_flag("ATATUS_LOG_TOOL_CONTENT", "tool_content", LOG_FLAG_DEFAULTS["tool_content"])
 
 
 env = _Env()

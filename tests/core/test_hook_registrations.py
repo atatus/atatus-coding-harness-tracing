@@ -476,16 +476,12 @@ class TestRunHookStalenessCheck:
         source = script.read_text(encoding="utf-8")
         assert "source_fingerprint" in source, f"{script} must fingerprint the source tree"
         # The old check read pyproject.toml and nothing else.
-        assert 'open(sys.argv[1],' not in source, (
-            f"{script} still hashes a single file to decide whether to reinstall"
-        )
+        assert "open(sys.argv[1]," not in source, f"{script} still hashes a single file to decide whether to reinstall"
 
     @pytest.mark.parametrize("script", RUN_HOOKS, ids=lambda p: p.parents[1].name)
     def test_fingerprint_covers_python_sources(self, script):
         source = script.read_text(encoding="utf-8")
-        assert ".py" in source and "os.walk" in source, (
-            f"{script} must walk the tree and include .py files"
-        )
+        assert ".py" in source and "os.walk" in source, f"{script} must walk the tree and include .py files"
         assert "__pycache__" in source, f"{script} must exclude __pycache__ from the fingerprint"
 
     @pytest.mark.parametrize("script", RUN_HOOKS, ids=lambda p: p.parents[1].name)

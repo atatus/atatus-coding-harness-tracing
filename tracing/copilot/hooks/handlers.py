@@ -117,7 +117,9 @@ def _tool_attributes(input_json: dict) -> dict:
             command = tool_input_raw.get("command", "")
             description = command[:200]
         elif tool_name_lc in ("read", "write", "edit", "glob", "str_replace_editor", "create_file"):
-            file_path = tool_input_raw.get("file_path") or tool_input_raw.get("path") or tool_input_raw.get("pattern", "")
+            file_path = (
+                tool_input_raw.get("file_path") or tool_input_raw.get("path") or tool_input_raw.get("pattern", "")
+            )
             description = str(file_path)[:200]
         elif tool_name_lc in ("websearch", "web_search"):
             query = tool_input_raw.get("query", "")

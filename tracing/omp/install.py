@@ -24,17 +24,9 @@ import sys
 from pathlib import Path
 
 import tracing.omp.constants as omp_constants
-from core.setup import (
-    configure_harness,
-    dry_run,
-)
+from core.setup import configure_harness, dry_run
 from core.setup import err as _err
-from core.setup import (
-    info,
-    remove_harness_entry,
-    symlink_skills,
-    unlink_skills,
-)
+from core.setup import info, remove_harness_entry, symlink_skills, unlink_skills
 
 # Header-marker the installer writes into the shim and checks on uninstall so
 # we never delete a user's own extension file.

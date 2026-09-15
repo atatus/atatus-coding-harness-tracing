@@ -40,7 +40,6 @@ re-enter). All diagnostics go through ``core.common.log``/``error`` (stderr).
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 from core.common import (
@@ -64,11 +63,7 @@ from tracing.antigravity.hooks.adapter import (
     gc_stale_state_files,
     resolve_session,
 )
-from tracing.antigravity.hooks.model import (
-    label_to_id,
-    model_id_from_store,
-    model_label_from_settings,
-)
+from tracing.antigravity.hooks.model import label_to_id, model_id_from_store, model_label_from_settings
 from tracing.antigravity.hooks.transcript import parse_transcript, turn_is_waiting
 from tracing.antigravity.hooks.usage import CallUsage, usage_by_call
 
