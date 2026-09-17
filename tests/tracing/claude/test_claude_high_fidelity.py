@@ -8,6 +8,7 @@ downstream validates them, and nothing will report when they break.
 import io
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -420,19 +421,15 @@ def _interrupt_marker(ts="2026-08-22T16:16:44.000Z"):
     }
 
 
-def _queued_command(prompt, origin="human", ts="2026-08-22T16:16:43.500Z"):
-    return {
-        "type": "attachment",
-        "uuid": f"att-{abs(hash(prompt))}",
-        "timestamp": ts,
-        "attachment": {
-            "type": "queued_command",
-            "prompt": prompt,
-            "commandMode": "prompt",
-            "origin": {"kind": origin},
-            "timestamp": ts,
-        },
-    }
+def _queued_command(prompt, origin="human", ts="2026-08-22T16:16:43.500Z", mode="prompt"):
+    attachment = {"type": "queued_command", "prompt": prompt, "commandMode": mode, "timestamp": ts}
+    if origin is not None:
+        attachment["origin"] = {"kind": origin}
+    return {"type": "attachment", "uuid": f"att-{abs(hash(prompt))}", "timestamp": ts, "attachment": attachment}
+
+
+def _absorb_marker(ts):
+    return {"type": "queue-operation", "operation": "remove", "reason": "absorbed_mid_turn", "timestamp": ts}
 
 
 def _live_turn_state(tmp_path, prompt_id="p-1"):
@@ -589,13 +586,38 @@ class TestAbsorbedPromptBelongsToTheTurn:
         assert _attrs(prompts[0])["openinference.span.kind"] == "CHAIN"
         assert prompts[0]["startTimeUnixNano"] == prompts[0]["endTimeUnixNano"] != "0000000"
 
+    def test_prompt_is_placed_where_the_harness_absorbed_it_not_where_it_was_typed(self, tmp_path):
+        typed_at = "2026-08-22T16:16:42.000Z"
+        absorbed_at = "2026-08-22T16:16:43.900Z"
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            _WORK + [_absorb_marker(absorbed_at), _queued_command("also do Y", ts=typed_at)],
+        )
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        spans = _spans(captured[0])
+        prompt = next(s for s in spans if s["name"] == "User prompt 2")
+        tool = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "TOOL")
+        assert int(prompt["startTimeUnixNano"]) > int(tool["endTimeUnixNano"])
+        absorbed_ms = int(datetime.fromisoformat(absorbed_at.replace("Z", "+00:00")).timestamp() * 1000)
+        assert prompt["startTimeUnixNano"] == f"{absorbed_ms}000000"
+
     def test_state_is_acknowledged(self, stopped):
         state, _ = stopped
         assert state.get("current_trace_id") is None
         assert state.get("export_attempted_trace_id") is None
 
-    def test_machine_queued_command_is_not_a_prompt(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", _WORK + [_queued_command("<task-notification/>", origin="system")])
+    @pytest.mark.parametrize(
+        "record",
+        [
+            _queued_command("<task-notification/>", origin="system"),
+            # The real shape: no origin at all, commandMode says what it is.
+            _queued_command("<task-notification/>", origin=None, mode="task-notification"),
+        ],
+    )
+    def test_machine_queued_command_is_not_a_prompt(self, tmp_path, record):
+        transcript = _write(tmp_path / "t.jsonl", _WORK + [record])
         state = _live_turn_state(tmp_path)
         captured = []
         _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)

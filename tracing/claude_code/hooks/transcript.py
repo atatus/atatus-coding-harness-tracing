@@ -42,6 +42,8 @@ def parse_claude_transcript(
     models_by_message_id: dict[str, ModelCallEvent] = {}
     agent_id = root_event.agent_id if isinstance(root_event, AgentEvent) else None
     sequence = root_event.sequence + 1
+    absorbed_at_ms: list[int | None] = []
+    last_timestamp_ms: int | None = None
 
     try:
         lines = transcript.read_text(encoding="utf-8").splitlines()
@@ -73,12 +75,22 @@ def parse_claude_transcript(
         if not isinstance(entry, dict):
             continue
 
+        record_timestamp_ms = _timestamp_ms(entry.get("timestamp"))
+        if _is_absorb_marker(entry):
+            absorbed_at_ms.append(record_timestamp_ms)
+            last_timestamp_ms = record_timestamp_ms or last_timestamp_ms
+            continue
+
         message = entry.get("message")
         if not isinstance(message, dict):
             prompt = _absorbed_prompt(entry)
             if prompt and isinstance(root_event, TurnEvent):
                 root_event.additional_prompts.append(prompt)
-                timestamp_ms = _timestamp_ms(entry.get("timestamp"))
+                # The attachment carries the time the user typed it; the turn only saw it
+                # when the harness absorbed it, which is where it belongs in the trace.
+                timestamp_ms = (
+                    (absorbed_at_ms.pop(0) if absorbed_at_ms else None) or last_timestamp_ms or record_timestamp_ms
+                )
                 graph.events.append(
                     PromptEvent(
                         event_id=f"prompt:{_string(entry.get('uuid')) or line_index + 1}",
@@ -94,6 +106,7 @@ def parse_claude_transcript(
                 )
                 sequence += 1
             continue
+        last_timestamp_ms = record_timestamp_ms or last_timestamp_ms
         role = message.get("role")
 
         if role == "assistant":
@@ -284,11 +297,23 @@ def _is_interrupt_marker(entry: dict[str, Any], message: dict[str, Any]) -> bool
     )
 
 
+def _is_absorb_marker(entry: dict[str, Any]) -> bool:
+    return (
+        entry.get("type") == "queue-operation"
+        and entry.get("operation") == "remove"
+        and entry.get("reason") == "absorbed_mid_turn"
+    )
+
+
 def _absorbed_prompt(entry: dict[str, Any]) -> str:
     if entry.get("type") != "attachment":
         return ""
     attachment = entry.get("attachment")
     if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+        return ""
+    # A subagent notification is also queued and absorbed, with commandMode
+    # "task-notification" and no origin. Only a typed prompt is a prompt.
+    if attachment.get("commandMode") != "prompt":
         return ""
     origin = attachment.get("origin")
     if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
