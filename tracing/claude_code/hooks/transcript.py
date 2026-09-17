@@ -16,6 +16,8 @@ from core.event_model import (
     GraphDiagnostic,
     ModelCallEvent,
     ToolEvent,
+    TurnEndReason,
+    TurnEvent,
     Usage,
 )
 
@@ -72,6 +74,8 @@ def parse_claude_transcript(
 
         message = entry.get("message")
         if not isinstance(message, dict):
+            if isinstance(root_event, TurnEvent):
+                _collect_absorbed_prompt(entry, root_event)
             continue
         role = message.get("role")
 
@@ -183,6 +187,10 @@ def parse_claude_transcript(
                 sequence += 1
 
         elif role == "user":
+            if _is_interrupt_marker(entry, message):
+                if isinstance(root_event, TurnEvent) and root_event.end_reason in (None, TurnEndReason.CONTINUED):
+                    root_event.end_reason = TurnEndReason.INTERRUPTED
+                continue
             result_timestamp_ms = _timestamp_ms(entry.get("timestamp"))
             for block in _content_blocks(message.get("content")):
                 if block.get("type") != "tool_result":
@@ -240,6 +248,37 @@ def parse_claude_transcript(
     validation_diagnostics = graph.validate()
     graph.diagnostics = parser_diagnostics + validation_diagnostics
     return graph
+
+
+# Written by Claude Code as a `user` record when Esc cancels a request; it carries no
+# isMeta flag, so only the marker text and interruptedMessageId identify it.
+_INTERRUPT_MARKER = "[Request interrupted by user"
+
+
+def _is_interrupt_marker(entry: dict[str, Any], message: dict[str, Any]) -> bool:
+    if entry.get("interruptedMessageId"):
+        return True
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.startswith(_INTERRUPT_MARKER)
+    return any(
+        block.get("type") == "text" and _string(block.get("text")).startswith(_INTERRUPT_MARKER)
+        for block in _content_blocks(content)
+    )
+
+
+def _collect_absorbed_prompt(entry: dict[str, Any], root_event: TurnEvent) -> None:
+    if entry.get("type") != "attachment":
+        return
+    attachment = entry.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+        return
+    origin = attachment.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        return
+    prompt = _string(attachment.get("prompt"))
+    if prompt:
+        root_event.additional_prompts.append(prompt)
 
 
 def _content_blocks(content: Any) -> list[dict[str, Any]]:

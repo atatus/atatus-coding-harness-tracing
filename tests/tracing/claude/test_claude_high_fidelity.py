@@ -364,10 +364,11 @@ class TestLegacyFallback:
         assert spans[0]["name"] == "Turn 1"
 
 
-class TestFailSafeTurnIsNotASuccess:
-    """A turn closed by the fail-safe never finished — Stop never fired, because the user
-    interrupted it or the process died. Reporting it as a success makes an abandoned turn
-    indistinguishable from a clean one in every rollup."""
+class TestAbandonedTurnIsNotASuccess:
+    """A live turn closed with no transcript to replay is the one case nothing can vouch
+    for. Reporting it as a success would make it indistinguishable from a clean turn in
+    every rollup, so it stays an error - and stays marked, so it is never mistaken for a
+    turn that ran and genuinely failed."""
 
     @pytest.fixture
     def failsafe_span(self, tmp_path):
@@ -402,3 +403,231 @@ class TestFailSafeTurnIsNotASuccess:
     def test_marked_incomplete_so_it_is_distinguishable_from_a_real_failure(self, failsafe_span):
         attrs = {a["key"]: list(a["value"].values())[0] for a in failsafe_span["attributes"]}
         assert attrs.get("turn.incomplete") == "true"
+
+    def test_reason_is_abandoned(self, failsafe_span):
+        attrs = {a["key"]: list(a["value"].values())[0] for a in failsafe_span["attributes"]}
+        assert attrs.get("turn.end_reason") == "abandoned"
+
+
+def _interrupt_marker(ts="2026-08-22T16:16:44.000Z"):
+    return {
+        "type": "user",
+        "uuid": "int-1",
+        "timestamp": ts,
+        "promptId": "p-1",
+        "interruptedMessageId": "msg_A",
+        "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+    }
+
+
+def _queued_command(prompt, origin="human", ts="2026-08-22T16:16:43.500Z"):
+    return {
+        "type": "attachment",
+        "uuid": f"att-{abs(hash(prompt))}",
+        "timestamp": ts,
+        "attachment": {
+            "type": "queued_command",
+            "prompt": prompt,
+            "commandMode": "prompt",
+            "origin": {"kind": origin},
+            "timestamp": ts,
+        },
+    }
+
+
+def _live_turn_state(tmp_path, prompt_id="p-1"):
+    state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
+    state.init_state()
+    for key, value in {
+        "session_id": "s1",
+        "user_id": "dg",
+        "trace_count": "1",
+        "current_trace_id": "a" * 32,
+        "current_trace_span_id": "b" * 16,
+        "current_trace_start_time": "1",
+        "current_trace_prompt": "go",
+        "current_prompt_id": prompt_id,
+        "trace_start_line": "0",
+    }.items():
+        state.set(key, value)
+    return state
+
+
+def _run_hook(entry, state, payload, captured):
+    with (
+        mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+        mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+        mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+        mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+    ):
+        entry()
+
+
+def _spans(payload):
+    return payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+
+
+def _attrs(span):
+    return {a["key"]: list(a["value"].values())[0] for a in span["attributes"]}
+
+
+def _root_span(spans):
+    return next(s for s in spans if "parentSpanId" not in s)
+
+
+_WORK = [
+    _assistant(
+        "u1",
+        "msg_A",
+        [
+            {"type": "text", "text": "working"},
+            {"type": "tool_use", "id": "tu1", "name": "Bash", "input": {"command": "ls"}},
+        ],
+        usage={"input_tokens": 100, "output_tokens": 5},
+    ),
+    _tool_result("tu1"),
+]
+
+
+class TestInterruptedTurnIsReplayedNotStubbed:
+    """Stop never fires when the user interrupts, so the next prompt closes the turn. It
+    must ship what the turn actually did, and interrupting is not a failure."""
+
+    @pytest.fixture
+    def closed(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK + [_interrupt_marker()])
+        state = _live_turn_state(tmp_path)
+        captured = []
+        payload = {
+            "session_id": "s1",
+            "prompt": "next turn",
+            "prompt_id": "p-2",
+            "transcript_path": str(transcript),
+            "cwd": str(tmp_path),
+        }
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        assert len(captured) == 1, "exactly one export for the interrupted turn"
+        return state, _spans(captured[0])
+
+    def test_root_is_ok_and_marked_interrupted(self, closed):
+        _, spans = closed
+        root = _root_span(spans)
+        assert root["status"]["code"] == 1
+        attrs = _attrs(root)
+        assert attrs["turn.end_reason"] == "interrupted"
+        assert attrs["turn.incomplete"] == "true"
+        assert attrs["prompt.id"] == "p-1"
+
+    def test_root_keeps_its_reserved_ids_so_children_stay_attached(self, closed):
+        _, spans = closed
+        root = _root_span(spans)
+        assert root["spanId"] == "b" * 16
+        assert root["traceId"] == "a" * 32
+
+    def test_real_model_call_and_tool_are_shipped(self, closed):
+        _, spans = closed
+        kinds = [_attrs(s)["openinference.span.kind"] for s in spans]
+        assert kinds.count("LLM") == 1
+        assert kinds.count("TOOL") == 1
+        llm = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "LLM")
+        assert int(_attrs(llm)["llm.token_count.total"]) == 105
+
+    def test_next_turn_starts_fresh(self, closed):
+        state, _ = closed
+        assert state.get("current_trace_id") != "a" * 32
+        assert state.get("current_prompt_id") == "p-2"
+        assert state.get("trace_count") == "2"
+        assert state.get("export_attempted_trace_id") is None
+        assert state.get("high_fidelity_span_ids") is None
+
+
+class TestContinuedTurn:
+    def test_new_prompt_with_no_abort_evidence_is_continued_not_error(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        captured = []
+        payload = {"session_id": "s1", "prompt": "next", "prompt_id": "p-2", "transcript_path": str(transcript)}
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        root = _root_span(_spans(captured[0]))
+        assert root["status"]["code"] == 1
+        assert _attrs(root)["turn.end_reason"] == "continued"
+        assert _attrs(root)["turn.incomplete"] == "true"
+
+
+class TestAbsorbedPromptBelongsToTheTurn:
+    """A message typed mid-turn that the harness absorbs fires no hook. The transcript is
+    the only place it exists, so the turn that ran it must carry it."""
+
+    @pytest.fixture
+    def stopped(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK[:1] + [_queued_command("also do Y")] + _WORK[1:])
+        state = _live_turn_state(tmp_path)
+        captured = []
+        payload = {"session_id": "s1", "transcript_path": str(transcript), "last_assistant_message": "done"}
+        _run_hook(handlers.stop, state, payload, captured)
+        assert len(captured) == 1
+        return state, _spans(captured[0])
+
+    def test_one_trace_with_both_prompts(self, stopped):
+        _, spans = stopped
+        assert len({s["traceId"] for s in spans}) == 1
+        root = _root_span(spans)
+        attrs = _attrs(root)
+        assert attrs["input.value"] == "go\n\nalso do Y"
+        assert attrs["turn.prompt_count"] == "2"
+        assert attrs["turn.end_reason"] == "completed"
+        assert "turn.incomplete" not in attrs
+        assert root["status"]["code"] == 1
+
+    def test_state_is_acknowledged(self, stopped):
+        state, _ = stopped
+        assert state.get("current_trace_id") is None
+        assert state.get("export_attempted_trace_id") is None
+
+    def test_machine_queued_command_is_not_a_prompt(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK + [_queued_command("<task-notification/>", origin="system")])
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        attrs = _attrs(_root_span(_spans(captured[0])))
+        assert attrs["input.value"] == "go"
+        assert "turn.prompt_count" not in attrs
+
+
+class TestSessionEndClosesTheLiveTurn:
+    def test_last_turn_of_a_session_is_not_lost(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.session_end, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        assert len(captured) == 1
+        root = _root_span(_spans(captured[0]))
+        assert root["spanId"] == "b" * 16
+        assert root["status"]["code"] == 1
+        assert _attrs(root)["turn.end_reason"] == "interrupted"
+
+
+class TestStopMarksTheExportBeforeSending:
+    def test_a_refused_export_is_never_re_emitted_as_a_second_root(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        refused = []
+        with (
+            mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+            mock.patch.object(handlers, "send_span", lambda p: refused.append(p) or False),
+            mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+            mock.patch.object(
+                sys, "stdin", new=io.StringIO(json.dumps({"session_id": "s1", "transcript_path": str(transcript)}))
+            ),
+        ):
+            handlers.stop()
+        assert len(refused) == 1
+        assert state.get("current_trace_id") == "a" * 32, "un-acked on refusal"
+        assert state.get("export_attempted_trace_id") == "a" * 32
+
+        captured = []
+        payload = {"session_id": "s1", "prompt": "next", "prompt_id": "p-2", "transcript_path": str(transcript)}
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        assert captured == []
+        assert state.get("current_trace_id") != "a" * 32
+        assert state.get("trace_count") == "2"

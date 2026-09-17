@@ -24,7 +24,23 @@ from core.common import (
     send_span,
     send_span_async,
 )
-from core.event_model import AgentEvent, EventStatus, GraphDiagnostic, ModelCallEvent, ToolEvent, TurnEvent
+from core.event_model import (
+    AgentEvent,
+    EventStatus,
+    GraphDiagnostic,
+    ModelCallEvent,
+    ToolEvent,
+    TurnEndReason,
+    TurnEvent,
+)
+from core.turn_lifecycle import (
+    ABANDONED_OUTPUT,
+    PROMPT_ID_ATTR,
+    close_turn_span,
+    event_status_for,
+    turn_end_attributes,
+    turn_status,
+)
 from tracing.claude_code.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
@@ -391,58 +407,27 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     """Handle user_prompt_submit: set up a new trace (close orphaned turn first)."""
     state = resolve_session(input_json)
     ensure_session_initialized(state, input_json)
-    session_id = state.get("session_id")
+    prompt_id = input_json.get("prompt_id") or ""
+    prompt_id = prompt_id if isinstance(prompt_id, str) else ""
 
-    # Fail-safe: close any orphaned Turn span
-    prev_trace_id = state.get("current_trace_id")
-    prev_span_id = state.get("current_trace_span_id")
-    if prev_trace_id and prev_span_id:
-        prev_start = state.get("current_trace_start_time") or str(get_timestamp_ms())
-        prev_prompt = state.get("current_trace_prompt") or ""
-        prev_count = state.get("trace_count") or "?"
-        failsafe_attrs = {
-            "session.id": session_id,
-            **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
-            "openinference.span.kind": "LLM",
-            "input.value": redact_content(env.log_prompts, prev_prompt),
-            "output.value": "(Turn closed by fail-safe: Stop hook did not fire)",
-            # Queryable, so an abandoned turn can be told apart from one that ran and
-            # genuinely failed - the status alone cannot express that difference.
-            "turn.incomplete": "true",
-        }
-        user_id = state.get("user_id") or ""
-        if user_id:
-            failsafe_attrs["user.id"] = user_id
-        # Not OK. The turn was abandoned - interrupted, cancelled, or the process died
-        # before Stop - so reporting it as a success is a lie that reads as a clean turn
-        # in every rollup. ERROR is the only non-success state the pipeline models; the
-        # message and turn.incomplete carry the distinction.
-        failsafe_span = build_span(
-            f"Turn {prev_count}",
-            "LLM",
-            prev_span_id,
-            prev_trace_id,
-            "",
-            prev_start,
-            str(get_timestamp_ms()),
-            failsafe_attrs,
-            SERVICE_NAME,
-            SCOPE_NAME,
-            status_code=2,
-            status_message="Turn did not complete: Stop hook never fired",
-        )
-        _send_span_async(failsafe_span)
-        state.delete("current_trace_id")
-        state.delete("current_trace_span_id")
-        state.delete("current_trace_start_time")
-        state.delete("current_trace_prompt")
-        log(f"Fail-safe: closed orphaned Turn {prev_count}")
+    if state.get("current_trace_id"):
+        # Same prompt id means the harness is still inside this turn, whatever the hook says.
+        if prompt_id and prompt_id == state.get("current_prompt_id"):
+            log("Prompt resubmitted for the live turn; keeping it open")
+            return
+        # Stop never fires for a turn the user interrupted, so the next prompt is the
+        # first chance to close it - with what it actually did, not a stub.
+        _close_live_turn(state, input_json, TurnEndReason.CONTINUED)
 
     # Set up new trace
     state.increment("trace_count")
     state.set("current_trace_id", generate_trace_id())
     state.set("current_trace_span_id", generate_span_id())
     state.set("current_trace_start_time", str(get_timestamp_ms()))
+    if prompt_id:
+        state.set("current_prompt_id", prompt_id)
+    else:
+        state.delete("current_prompt_id")
     prompt = input_json.get("prompt", "") or ""
     # Store RAW prompt in state; redact only at span build time so the redaction
     # toggle is read once-per-emit instead of being baked into the state file.
@@ -898,6 +883,8 @@ def _acknowledge_exported_turn(
                 "current_trace_span_id",
                 "current_trace_start_time",
                 "current_trace_prompt",
+                "current_prompt_id",
+                "export_attempted_trace_id",
                 "trace_start_line",
                 "pending_expansion_type",
                 "pending_command_name",
@@ -922,132 +909,139 @@ def _periodic_gc(trace_count: str) -> None:
         gc_stale_state_files()
 
 
-def _handle_stop(input_json: dict) -> None:
-    """Handle Stop: send the LLM span for the completed turn and clean up trace state."""
-    state = resolve_session(input_json)
+@dataclass
+class _TurnExport:
+    payload: dict
+    reason: TurnEndReason
+    observations: list
+    subagents: dict
+
+
+def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport | None":
+    """Render the live turn from its transcript window. Returns None when there is no
+    transcript to replay; the caller decides how to send and when to clear state."""
     session_id = state.get("session_id")
     trace_id = state.get("current_trace_id")
     if session_id is None or trace_id is None:
-        return
+        return None
 
     trace_span_id = state.get("current_trace_span_id") or generate_span_id()
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
     trace_count = state.get("trace_count") or "0"
     user_id = state.get("user_id") or ""
+    prompt_id = state.get("current_prompt_id") or ""
+
+    # Stop vouches for the turn by itself; any other closer needs the transcript as evidence.
+    transcript = resolve_transcript_path(input_json, session_id)
+    if transcript is None and reason is not TurnEndReason.COMPLETED:
+        return None
 
     # Claude Code v2 ships the assistant's final text directly.  Earlier versions
     # didn't, so we still scan the transcript when last_assistant_message is empty.
-    last_msg = input_json.get("last_assistant_message", "") or ""
-    output = last_msg
-
+    output = input_json.get("last_assistant_message", "") or ""
+    start_line = int(state.get("trace_start_line") or "0")
     usage = _TokenUsage()
     model = ""
-
-    transcript = resolve_transcript_path(input_json, session_id)
     if transcript is not None:
-        start_line = int(state.get("trace_start_line") or "0")
-        _wait_for_transcript_flush(transcript, start_line)
-        scanned_output, usage, scanned_model = _scan_transcript_for_usage(transcript, start_line)
+        # The flush race only exists on Stop; by the time a later hook closes the turn,
+        # everything it wrote is already on disk.
+        if reason is TurnEndReason.COMPLETED:
+            _wait_for_transcript_flush(transcript, start_line)
+        scanned_output, usage, model = _scan_transcript_for_usage(transcript, start_line)
         if not output:
             output = scanned_output
-        model = scanned_model
-
     if not output:
         output = "(No response)"
 
+    root_event = TurnEvent(
+        event_id=f"turn:{trace_count}",
+        session_id=session_id,
+        turn_id=trace_count,
+        sequence=0,
+        started_at_ms=int(trace_start_time) if str(trace_start_time).isdigit() else None,
+        ended_at_ms=get_timestamp_ms(),
+        status=event_status_for(reason),
+        input=user_prompt,
+        output=output,
+        end_reason=reason,
+    )
+    graph = None
     if transcript is not None:
-        start_line = int(state.get("trace_start_line") or "0")
-        root_event = TurnEvent(
-            event_id=f"turn:{trace_count}",
-            session_id=session_id,
-            turn_id=trace_count,
-            sequence=0,
-            started_at_ms=int(trace_start_time) if str(trace_start_time).isdigit() else None,
-            ended_at_ms=get_timestamp_ms(),
-            status=EventStatus.COMPLETED,
-            input=user_prompt,
-            output=output,
-        )
         graph = parse_claude_transcript(transcript, root_event, start_line=start_line)
-        if _has_stable_model_ids(graph):
-            buffer = ToolBuffer(state)
-            observations = buffer.all()
-            pending_subagents = _pending_subagents(state)
-            matched_observations = _merge_tool_observations(graph, observations)
-            matched_subagents = _merge_pending_subagents(graph, pending_subagents)
-            graph.validate()
+        # The transcript can prove an interrupt the hook payload cannot.
+        reason = root_event.end_reason or reason
+        root_event.status = event_status_for(reason)
 
-            # The turn ends when its last child does. Taken from the graph because Stop
-            # fires before the final tool result is always flushed.
-            timestamp_candidates = [
-                int(event.ended_at_ms)
-                for event in graph.events
-                if isinstance(event.ended_at_ms, (int, float))
-                and not isinstance(event.ended_at_ms, bool)
-                and math.isfinite(event.ended_at_ms)
-                and event.ended_at_ms >= 0
-            ]
-            if timestamp_candidates:
-                root_event.ended_at_ms = max(root_event.ended_at_ms or 0, *timestamp_candidates)
+    root_attrs: dict = {"trace.number": trace_count}
+    if prompt_id:
+        root_attrs[PROMPT_ID_ATTR] = prompt_id
+    expansion_type = state.get("pending_expansion_type") or ""
+    command_name = state.get("pending_command_name") or ""
+    command_args = state.get("pending_command_args") or ""
+    command_source = state.get("pending_command_source") or ""
+    if expansion_type:
+        root_attrs["command.expansion_type"] = expansion_type
+    if command_name:
+        root_attrs["command.name"] = command_name
+    if command_args:
+        root_attrs["command.args"] = redact_content(env.log_prompts, command_args)
+    if command_source:
+        root_attrs["command.source"] = command_source
 
-            root_attrs = {"trace.number": trace_count}
-            expansion_type = state.get("pending_expansion_type") or ""
-            command_name = state.get("pending_command_name") or ""
-            command_args = state.get("pending_command_args") or ""
-            command_source = state.get("pending_command_source") or ""
-            if expansion_type:
-                root_attrs["command.expansion_type"] = expansion_type
-            if command_name:
-                root_attrs["command.name"] = command_name
-            if command_args:
-                root_attrs["command.args"] = redact_content(env.log_prompts, command_args)
-            if command_source:
-                root_attrs["command.source"] = command_source
+    if graph is not None and _has_stable_model_ids(graph):
+        buffer = ToolBuffer(state)
+        observations = buffer.all()
+        pending_subagents = _pending_subagents(state)
+        matched_observations = _merge_tool_observations(graph, observations)
+        matched_subagents = _merge_pending_subagents(graph, pending_subagents)
+        graph.validate()
 
-            # Reused verbatim on a retry so a failed export cannot produce a second copy
-            # of the same turn under fresh span IDs.
-            span_id_overrides = {root_event.event_id: trace_span_id}
-            stored_span_ids = state.get("high_fidelity_span_ids") or ""
-            if stored_span_ids:
-                try:
-                    decoded_span_ids = json.loads(stored_span_ids)
-                    if isinstance(decoded_span_ids, dict):
-                        span_id_overrides.update(
-                            {
-                                str(event_id): str(span_id)
-                                for event_id, span_id in decoded_span_ids.items()
-                                if isinstance(event_id, str) and isinstance(span_id, str) and span_id
-                            }
-                        )
-                except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                    log(f"invalid high_fidelity_span_ids state; regenerating span IDs: {exc}")
-            for event in graph.events:
-                span_id_overrides.setdefault(event.event_id, generate_span_id())
-            state.set("high_fidelity_span_ids", json.dumps(span_id_overrides, sort_keys=True))
+        # The turn ends when its last child does. Taken from the graph because Stop
+        # fires before the final tool result is always flushed.
+        timestamp_candidates = [
+            int(event.ended_at_ms)
+            for event in graph.events
+            if isinstance(event.ended_at_ms, (int, float))
+            and not isinstance(event.ended_at_ms, bool)
+            and math.isfinite(event.ended_at_ms)
+            and event.ended_at_ms >= 0
+        ]
+        if timestamp_candidates:
+            root_event.ended_at_ms = max(root_event.ended_at_ms or 0, *timestamp_candidates)
 
-            common_attrs = {"user.id": user_id} if user_id else {}
-            payload = render_event_graph(
-                graph,
-                trace_id=trace_id,
-                service_name=SERVICE_NAME,
-                scope_name=SCOPE_NAME,
-                span_id_overrides=span_id_overrides,
-                extra_attributes={root_event.event_id: root_attrs},
-                common_attributes=common_attrs,
-            )
+        # Reused verbatim on a retry so a failed export cannot produce a second copy
+        # of the same turn under fresh span IDs.
+        span_id_overrides = {root_event.event_id: trace_span_id}
+        stored_span_ids = state.get("high_fidelity_span_ids") or ""
+        if stored_span_ids:
+            try:
+                decoded_span_ids = json.loads(stored_span_ids)
+                if isinstance(decoded_span_ids, dict):
+                    span_id_overrides.update(
+                        {
+                            str(event_id): str(span_id)
+                            for event_id, span_id in decoded_span_ids.items()
+                            if isinstance(event_id, str) and isinstance(span_id, str) and span_id
+                        }
+                    )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                log(f"invalid high_fidelity_span_ids state; regenerating span IDs: {exc}")
+        for event in graph.events:
+            span_id_overrides.setdefault(event.event_id, generate_span_id())
+        state.set("high_fidelity_span_ids", json.dumps(span_id_overrides, sort_keys=True))
 
-            # The ack travels into the detached send rather than the delivery
-            # decision coming back out — the turn stays un-acked, and so retries
-            # on the next Stop, unless the collector actually took it. Safe to
-            # run late: _acknowledge_exported_turn re-checks current_trace_id
-            # under the state lock and bails if a newer turn has started.
-            def _settle() -> None:
-                _acknowledge_exported_turn(state, trace_id, matched_observations, matched_subagents)
-                _periodic_gc(trace_count)
-
-            _send_span_async(payload, on_success=_settle)
-            return
+        common_attrs = {"user.id": user_id} if user_id else {}
+        payload = render_event_graph(
+            graph,
+            trace_id=trace_id,
+            service_name=SERVICE_NAME,
+            scope_name=SCOPE_NAME,
+            span_id_overrides=span_id_overrides,
+            extra_attributes={root_event.event_id: root_attrs},
+            common_attributes=common_attrs,
+        )
+        return _TurnExport(payload, reason, matched_observations, matched_subagents)
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
     # model calls, so the turn stays one flat LLM span.
@@ -1058,31 +1052,19 @@ def _handle_stop(input_json: dict) -> None:
     attrs = {
         "session.id": session_id,
         **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
-        "trace.number": trace_count,
         "openinference.span.kind": "LLM",
         **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
         "input.value": redacted_prompt,
         "output.value": redacted_output,
         "llm.output_messages": json.dumps(output_messages),
+        **root_attrs,
+        **turn_end_attributes(reason),
     }
     if user_id:
         attrs["user.id"] = user_id
 
-    # Attach command metadata from UserPromptExpansion if present
-    expansion_type = state.get("pending_expansion_type") or ""
-    command_name = state.get("pending_command_name") or ""
-    command_args = state.get("pending_command_args") or ""
-    command_source = state.get("pending_command_source") or ""
-    if expansion_type:
-        attrs["command.expansion_type"] = expansion_type
-    if command_name:
-        attrs["command.name"] = command_name
-    if command_args:
-        attrs["command.args"] = redact_content(env.log_prompts, command_args)
-    if command_source:
-        attrs["command.source"] = command_source
-
+    status_code, status_message = turn_status(reason)
     span = build_span(
         f"Turn {trace_count}",
         "LLM",
@@ -1090,31 +1072,105 @@ def _handle_stop(input_json: dict) -> None:
         trace_id,
         "",
         trace_start_time,
+        str(root_event.ended_at_ms or get_timestamp_ms()),
+        attrs,
+        SERVICE_NAME,
+        SCOPE_NAME,
+        status_code=status_code,
+        status_message=status_message,
+    )
+    return _TurnExport(span, reason, [], {})
+
+
+def _emit_abandoned_turn(state) -> None:
+    """Last resort when there is no transcript to replay: the root is a stub, and the
+    only honest status is an error — nothing proves the turn ran or what it did."""
+    trace_id = state.get("current_trace_id")
+    span_id = state.get("current_trace_span_id")
+    if not trace_id or not span_id:
+        return
+    trace_count = state.get("trace_count") or "?"
+    attrs = {
+        "session.id": state.get("session_id"),
+        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
+        "openinference.span.kind": "LLM",
+        "input.value": redact_content(env.log_prompts, state.get("current_trace_prompt") or ""),
+        "output.value": ABANDONED_OUTPUT,
+    }
+    user_id = state.get("user_id") or ""
+    if user_id:
+        attrs["user.id"] = user_id
+    prompt_id = state.get("current_prompt_id") or ""
+    if prompt_id:
+        attrs[PROMPT_ID_ATTR] = prompt_id
+    span = close_turn_span(
+        f"Turn {trace_count}",
+        "LLM",
+        span_id,
+        trace_id,
+        state.get("current_trace_start_time") or str(get_timestamp_ms()),
         str(get_timestamp_ms()),
         attrs,
         SERVICE_NAME,
         SCOPE_NAME,
+        TurnEndReason.ABANDONED,
     )
     _send_span_async(span)
 
-    # Clean up state
-    state.delete("current_trace_id")
-    state.delete("current_trace_span_id")
-    state.delete("current_trace_start_time")
-    state.delete("current_trace_prompt")
-    state.delete("trace_start_line")
-    state.delete("pending_expansion_type")
-    state.delete("pending_command_name")
-    state.delete("pending_command_args")
-    state.delete("pending_command_source")
 
-    # Periodic GC
-    try:
-        tc = int(trace_count or "0")
-    except (ValueError, TypeError):
-        tc = 0
-    if tc % 5 == 0:
-        gc_stale_state_files()
+def _close_live_turn(state, input_json: dict, reason: TurnEndReason) -> None:
+    """Close the turn still open in state because its own end-of-turn hook never fired."""
+    trace_id = state.get("current_trace_id")
+    if not trace_id:
+        return
+    trace_count = state.get("trace_count") or "?"
+
+    # The root is already on the wire (or refused). Re-sending it under the same ids
+    # would put a second, contradictory row on the turn, so the only safe move is to
+    # clear it. Losing a turn the collector refused beats corrupting one it accepted.
+    if state.get("export_attempted_trace_id") == trace_id:
+        _acknowledge_exported_turn(state, trace_id, [], {})
+        log(f"Turn {trace_count} was already exported; cleared without re-emitting")
+        return
+
+    export = _export_turn(state, input_json, reason)
+    if export is None:
+        _emit_abandoned_turn(state)
+        _acknowledge_exported_turn(state, trace_id, [], {})
+        log(f"Closed Turn {trace_count} without a transcript ({TurnEndReason.ABANDONED.value})")
+        return
+
+    _send_span_async(export.payload)
+    _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents)
+    log(f"Closed Turn {trace_count} ({export.reason.value})")
+
+
+def _handle_stop(input_json: dict) -> None:
+    """Handle Stop: export the completed turn and clean up trace state."""
+    state = resolve_session(input_json)
+    session_id = state.get("session_id")
+    trace_id = state.get("current_trace_id")
+    if session_id is None or trace_id is None:
+        return
+    trace_count = state.get("trace_count") or "0"
+
+    export = _export_turn(state, input_json, TurnEndReason.COMPLETED)
+    if export is None:
+        _emit_abandoned_turn(state)
+        _acknowledge_exported_turn(state, trace_id, [], {})
+        _periodic_gc(trace_count)
+        return
+
+    # The ack travels into the detached send rather than the delivery decision
+    # coming back out, so the hook exits without waiting for the POST. Safe to run
+    # late: _acknowledge_exported_turn re-checks current_trace_id under the state
+    # lock and bails if a newer turn has started.
+    def _settle() -> None:
+        _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents)
+        _periodic_gc(trace_count)
+
+    state.set("export_attempted_trace_id", trace_id)
+    _send_span_async(export.payload, on_success=_settle)
 
 
 def _handle_subagent_start(input_json: dict) -> None:
@@ -1258,9 +1314,13 @@ def _handle_stop_failure(input_json: dict) -> None:
         "llm.output_messages": json.dumps(output_messages),
         "error.type": error_type,
         "error.message": error_details,
+        **turn_end_attributes(TurnEndReason.FAILED),
     }
     if user_id:
         attrs["user.id"] = user_id
+    prompt_id = state.get("current_prompt_id") or ""
+    if prompt_id:
+        attrs[PROMPT_ID_ATTR] = prompt_id
 
     span = build_span(
         f"Turn {trace_count} (failed)",
@@ -1277,16 +1337,7 @@ def _handle_stop_failure(input_json: dict) -> None:
         status_message=error_type or "turn_failure",
     )
     _send_span_async(span)
-
-    state.delete("current_trace_id")
-    state.delete("current_trace_span_id")
-    state.delete("current_trace_start_time")
-    state.delete("current_trace_prompt")
-    state.delete("trace_start_line")
-    state.delete("pending_expansion_type")
-    state.delete("pending_command_name")
-    state.delete("pending_command_args")
-    state.delete("pending_command_source")
+    _acknowledge_exported_turn(state, trace_id, [], {})
 
 
 def _handle_notification(input_json: dict) -> None:
@@ -1419,6 +1470,10 @@ def _handle_session_end(input_json: dict) -> None:
     session_id = state.get("session_id")
     if session_id is None:
         return
+
+    # A turn still open here was cut off by the session ending, not by a failure.
+    if state.get("current_trace_id"):
+        _close_live_turn(state, input_json, TurnEndReason.INTERRUPTED)
 
     trace_count = state.get("trace_count") or "0"
     tool_count = state.get("tool_count") or "0"

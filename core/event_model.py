@@ -22,6 +22,16 @@ class EventStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class TurnEndReason(str, Enum):
+    """Why a turn stopped. Only ``FAILED`` and ``ABANDONED`` are errors."""
+
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    CONTINUED = "continued"
+    ABANDONED = "abandoned"
+    FAILED = "failed"
+
+
 @dataclass
 class Usage:
     """Model token usage using cache-neutral totals by default.
@@ -107,6 +117,10 @@ class BaseEvent:
 @dataclass
 class TurnEvent(BaseEvent):
     """A user-visible coding-agent turn."""
+
+    end_reason: Optional[TurnEndReason] = None
+    # Prompts the harness absorbed into this turn after it started; ``input`` is the first.
+    additional_prompts: List[str] = field(default_factory=list)
 
     event_type: ClassVar[str] = "turn"
 
@@ -320,6 +334,7 @@ __all__ = [
     "GraphDiagnostic",
     "ModelCallEvent",
     "ToolEvent",
+    "TurnEndReason",
     "TurnEvent",
     "Usage",
 ]

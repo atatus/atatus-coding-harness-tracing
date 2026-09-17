@@ -9,6 +9,7 @@ from typing import Any
 
 from core.common import build_multi_span, build_span, env, generate_span_id, redact_content
 from core.event_model import AgentEvent, BaseEvent, EventGraph, EventStatus, ModelCallEvent, ToolEvent, TurnEvent
+from core.turn_lifecycle import TURN_PROMPT_COUNT_ATTR, turn_end_attributes
 
 
 def render_event_graph(
@@ -93,8 +94,12 @@ def _span_fields(event: BaseEvent, model_call_number: int) -> tuple[str, str, di
 
     if isinstance(event, TurnEvent):
         attrs["openinference.span.kind"] = "CHAIN"
-        _put_content(attrs, "input.value", event.input, env.log_prompts)
+        _put_content(attrs, "input.value", _turn_input(event), env.log_prompts)
         _put_content(attrs, "output.value", event.output, env.log_prompts)
+        if event.additional_prompts:
+            attrs[TURN_PROMPT_COUNT_ATTR] = str(1 + len(event.additional_prompts))
+        if event.end_reason is not None:
+            attrs.update(turn_end_attributes(event.end_reason))
         return f"Turn {event.turn_id}", "CHAIN", attrs
 
     if isinstance(event, AgentEvent):
@@ -186,6 +191,14 @@ def _put_tool_details(attrs: dict[str, Any], event: ToolEvent) -> None:
     for key, value in details.items():
         if value is not None:
             attrs[key] = redact_content(env.log_tool_details, _content_string(value))
+
+
+def _turn_input(event: TurnEvent) -> Any:
+    if not event.additional_prompts:
+        return event.input
+    parts = [_content_string(event.input)] if event.input is not None else []
+    parts.extend(event.additional_prompts)
+    return "\n\n".join(part for part in parts if part)
 
 
 def _put_content(attrs: dict[str, Any], key: str, value: Any, allowed: bool) -> None:

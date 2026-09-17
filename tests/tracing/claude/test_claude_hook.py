@@ -296,22 +296,56 @@ class TestUserPromptSubmit:
             _handle_user_prompt_submit({"prompt": "test"})
         assert state.get("trace_start_line") == "0"
 
-    def test_failsafe_closes_orphan(self, mock_resolve, state, captured_spans):
-        """If current_trace_id already in state, sends fail-safe LLM span."""
+    def test_live_turn_without_transcript_is_closed_as_abandoned(self, mock_resolve, state, captured_spans):
+        """No transcript to replay: the stub root is the only honest record, and it is an error."""
         state.set("current_trace_id", "old-trace-id-00000000000000000000")
         state.set("current_trace_span_id", "old-span-1234567")
         state.set("current_trace_start_time", "999000")
         state.set("current_trace_prompt", "old prompt")
         with mock.patch("tracing.claude_code.hooks.handlers.ensure_session_initialized"):
             _handle_user_prompt_submit({"prompt": "new prompt"})
-        # Should have sent a fail-safe span
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        attrs = {a["key"]: a["value"] for a in span["attributes"]}
-        assert attrs["openinference.span.kind"]["stringValue"] == "LLM"
-        assert "fail-safe" in attrs["output.value"]["stringValue"]
-        # New trace should be set up
+        attrs = {a["key"]: a["value"]["stringValue"] for a in span["attributes"]}
+        assert attrs["openinference.span.kind"] == "LLM"
+        assert attrs["turn.end_reason"] == "abandoned"
+        assert attrs["turn.incomplete"] == "true"
+        assert span["status"]["code"] == 2
         assert state.get("current_trace_id") != "old-trace-id-00000000000000000000"
+
+    def test_same_prompt_id_keeps_the_live_turn_open(self, mock_resolve, state, captured_spans):
+        """The harness re-submitting the prompt it is already running is not a new turn."""
+        with mock.patch("tracing.claude_code.hooks.handlers.ensure_session_initialized"):
+            _handle_user_prompt_submit({"prompt": "first", "prompt_id": "p-1"})
+            trace_id = state.get("current_trace_id")
+            _handle_user_prompt_submit({"prompt": "first again", "prompt_id": "p-1"})
+        assert captured_spans == []
+        assert state.get("current_trace_id") == trace_id
+        assert state.get("trace_count") == "1"
+        assert state.get("current_trace_prompt") == "first"
+
+    def test_new_prompt_id_closes_the_live_turn(self, mock_resolve, state, captured_spans):
+        with mock.patch("tracing.claude_code.hooks.handlers.ensure_session_initialized"):
+            _handle_user_prompt_submit({"prompt": "first", "prompt_id": "p-1"})
+            first_trace = state.get("current_trace_id")
+            _handle_user_prompt_submit({"prompt": "second", "prompt_id": "p-2"})
+        assert len(captured_spans) == 1
+        assert state.get("current_trace_id") != first_trace
+        assert state.get("current_prompt_id") == "p-2"
+        assert state.get("trace_count") == "2"
+
+    def test_already_exported_turn_is_cleared_without_a_second_root(self, mock_resolve, state, captured_spans):
+        """A root already on the wire must never be re-sent under the same ids."""
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        state.set("current_trace_start_time", "999000")
+        state.set("current_trace_prompt", "old prompt")
+        state.set("export_attempted_trace_id", "a" * 32)
+        with mock.patch("tracing.claude_code.hooks.handlers.ensure_session_initialized"):
+            _handle_user_prompt_submit({"prompt": "new prompt"})
+        assert captured_spans == []
+        assert state.get("export_attempted_trace_id") is None
+        assert state.get("current_trace_id") != "a" * 32
 
 
 # ---------------------------------------------------------------------------
