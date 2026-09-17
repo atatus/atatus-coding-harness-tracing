@@ -31,6 +31,8 @@ def render_event_graph(
     span_id_overrides: Mapping[str, str] | None = None,
     extra_attributes: Mapping[str, Mapping[str, Any]] | None = None,
     common_attributes: Mapping[str, Any] | None = None,
+    root_parent_span_id: str = "",
+    skip_root: bool = False,
 ) -> dict:
     """Render every event in graph order under one trace.
 
@@ -38,6 +40,10 @@ def render_event_graph(
     reference a parent that appears later in a tolerant/partially ordered graph.
     Missing parents fail soft and become root spans; graph diagnostics retain the
     reason for callers that need to report schema drift.
+
+    ``root_parent_span_id`` parents every otherwise-parentless span to a span that
+    already exists in the trace. ``skip_root`` renders only the descendants of the
+    first event, for a continuation whose root span was sent by an earlier hook.
     """
 
     overrides = span_id_overrides or {}
@@ -69,11 +75,17 @@ def render_event_graph(
             model_call_number += 1
         elif isinstance(event, PromptEvent):
             prompt_number += 1
+        if skip_root and index == 0:
+            continue
         name, kind, attrs = _span_fields(event, model_call_number, prompt_number)
         for key, value in common.items():
             attrs.setdefault(key, value)
         attrs.update(extras.get(event.event_id, {}))
         parent_span_id = first_span_by_event_id.get(safe_parent_ids[index] or "", "")
+        if skip_root and parent_span_id == event_span_ids[0]:
+            parent_span_id = root_parent_span_id
+        elif not parent_span_id:
+            parent_span_id = root_parent_span_id
         start_ms = _safe_timestamp(event.started_at_ms, graph_start)
         end_ms = _safe_timestamp(event.ended_at_ms, start_ms or graph_end)
         if end_ms < start_ms:

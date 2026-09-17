@@ -7,6 +7,7 @@ entry point registered in pyproject.toml [project.scripts].
 import json
 import math
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -419,11 +420,29 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
         # first chance to close it - with what it actually did, not a stub.
         _close_live_turn(state, input_json, TurnEndReason.CONTINUED)
 
+    # A background agent finishing is delivered as a prompt the harness runs as its own
+    # turn. It is not a user turn: the work it triggers belongs to the trace that launched
+    # the agent, under the agent's span, so no new trace is minted for it.
+    continuation = _background_agent_for_notification(state, input_json)
+    if continuation is not None and input_json.get("source", "system") != "user":
+        agent_id, descriptor = continuation
+        parent_span_id = descriptor.get("subagent_span_id") or descriptor.get("tool_span_id")
+        state.set("current_trace_id", str(descriptor["trace_id"]))
+        state.set("current_trace_span_id", str(parent_span_id))
+        state.set("current_trace_start_time", str(get_timestamp_ms()))
+        state.set("current_trace_prompt", "")
+        state.set("current_prompt_id", prompt_id) if prompt_id else state.delete("current_prompt_id")
+        state.set("continuation_agent_id", agent_id)
+        _record_trace_start_line(state, input_json)
+        log(f"Task notification for {agent_id}; continuing trace {descriptor['trace_id']}")
+        return
+
     # Set up new trace
     state.increment("trace_count")
     state.set("current_trace_id", generate_trace_id())
     state.set("current_trace_span_id", generate_span_id())
     state.set("current_trace_start_time", str(get_timestamp_ms()))
+    state.delete("continuation_agent_id")
     if prompt_id:
         state.set("current_prompt_id", prompt_id)
     else:
@@ -433,7 +452,10 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     # toggle is read once-per-emit instead of being baked into the state file.
     state.set("current_trace_prompt", prompt)
 
-    # Track transcript position
+    _record_trace_start_line(state, input_json)
+
+
+def _record_trace_start_line(state, input_json: dict) -> None:
     transcript = input_json.get("transcript_path", "")
     if transcript and Path(transcript).is_file():
         with open(transcript, encoding="utf-8") as f:
@@ -884,6 +906,7 @@ def _acknowledge_exported_turn(
                 "current_trace_start_time",
                 "current_trace_prompt",
                 "current_prompt_id",
+                "continuation_agent_id",
                 "export_attempted_trace_id",
                 "trace_start_line",
                 "pending_expansion_type",
@@ -898,6 +921,82 @@ def _acknowledge_exported_turn(
     except Exception as exc:
         error(f"Failed to acknowledge exported turn: {exc}")
         return False
+
+
+BACKGROUND_AGENTS_KEY = "background_agents"
+_NOTIFICATION_TOOL_USE = re.compile(r"<tool-use-id>\s*([A-Za-z0-9_]+)\s*</tool-use-id>")
+
+
+def _background_agents(state) -> dict[str, dict]:
+    return _decode_pending_subagents(state.get(BACKGROUND_AGENTS_KEY) or "")
+
+
+def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str, str]) -> None:
+    """Remember every Agent tool the turn launched in the background, keyed by agent id
+    and by tool_use_id, so a SubagentStop or a task notification that lands after this
+    turn has closed can still find its way back into this trace."""
+    launched: dict[str, dict] = {}
+    for event in graph.events:
+        if not isinstance(event, ToolEvent) or not isinstance(event.output, dict):
+            continue
+        result = event.output.get("toolUseResult")
+        if not isinstance(result, dict) or result.get("status") != "async_launched":
+            continue
+        agent_id = result.get("agentId")
+        tool_span_id = span_ids.get(event.event_id)
+        if not isinstance(agent_id, str) or not agent_id or not tool_span_id:
+            continue
+        launched[agent_id] = {
+            "trace_id": trace_id,
+            "tool_span_id": tool_span_id,
+            "tool_use_id": event.tool_call_id or "",
+            "agent_type": (event.input or {}).get("subagent_type") if isinstance(event.input, dict) else None,
+            "prompt": (event.input or {}).get("prompt") if isinstance(event.input, dict) else None,
+            "turn_id": event.turn_id,
+            "launched_at_ms": event.ended_at_ms or event.started_at_ms,
+        }
+    if not launched or state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            current.update(launched)
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to register background agents: {exc}")
+
+
+def _update_background_agent(state, agent_id: str, **fields) -> None:
+    if state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            if agent_id not in current:
+                return
+            current[agent_id].update(fields)
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to update background agent {agent_id}: {exc}")
+
+
+def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, dict] | None":
+    """Resolve a task-notification prompt to the background agent it reports on."""
+    prompt = input_json.get("prompt") or ""
+    if not isinstance(prompt, str):
+        return None
+    match = _NOTIFICATION_TOOL_USE.search(prompt)
+    if match is None:
+        return None
+    tool_use_id = match.group(1)
+    for agent_id, descriptor in _background_agents(state).items():
+        if descriptor.get("tool_use_id") == tool_use_id:
+            return agent_id, descriptor
+    return None
 
 
 def _periodic_gc(trace_count: str) -> None:
@@ -1032,6 +1131,9 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         state.set("high_fidelity_span_ids", json.dumps(span_id_overrides, sort_keys=True))
 
         common_attrs = {"user.id": user_id} if user_id else {}
+        # A task-notification continuation has no root of its own: its spans go straight
+        # under the subagent (or Agent tool) span already sent in the originating trace.
+        continuation = bool(state.get("continuation_agent_id"))
         payload = render_event_graph(
             graph,
             trace_id=trace_id,
@@ -1040,8 +1142,15 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             span_id_overrides=span_id_overrides,
             extra_attributes={root_event.event_id: root_attrs},
             common_attributes=common_attrs,
+            root_parent_span_id=trace_span_id if continuation else "",
+            skip_root=continuation,
         )
+        _register_background_agents(state, graph, trace_id, span_id_overrides)
         return _TurnExport(payload, reason, matched_observations, matched_subagents)
+
+    if state.get("continuation_agent_id"):
+        # No model calls to attach and no root to send; the notification itself is not a turn.
+        return _TurnExport({}, reason, [], {})
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
     # model calls, so the turn stays one flat LLM span.
@@ -1140,7 +1249,8 @@ def _close_live_turn(state, input_json: dict, reason: TurnEndReason) -> None:
         log(f"Closed Turn {trace_count} without a transcript ({TurnEndReason.ABANDONED.value})")
         return
 
-    _send_span_async(export.payload)
+    if export.payload:
+        _send_span_async(export.payload)
     _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents)
     log(f"Closed Turn {trace_count} ({export.reason.value})")
 
@@ -1169,6 +1279,9 @@ def _handle_stop(input_json: dict) -> None:
         _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents)
         _periodic_gc(trace_count)
 
+    if not export.payload:
+        _settle()
+        return
     state.set("export_attempted_trace_id", trace_id)
     _send_span_async(export.payload, on_success=_settle)
 
@@ -1185,9 +1298,65 @@ def _handle_subagent_start(input_json: dict) -> None:
         state.set(f"subagent_{agent_id}_prompt", prompt)
 
 
+def _export_background_subagent(state, input_json: dict, agent_id: str, descriptor: dict) -> bool:
+    """A background agent finished after the turn that launched it was exported. Render
+    its transcript into that trace, under the Agent tool that spawned it."""
+    transcript_path = input_json.get("agent_transcript_path") or ""
+    if not isinstance(transcript_path, str) or not transcript_path or not Path(transcript_path).is_file():
+        return False
+    trace_id = str(descriptor.get("trace_id") or "")
+    tool_span_id = str(descriptor.get("tool_span_id") or "")
+    if not trace_id or not tool_span_id:
+        return False
+
+    ended_at_ms = get_timestamp_ms()
+    stored_start = state.get(f"subagent_{agent_id}_start_time") or ""
+    started_at_ms = int(stored_start) if stored_start.isdigit() else descriptor.get("launched_at_ms")
+    agent_type = str(input_json.get("agent_type") or descriptor.get("agent_type") or "unknown")
+    agent_event = AgentEvent(
+        event_id=f"agent:{agent_id}",
+        session_id=state.get("session_id") or "",
+        turn_id=str(descriptor.get("turn_id") or state.get("trace_count") or ""),
+        sequence=0,
+        started_at_ms=started_at_ms if isinstance(started_at_ms, int) else None,
+        ended_at_ms=ended_at_ms,
+        status=EventStatus.COMPLETED,
+        input=descriptor.get("prompt") or state.get(f"subagent_{agent_id}_prompt"),
+        output=input_json.get("last_assistant_message") or "",
+        agent_id=agent_id,
+        source_id=agent_type,
+    )
+    graph = parse_claude_transcript(Path(transcript_path), agent_event)
+    if graph.events and graph.events[-1].ended_at_ms:
+        agent_event.ended_at_ms = max(int(e.ended_at_ms) for e in graph.events if isinstance(e.ended_at_ms, int))
+    subagent_span_id = generate_span_id()
+    user_id = state.get("user_id") or ""
+    payload = render_event_graph(
+        graph,
+        trace_id=trace_id,
+        service_name=SERVICE_NAME,
+        scope_name=SCOPE_NAME,
+        span_id_overrides={agent_event.event_id: subagent_span_id},
+        extra_attributes={agent_event.event_id: {"subagent.background": "true"}},
+        common_attributes={"user.id": user_id} if user_id else {},
+        root_parent_span_id=tool_span_id,
+    )
+    _send_span_async(payload)
+    _update_background_agent(state, agent_id, subagent_span_id=subagent_span_id, ended_at_ms=agent_event.ended_at_ms)
+    state.delete(f"subagent_{agent_id}_start_time")
+    state.delete(f"subagent_{agent_id}_prompt")
+    log(f"Background subagent {agent_id} attached to trace {trace_id}")
+    return True
+
+
 def _handle_subagent_stop(input_json: dict) -> None:
     """Handle subagent_stop: parse subagent transcript and send CHAIN span."""
     state = resolve_session(input_json)
+    agent_id = input_json.get("agent_id", "")
+    background = _background_agents(state).get(agent_id) if isinstance(agent_id, str) and agent_id else None
+    if background is not None and _export_background_subagent(state, input_json, agent_id, background):
+        return
+
     trace_id = state.get("current_trace_id")
     if trace_id is None:
         return
