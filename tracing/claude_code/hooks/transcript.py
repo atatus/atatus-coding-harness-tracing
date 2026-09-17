@@ -15,6 +15,7 @@ from core.event_model import (
     EventStatus,
     GraphDiagnostic,
     ModelCallEvent,
+    PromptEvent,
     ToolEvent,
     TurnEndReason,
     TurnEvent,
@@ -74,8 +75,24 @@ def parse_claude_transcript(
 
         message = entry.get("message")
         if not isinstance(message, dict):
-            if isinstance(root_event, TurnEvent):
-                _collect_absorbed_prompt(entry, root_event)
+            prompt = _absorbed_prompt(entry)
+            if prompt and isinstance(root_event, TurnEvent):
+                root_event.additional_prompts.append(prompt)
+                timestamp_ms = _timestamp_ms(entry.get("timestamp"))
+                graph.events.append(
+                    PromptEvent(
+                        event_id=f"prompt:{_string(entry.get('uuid')) or line_index + 1}",
+                        parent_event_id=root_event.event_id,
+                        session_id=_string(entry.get("sessionId")) or root_event.session_id,
+                        turn_id=root_event.turn_id,
+                        sequence=sequence,
+                        started_at_ms=timestamp_ms,
+                        ended_at_ms=timestamp_ms,
+                        status=EventStatus.COMPLETED,
+                        input=prompt,
+                    )
+                )
+                sequence += 1
             continue
         role = message.get("role")
 
@@ -267,18 +284,16 @@ def _is_interrupt_marker(entry: dict[str, Any], message: dict[str, Any]) -> bool
     )
 
 
-def _collect_absorbed_prompt(entry: dict[str, Any], root_event: TurnEvent) -> None:
+def _absorbed_prompt(entry: dict[str, Any]) -> str:
     if entry.get("type") != "attachment":
-        return
+        return ""
     attachment = entry.get("attachment")
     if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-        return
+        return ""
     origin = attachment.get("origin")
     if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
-        return
-    prompt = _string(attachment.get("prompt"))
-    if prompt:
-        root_event.additional_prompts.append(prompt)
+        return ""
+    return _string(attachment.get("prompt"))
 
 
 def _content_blocks(content: Any) -> list[dict[str, Any]]:

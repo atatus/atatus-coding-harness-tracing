@@ -126,6 +126,13 @@ class TurnEvent(BaseEvent):
 
 
 @dataclass
+class PromptEvent(BaseEvent):
+    """A user prompt the harness absorbed into a turn that was already running."""
+
+    event_type: ClassVar[str] = "prompt"
+
+
+@dataclass
 class AgentEvent(BaseEvent):
     """An agent or subagent invocation within a turn."""
 
@@ -333,6 +340,7 @@ __all__ = [
     "EventStatus",
     "GraphDiagnostic",
     "ModelCallEvent",
+    "PromptEvent",
     "ToolEvent",
     "TurnEndReason",
     "TurnEvent",

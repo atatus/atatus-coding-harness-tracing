@@ -8,7 +8,16 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from core.common import build_multi_span, build_span, env, generate_span_id, redact_content
-from core.event_model import AgentEvent, BaseEvent, EventGraph, EventStatus, ModelCallEvent, ToolEvent, TurnEvent
+from core.event_model import (
+    AgentEvent,
+    BaseEvent,
+    EventGraph,
+    EventStatus,
+    ModelCallEvent,
+    PromptEvent,
+    ToolEvent,
+    TurnEvent,
+)
 from core.turn_lifecycle import TURN_PROMPT_COUNT_ATTR, turn_end_attributes
 
 
@@ -49,6 +58,8 @@ def render_event_graph(
         first_span_by_event_id.setdefault(event.event_id, span_id)
     safe_parent_ids = _safe_parent_event_ids(graph.events)
     model_call_number = 0
+    # The turn's own prompt is number one; absorbed prompts count on from there.
+    prompt_number = 1
     payloads: list[dict] = []
     graph_start = _first_timestamp(graph.events, "started_at_ms")
     graph_end = _last_timestamp(graph.events, "ended_at_ms") or graph_start
@@ -56,7 +67,9 @@ def render_event_graph(
     for index, event in enumerate(graph.events):
         if isinstance(event, ModelCallEvent):
             model_call_number += 1
-        name, kind, attrs = _span_fields(event, model_call_number)
+        elif isinstance(event, PromptEvent):
+            prompt_number += 1
+        name, kind, attrs = _span_fields(event, model_call_number, prompt_number)
         for key, value in common.items():
             attrs.setdefault(key, value)
         attrs.update(extras.get(event.event_id, {}))
@@ -86,7 +99,7 @@ def render_event_graph(
     return build_multi_span(payloads, service_name, scope_name)
 
 
-def _span_fields(event: BaseEvent, model_call_number: int) -> tuple[str, str, dict[str, Any]]:
+def _span_fields(event: BaseEvent, model_call_number: int, prompt_number: int) -> tuple[str, str, dict[str, Any]]:
     attrs: dict[str, Any] = {
         "session.id": event.session_id,
         "turn.id": event.turn_id,
@@ -101,6 +114,11 @@ def _span_fields(event: BaseEvent, model_call_number: int) -> tuple[str, str, di
         if event.end_reason is not None:
             attrs.update(turn_end_attributes(event.end_reason))
         return f"Turn {event.turn_id}", "CHAIN", attrs
+
+    if isinstance(event, PromptEvent):
+        attrs["openinference.span.kind"] = "CHAIN"
+        _put_content(attrs, "input.value", event.input, env.log_prompts)
+        return f"User prompt {prompt_number}", "CHAIN", attrs
 
     if isinstance(event, AgentEvent):
         attrs.update(

@@ -579,6 +579,16 @@ class TestAbsorbedPromptBelongsToTheTurn:
         assert "turn.incomplete" not in attrs
         assert root["status"]["code"] == 1
 
+    def test_absorbed_prompt_is_its_own_span_under_the_turn(self, stopped):
+        _, spans = stopped
+        root = _root_span(spans)
+        prompts = [s for s in spans if s["name"].startswith("User prompt")]
+        assert [s["name"] for s in prompts] == ["User prompt 2"]
+        assert prompts[0]["parentSpanId"] == root["spanId"]
+        assert _attrs(prompts[0])["input.value"] == "also do Y"
+        assert _attrs(prompts[0])["openinference.span.kind"] == "CHAIN"
+        assert prompts[0]["startTimeUnixNano"] == prompts[0]["endTimeUnixNano"] != "0000000"
+
     def test_state_is_acknowledged(self, stopped):
         state, _ = stopped
         assert state.get("current_trace_id") is None
@@ -589,9 +599,11 @@ class TestAbsorbedPromptBelongsToTheTurn:
         state = _live_turn_state(tmp_path)
         captured = []
         _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
-        attrs = _attrs(_root_span(_spans(captured[0])))
+        spans = _spans(captured[0])
+        attrs = _attrs(_root_span(spans))
         assert attrs["input.value"] == "go"
         assert "turn.prompt_count" not in attrs
+        assert not [s for s in spans if s["name"].startswith("User prompt")]
 
 
 class TestSessionEndClosesTheLiveTurn:
