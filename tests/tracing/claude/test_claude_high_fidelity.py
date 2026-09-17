@@ -603,6 +603,27 @@ class TestAbsorbedPromptBelongsToTheTurn:
         absorbed_ms = int(datetime.fromisoformat(absorbed_at.replace("Z", "+00:00")).timestamp() * 1000)
         assert prompt["startTimeUnixNano"] == f"{absorbed_ms}000000"
 
+    def test_a_skipped_notification_does_not_lend_its_absorb_time_to_the_next_prompt(self, tmp_path):
+        notification_absorbed = "2026-08-22T16:16:43.100Z"
+        prompt_absorbed = "2026-08-22T16:16:43.900Z"
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            _WORK
+            + [
+                _absorb_marker(notification_absorbed),
+                _queued_command("<task-notification/>", origin=None, mode="task-notification"),
+                _absorb_marker(prompt_absorbed),
+                _queued_command("stop", ts="2026-08-22T16:16:43.000Z"),
+            ],
+        )
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        prompts = [s for s in _spans(captured[0]) if s["name"].startswith("User prompt")]
+        assert [_attrs(s)["input.value"] for s in prompts] == ["stop"]
+        absorbed_ms = int(datetime.fromisoformat(prompt_absorbed.replace("Z", "+00:00")).timestamp() * 1000)
+        assert prompts[0]["startTimeUnixNano"] == f"{absorbed_ms}000000"
+
     def test_state_is_acknowledged(self, stopped):
         state, _ = stopped
         assert state.get("current_trace_id") is None

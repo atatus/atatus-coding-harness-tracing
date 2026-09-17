@@ -83,14 +83,18 @@ def parse_claude_transcript(
 
         message = entry.get("message")
         if not isinstance(message, dict):
-            prompt = _absorbed_prompt(entry)
+            queued = _queued_command(entry)
+            if queued is None:
+                continue
+            # Every queued command consumes its absorb marker, prompt or not - a notification
+            # left in the queue would hand its timestamp to the next typed prompt.
+            absorbed_ms = absorbed_at_ms.pop(0) if absorbed_at_ms else None
+            prompt = _typed_prompt(queued)
             if prompt and isinstance(root_event, TurnEvent):
                 root_event.additional_prompts.append(prompt)
                 # The attachment carries the time the user typed it; the turn only saw it
                 # when the harness absorbed it, which is where it belongs in the trace.
-                timestamp_ms = (
-                    (absorbed_at_ms.pop(0) if absorbed_at_ms else None) or last_timestamp_ms or record_timestamp_ms
-                )
+                timestamp_ms = absorbed_ms or last_timestamp_ms or record_timestamp_ms
                 graph.events.append(
                     PromptEvent(
                         event_id=f"prompt:{_string(entry.get('uuid')) or line_index + 1}",
@@ -305,12 +309,16 @@ def _is_absorb_marker(entry: dict[str, Any]) -> bool:
     )
 
 
-def _absorbed_prompt(entry: dict[str, Any]) -> str:
+def _queued_command(entry: dict[str, Any]) -> dict[str, Any] | None:
     if entry.get("type") != "attachment":
-        return ""
+        return None
     attachment = entry.get("attachment")
     if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
-        return ""
+        return None
+    return attachment
+
+
+def _typed_prompt(attachment: dict[str, Any]) -> str:
     # A subagent notification is also queued and absorbed, with commandMode
     # "task-notification" and no origin. Only a typed prompt is a prompt.
     if attachment.get("commandMode") != "prompt":
