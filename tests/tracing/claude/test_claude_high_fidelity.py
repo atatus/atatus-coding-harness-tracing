@@ -731,11 +731,13 @@ class TestBackgroundSubagentsStayInTheirTrace:
     """A turn launches agents in the background and ends. Each agent's completion then
     arrives as a task-notification prompt with a fresh prompt id, and its SubagentStop
     fires with no turn open. Both must land in the trace that launched the agent, not
-    open a new one."""
+    open a new one - and the spans that enclose the launch (root, model call, Agent tool)
+    must not be sent until the agent's real lifetime is known, or the chart cannot nest it."""
 
     @pytest.fixture
     def launched(self, tmp_path):
-        transcript = _write(tmp_path / "t.jsonl", _agent_launch("toolu_A", "agent-A"))
+        # A Bash before the launch: it does not enclose the agent, so it ships at Stop.
+        transcript = _write(tmp_path / "t.jsonl", _WORK + _agent_launch("toolu_A", "agent-A"))
         state = _live_turn_state(tmp_path)
         captured = []
         _run_hook(
@@ -744,20 +746,30 @@ class TestBackgroundSubagentsStayInTheirTrace:
             {"session_id": "s1", "transcript_path": str(transcript), "last_assistant_message": "launched"},
             captured,
         )
-        spans = _spans(captured[0])
-        tool = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "TOOL")
-        return state, transcript, captured, tool
+        return state, transcript, captured
+
+    @staticmethod
+    def _all_spans(captured):
+        return [s for p in captured if p for s in _spans(p)]
+
+    def test_enclosing_spans_are_held_and_the_rest_ship_at_stop(self, launched):
+        state, _, captured = launched
+        sent = self._all_spans(captured)
+        assert sorted(s["name"] for s in sent) == ["Bash", "LLM call 1: claude-haiku-4-5-20251001"]
+        held = json.loads(state.get("held_spans"))["a" * 32]
+        assert sorted(s["name"] for s in held["spans"]) == ["Agent", "LLM call 2: claude-haiku-4-5-20251001", "Turn 1"]
+        assert held["pending"] == ["agent-A"]
+        assert state.get("current_trace_id") is None, "the turn is still acked"
 
     def test_launch_is_remembered_after_the_turn_is_acked(self, launched):
-        state, _, _, tool = launched
-        assert state.get("current_trace_id") is None
+        state, _, _ = launched
         registry = json.loads(state.get("background_agents"))
+        held_tool = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
         assert registry["agent-A"]["trace_id"] == "a" * 32
-        assert registry["agent-A"]["tool_span_id"] == tool["spanId"]
+        assert registry["agent-A"]["tool_span_id"] == held_tool["spanId"]
         assert registry["agent-A"]["tool_use_id"] == "toolu_A"
 
-    def test_subagent_stop_after_the_turn_closed_attaches_under_the_agent_tool(self, launched, tmp_path):
-        state, _, captured, tool = launched
+    def _finish_agent(self, state, tmp_path, captured, output="fetched", ts="2026-08-22T16:17:10.000Z"):
         agent_transcript = _write(
             tmp_path / "agent.jsonl",
             [
@@ -766,8 +778,9 @@ class TestBackgroundSubagentsStayInTheirTrace:
                     "amsg_1",
                     [{"type": "tool_use", "id": "tu-a1", "name": "Bash", "input": {"command": "curl"}}],
                     usage={"input_tokens": 7, "output_tokens": 3},
+                    ts=ts,
                 ),
-                _tool_result("tu-a1"),
+                _tool_result("tu-a1", ts=ts),
             ],
         )
         payload = {
@@ -776,23 +789,47 @@ class TestBackgroundSubagentsStayInTheirTrace:
             "agent_type": "general-purpose",
             "agent_transcript_path": str(agent_transcript),
             "transcript_path": str(tmp_path / "t.jsonl"),
-            "last_assistant_message": "fetched",
+            "last_assistant_message": output,
         }
         _run_hook(handlers.subagent_stop, state, payload, captured)
-        assert len(captured) == 2, "the subagent was dropped instead of attached"
-        spans = _spans(captured[1])
-        assert {s["traceId"] for s in spans} == {"a" * 32}
-        agent = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "AGENT")
+
+    def test_last_subagent_stop_attaches_under_the_agent_tool_and_releases_the_ancestors(self, launched, tmp_path):
+        state, _, captured = launched
+        before = len(self._all_spans(captured))
+        self._finish_agent(state, tmp_path, captured)
+        sent = self._all_spans(captured)[before:]
+        assert {s["traceId"] for s in sent} == {"a" * 32}
+        by_name = {s["name"]: s for s in sent}
+        agent = by_name["Subagent: general-purpose"]
+        tool = by_name["Agent"]
+        root = by_name["Turn 1"]
         assert agent["parentSpanId"] == tool["spanId"]
         assert _attrs(agent)["subagent.background"] == "true"
         assert _attrs(agent)["output.value"] == "fetched"
-        kinds = sorted(_attrs(s)["openinference.span.kind"] for s in spans)
-        assert kinds == ["AGENT", "LLM", "TOOL"]
-        assert json.loads(state.get("background_agents"))["agent-A"]["subagent_span_id"] == agent["spanId"]
+        # Root, model call and Agent tool now end no earlier than the agent does.
+        for name in ("Turn 1", "LLM call 2: claude-haiku-4-5-20251001", "Agent"):
+            assert int(by_name[name]["endTimeUnixNano"]) >= int(agent["endTimeUnixNano"]), name
+        assert "parentSpanId" not in root
+        assert state.get("held_spans") is None or "a" * 32 not in json.loads(state.get("held_spans"))
 
     def test_notification_prompt_continues_the_trace_instead_of_opening_one(self, launched, tmp_path):
-        state, transcript, captured, tool = launched
-        # The parent's reaction to the notification: one model call, one tool.
+        state, transcript, captured = launched
+        self._finish_agent(state, tmp_path, captured)
+        agent = next(s for s in self._all_spans(captured) if _attrs(s)["openinference.span.kind"] == "AGENT")
+        payload = {
+            "session_id": "s1",
+            "prompt": _notification("toolu_A"),
+            "prompt_id": "p-notif",
+            "source": "system",
+            "transcript_path": str(transcript),
+        }
+        before = len(self._all_spans(captured))
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        assert len(self._all_spans(captured)) == before, "a notification must not emit anything"
+        assert state.get("current_trace_id") == "a" * 32
+        assert state.get("current_trace_span_id") == agent["spanId"]
+        assert state.get("trace_count") == "1", "not a new turn"
+
         reaction = [
             _assistant(
                 "r1",
@@ -802,23 +839,10 @@ class TestBackgroundSubagentsStayInTheirTrace:
                     {"type": "tool_use", "id": "tu-r1", "name": "Read", "input": {"file_path": "/x"}},
                 ],
                 usage={"input_tokens": 9, "output_tokens": 2},
-                ts="2026-08-22T16:16:50.000Z",
+                ts="2026-08-22T16:17:50.000Z",
             ),
-            _tool_result("tu-r1", ts="2026-08-22T16:16:50.500Z"),
+            _tool_result("tu-r1", ts="2026-08-22T16:17:50.500Z"),
         ]
-        payload = {
-            "session_id": "s1",
-            "prompt": _notification("toolu_A"),
-            "prompt_id": "p-notif",
-            "source": "system",
-            "transcript_path": str(transcript),
-        }
-        _run_hook(handlers.user_prompt_submit, state, payload, captured)
-        assert len(captured) == 1, "a notification must not close or emit anything"
-        assert state.get("current_trace_id") == "a" * 32
-        assert state.get("current_trace_span_id") == tool["spanId"]
-        assert state.get("trace_count") == "1", "not a new turn"
-
         with open(transcript, "a", encoding="utf-8") as f:
             f.write("\n".join(json.dumps(r) for r in reaction) + "\n")
         _run_hook(
@@ -827,21 +851,129 @@ class TestBackgroundSubagentsStayInTheirTrace:
             {"session_id": "s1", "transcript_path": str(transcript), "last_assistant_message": "ok"},
             captured,
         )
-        assert len(captured) == 2
-        spans = _spans(captured[1])
-        assert {s["traceId"] for s in spans} == {"a" * 32}
-        assert not [s for s in spans if s["name"].startswith("Turn")], "no root for a continuation"
-        llm = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "LLM")
-        assert llm["parentSpanId"] == tool["spanId"]
-        read = next(s for s in spans if _attrs(s)["openinference.span.kind"] == "TOOL")
+        sent = self._all_spans(captured)[before:]
+        assert {s["traceId"] for s in sent} == {"a" * 32}
+        assert not [s for s in sent if s["name"].startswith("Turn")], "no root for a continuation"
+        llm = next(s for s in sent if _attrs(s)["openinference.span.kind"] == "LLM")
+        assert llm["parentSpanId"] == agent["spanId"]
+        read = next(s for s in sent if _attrs(s)["openinference.span.kind"] == "TOOL")
         assert read["parentSpanId"] == llm["spanId"]
         assert state.get("current_trace_id") is None
         assert state.get("continuation_agent_id") is None
 
-    def test_notification_lands_under_the_subagent_span_when_it_already_arrived(self, launched, tmp_path):
-        state, transcript, captured, tool = launched
+    def test_notification_before_the_agent_stopped_lands_under_the_agent_tool(self, launched, tmp_path):
+        state, transcript, captured = launched
+        held_tool = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
+        _run_hook(
+            handlers.user_prompt_submit,
+            state,
+            {
+                "session_id": "s1",
+                "prompt": _notification("toolu_A"),
+                "prompt_id": "p-notif",
+                "source": "system",
+                "transcript_path": str(transcript),
+            },
+            captured,
+        )
+        assert state.get("current_trace_span_id") == held_tool["spanId"]
+
+    def test_session_end_releases_ancestors_of_an_agent_that_never_reported(self, launched, tmp_path):
+        state, transcript, captured = launched
+        before = len(self._all_spans(captured))
+        _run_hook(handlers.session_end, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        sent = self._all_spans(captured)[before:]
+        assert sorted(s["name"] for s in sent) == ["Agent", "LLM call 2: claude-haiku-4-5-20251001", "Turn 1"]
+
+    def test_peer_message_from_a_running_agent_continues_the_trace(self, launched, tmp_path):
+        """A subagent can message the parent before it finishes; that is a prompt with a
+        fresh prompt id too, keyed by agent id rather than tool-use id."""
+        state, transcript, captured = launched
+        held_tool = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
+        prompt = (
+            "Another Claude session sent a message:\n"
+            '<agent-message from="agent-A">\nStep 12: what next?\n</agent-message>\n'
+        )
+        _run_hook(
+            handlers.user_prompt_submit,
+            state,
+            {
+                "session_id": "s1",
+                "prompt": prompt,
+                "prompt_id": "p-peer",
+                "source": "system",
+                "transcript_path": str(transcript),
+            },
+            captured,
+        )
+        assert state.get("current_trace_id") == "a" * 32
+        assert state.get("current_trace_span_id") == held_tool["spanId"]
+        assert state.get("trace_count") == "1"
+
+    def test_a_typed_prompt_mentioning_a_tool_use_id_is_still_a_turn(self, launched, tmp_path):
+        state, transcript, captured = launched
+        payload = {
+            "session_id": "s1",
+            "prompt": _notification("toolu_A"),
+            "prompt_id": "p-2",
+            "source": "user",
+            "transcript_path": str(transcript),
+        }
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        assert state.get("current_trace_id") != "a" * 32
+        assert state.get("trace_count") == "2"
+
+    def test_unknown_notification_falls_back_to_a_normal_turn(self, launched, tmp_path):
+        state, transcript, captured = launched
+        payload = {
+            "session_id": "s1",
+            "prompt": _notification("toolu_NEVER_SEEN"),
+            "prompt_id": "p-2",
+            "source": "system",
+            "transcript_path": str(transcript),
+        }
+        _run_hook(handlers.user_prompt_submit, state, payload, captured)
+        assert state.get("trace_count") == "2"
+        assert state.get("continuation_agent_id") is None
+
+
+class TestParentsOutlastTheirChildren:
+    """A model call is stamped when its response lands; the tools it requested run after.
+    The chart can only nest a child whose window sits inside its parent's, so every parent
+    closes no earlier than its last descendant."""
+
+    def test_model_call_ends_no_earlier_than_its_tool(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant(
+                    "u1",
+                    "msg_A",
+                    [{"type": "tool_use", "id": "tu1", "name": "Bash", "input": {"command": "sleep"}}],
+                    ts="2026-08-22T16:16:42.000Z",
+                ),
+                _tool_result("tu1", ts="2026-08-22T16:16:49.000Z"),
+            ],
+        )
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        spans = _spans(captured[0])
+        by_name = {s["name"]: s for s in spans}
+        llm = next(s for n, s in by_name.items() if n.startswith("LLM call"))
+        assert int(llm["endTimeUnixNano"]) >= int(by_name["Bash"]["endTimeUnixNano"])
+        assert int(by_name["Turn 1"]["endTimeUnixNano"]) >= int(llm["endTimeUnixNano"])
+
+    def test_continuation_after_every_agent_reported_still_stretches_the_root(self, tmp_path):
+        """The last notification's reaction renders after the last SubagentStop; the held
+        ancestors must wait for it rather than release on the agent count alone."""
+        transcript = _write(tmp_path / "t.jsonl", _agent_launch("toolu_A", "agent-A"))
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
         agent_transcript = _write(
-            tmp_path / "agent.jsonl", [_assistant("au1", "amsg_1", [{"type": "text", "text": "hi"}])]
+            tmp_path / "agent.jsonl",
+            [_assistant("au1", "amsg_1", [{"type": "text", "text": "hi"}], ts="2026-08-22T16:17:00.000Z")],
         )
         _run_hook(
             handlers.subagent_stop,
@@ -855,43 +987,30 @@ class TestBackgroundSubagentsStayInTheirTrace:
             },
             captured,
         )
-        agent = next(s for s in _spans(captured[1]) if _attrs(s)["openinference.span.kind"] == "AGENT")
         _run_hook(
             handlers.user_prompt_submit,
             state,
             {
                 "session_id": "s1",
                 "prompt": _notification("toolu_A"),
-                "prompt_id": "p-notif",
+                "prompt_id": "p-n",
                 "source": "system",
                 "transcript_path": str(transcript),
             },
             captured,
         )
-        assert state.get("current_trace_span_id") == agent["spanId"]
-
-    def test_a_typed_prompt_mentioning_a_tool_use_id_is_still_a_turn(self, launched, tmp_path):
-        state, transcript, captured, _ = launched
-        payload = {
-            "session_id": "s1",
-            "prompt": _notification("toolu_A"),
-            "prompt_id": "p-2",
-            "source": "user",
-            "transcript_path": str(transcript),
-        }
-        _run_hook(handlers.user_prompt_submit, state, payload, captured)
-        assert state.get("current_trace_id") != "a" * 32
-        assert state.get("trace_count") == "2"
-
-    def test_unknown_notification_falls_back_to_a_normal_turn(self, launched, tmp_path):
-        state, transcript, captured, _ = launched
-        payload = {
-            "session_id": "s1",
-            "prompt": _notification("toolu_NEVER_SEEN"),
-            "prompt_id": "p-2",
-            "source": "system",
-            "transcript_path": str(transcript),
-        }
-        _run_hook(handlers.user_prompt_submit, state, payload, captured)
-        assert state.get("trace_count") == "2"
-        assert state.get("continuation_agent_id") is None
+        with open(transcript, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(_assistant("r1", "rmsg_1", [{"type": "text", "text": "ok"}], ts="2026-08-22T16:18:30.000Z"))
+                + "\n"
+            )
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        spans = [s for p in captured if p for s in _spans(p)]
+        root = next(s for s in spans if s["name"] == "Turn 1")
+        reaction = [
+            s
+            for s in spans
+            if s["name"].startswith("LLM call") and "parentSpanId" in s and s["parentSpanId"] != root["spanId"]
+        ]
+        assert reaction, "the reaction model call was not emitted"
+        assert int(root["endTimeUnixNano"]) >= max(int(s["endTimeUnixNano"]) for s in spans)

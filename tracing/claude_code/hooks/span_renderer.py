@@ -63,6 +63,7 @@ def render_event_graph(
         event_span_ids.append(span_id)
         first_span_by_event_id.setdefault(event.event_id, span_id)
     safe_parent_ids = _safe_parent_event_ids(graph.events)
+    subtree_end = _subtree_end_ms(graph.events, safe_parent_ids)
     model_call_number = 0
     # The turn's own prompt is number one; absorbed prompts count on from there.
     prompt_number = 1
@@ -88,6 +89,9 @@ def render_event_graph(
             parent_span_id = root_parent_span_id
         start_ms = _safe_timestamp(event.started_at_ms, graph_start)
         end_ms = _safe_timestamp(event.ended_at_ms, start_ms or graph_end)
+        # A model call is stamped when its response lands, but the tools it asked for
+        # run after that; a parent has to outlast its children or the chart unnests them.
+        end_ms = max(end_ms, subtree_end[index])
         if end_ms < start_ms:
             end_ms = start_ms
         status_code, status_message = _status(event)
@@ -264,6 +268,21 @@ def _first_timestamp(events: list[BaseEvent], attribute: str) -> int:
 def _last_timestamp(events: list[BaseEvent], attribute: str) -> int:
     values = [value for event in events if (value := _valid_timestamp(getattr(event, attribute))) is not None]
     return max(values) if values else 0
+
+
+def _subtree_end_ms(events: list[BaseEvent], parent_ids: list[str | None]) -> list[int]:
+    """Latest end in each event's subtree, so a parent span can be closed no earlier
+    than its last descendant."""
+    index_by_id: dict[str, int] = {}
+    for index, event in enumerate(events):
+        index_by_id.setdefault(event.event_id, index)
+    ends = [_valid_timestamp(event.ended_at_ms) or 0 for event in events]
+    for index in range(len(events) - 1, -1, -1):
+        parent = parent_ids[index]
+        parent_index = index_by_id.get(parent) if parent else None
+        if parent_index is not None and parent_index != index:
+            ends[parent_index] = max(ends[parent_index], ends[index])
+    return ends
 
 
 def _valid_timestamp(value: Any) -> int | None:

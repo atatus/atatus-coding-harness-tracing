@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.common import (
+    build_multi_span,
     build_span,
     env,
     error,
@@ -433,6 +434,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
         state.set("current_trace_prompt", "")
         state.set("current_prompt_id", prompt_id) if prompt_id else state.delete("current_prompt_id")
         state.set("continuation_agent_id", agent_id)
+        _mark_continuation(state, str(descriptor["trace_id"]), agent_id, in_flight=True)
         _record_trace_start_line(state, input_json)
         log(f"Task notification for {agent_id}; continuing trace {descriptor['trace_id']}")
         return
@@ -925,13 +927,14 @@ def _acknowledge_exported_turn(
 
 BACKGROUND_AGENTS_KEY = "background_agents"
 _NOTIFICATION_TOOL_USE = re.compile(r"<tool-use-id>\s*([A-Za-z0-9_]+)\s*</tool-use-id>")
+_AGENT_MESSAGE_FROM = re.compile(r'<agent-message\s+from="([A-Za-z0-9_-]+)"')
 
 
 def _background_agents(state) -> dict[str, dict]:
     return _decode_pending_subagents(state.get(BACKGROUND_AGENTS_KEY) or "")
 
 
-def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str, str]) -> None:
+def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str, str]) -> dict[str, dict]:
     """Remember every Agent tool the turn launched in the background, keyed by agent id
     and by tool_use_id, so a SubagentStop or a task notification that lands after this
     turn has closed can still find its way back into this trace."""
@@ -956,16 +959,126 @@ def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str,
             "launched_at_ms": event.ended_at_ms or event.started_at_ms,
         }
     if not launched or state.state_file is None:
-        return
+        return {}
     try:
         with state._lock():
             data = state._read_safe()
             current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
             current.update(launched)
             data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
+            held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            entry = held.get(trace_id) or {"spans": [], "pending": []}
+            entry["pending"] = sorted(set(entry.get("pending", [])) | set(launched))
+            held[trace_id] = entry
+            data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
             state._write(data)
     except Exception as exc:
         error(f"Failed to register background agents: {exc}")
+        return {}
+    return launched
+
+
+HELD_SPANS_KEY = "held_spans"
+
+
+def _held_spans(state) -> dict[str, dict]:
+    return _decode_pending_subagents(state.get(HELD_SPANS_KEY) or "")
+
+
+def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_ids: set[str]) -> dict:
+    """Split a rendered turn: the spans that enclose a background launch - the Agent tool,
+    its model call, the root - are held back so their end can grow to cover the agent's
+    real lifetime; everything else ships now. Returns the payload to send."""
+    try:
+        spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    except (KeyError, IndexError, TypeError):
+        return payload
+    by_id = {span["spanId"]: span for span in spans}
+    held_ids: set[str] = set()
+    for span_id in agent_tool_span_ids:
+        current = span_id
+        while current and current in by_id and current not in held_ids:
+            held_ids.add(current)
+            current = by_id[current].get("parentSpanId", "")
+    if not held_ids or state.state_file is None:
+        return payload
+    held = [span for span in spans if span["spanId"] in held_ids]
+    remaining = [span for span in spans if span["spanId"] not in held_ids]
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current_held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            entry = current_held.get(trace_id) or {"spans": [], "pending": []}
+            entry["spans"] = [*entry.get("spans", []), *held]
+            data[HELD_SPANS_KEY] = json.dumps(current_held | {trace_id: entry}, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to hold spans for trace {trace_id}: {exc}")
+        return payload
+    if not remaining:
+        return {}
+    payload["resourceSpans"][0]["scopeSpans"][0]["spans"] = remaining
+    return payload
+
+
+def _extend_held_spans(state, trace_id: str, end_ms: int, agent_id: str = "", release: bool = False) -> None:
+    """Grow every held span of the trace to at least ``end_ms``. With ``release`` (or when
+    ``agent_id`` was the last pending one) the held spans are sent."""
+    if state.state_file is None:
+        return
+    to_send: list[dict] = []
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current_held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            entry = current_held.get(trace_id)
+            if not entry:
+                return
+            end_nano = f"{end_ms}000000"
+            for span in entry.get("spans", []):
+                if int(span.get("endTimeUnixNano", "0")) < int(end_nano):
+                    span["endTimeUnixNano"] = end_nano
+            pending = [a for a in entry.get("pending", []) if a != agent_id]
+            entry["pending"] = pending
+            if release or (not pending and not entry.get("in_flight")):
+                to_send = entry.get("spans", [])
+                current_held.pop(trace_id, None)
+            else:
+                current_held[trace_id] = entry
+            data[HELD_SPANS_KEY] = json.dumps(current_held, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to extend held spans for trace {trace_id}: {exc}")
+        return
+    if to_send:
+        _send_span_async(build_multi_span([{"resourceSpans": [{"scopeSpans": [{"spans": [span]}]}]} for span in to_send], SERVICE_NAME, SCOPE_NAME))
+        log(f"Released {len(to_send)} held span(s) for trace {trace_id}")
+
+
+def _mark_continuation(state, trace_id: str, agent_id: str, in_flight: bool) -> None:
+    """A notification's reaction is still being rendered: the held ancestors must wait
+    for it even when every agent has already reported."""
+    if state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current_held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            entry = current_held.get(trace_id)
+            if not entry:
+                return
+            flights = set(entry.get("in_flight", []))
+            flights.add(agent_id) if in_flight else flights.discard(agent_id)
+            entry["in_flight"] = sorted(flights)
+            data[HELD_SPANS_KEY] = json.dumps(current_held, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to mark continuation for trace {trace_id}: {exc}")
+
+
+def _release_all_held_spans(state) -> None:
+    for trace_id in list(_held_spans(state)):
+        _extend_held_spans(state, trace_id, get_timestamp_ms(), release=True)
 
 
 def _update_background_agent(state, agent_id: str, **fields) -> None:
@@ -985,17 +1098,22 @@ def _update_background_agent(state, agent_id: str, **fields) -> None:
 
 
 def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, dict] | None":
-    """Resolve a task-notification prompt to the background agent it reports on."""
+    """Resolve a machine-injected prompt to the background agent it comes from: a task
+    notification names the Agent tool call, a peer message from a still-running agent
+    names the agent itself."""
     prompt = input_json.get("prompt") or ""
     if not isinstance(prompt, str):
         return None
+    agents = _background_agents(state)
     match = _NOTIFICATION_TOOL_USE.search(prompt)
-    if match is None:
-        return None
-    tool_use_id = match.group(1)
-    for agent_id, descriptor in _background_agents(state).items():
-        if descriptor.get("tool_use_id") == tool_use_id:
-            return agent_id, descriptor
+    if match is not None:
+        tool_use_id = match.group(1)
+        for agent_id, descriptor in agents.items():
+            if descriptor.get("tool_use_id") == tool_use_id:
+                return agent_id, descriptor
+    match = _AGENT_MESSAGE_FROM.search(prompt)
+    if match is not None and match.group(1) in agents:
+        return match.group(1), agents[match.group(1)]
     return None
 
 
@@ -1145,11 +1263,18 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             root_parent_span_id=trace_span_id if continuation else "",
             skip_root=continuation,
         )
-        _register_background_agents(state, graph, trace_id, span_id_overrides)
+        launched = _register_background_agents(state, graph, trace_id, span_id_overrides)
+        if launched:
+            payload = _hold_ancestor_spans(state, payload, trace_id, {d["tool_span_id"] for d in launched.values()})
+        if continuation:
+            _mark_continuation(state, trace_id, str(state.get("continuation_agent_id")), in_flight=False)
+            _extend_held_spans(state, trace_id, int(root_event.ended_at_ms or get_timestamp_ms()))
         return _TurnExport(payload, reason, matched_observations, matched_subagents)
 
     if state.get("continuation_agent_id"):
         # No model calls to attach and no root to send; the notification itself is not a turn.
+        _mark_continuation(state, trace_id, str(state.get("continuation_agent_id")), in_flight=False)
+        _extend_held_spans(state, trace_id, get_timestamp_ms())
         return _TurnExport({}, reason, [], {})
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
@@ -1343,6 +1468,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     )
     _send_span_async(payload)
     _update_background_agent(state, agent_id, subagent_span_id=subagent_span_id, ended_at_ms=agent_event.ended_at_ms)
+    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), agent_id=agent_id)
     state.delete(f"subagent_{agent_id}_start_time")
     state.delete(f"subagent_{agent_id}_prompt")
     log(f"Background subagent {agent_id} attached to trace {trace_id}")
@@ -1643,6 +1769,8 @@ def _handle_session_end(input_json: dict) -> None:
     # A turn still open here was cut off by the session ending, not by a failure.
     if state.get("current_trace_id"):
         _close_live_turn(state, input_json, TurnEndReason.INTERRUPTED)
+    # Agents that never reported back still need their ancestors on the wire.
+    _release_all_held_spans(state)
 
     trace_count = state.get("trace_count") or "0"
     tool_count = state.get("tool_count") or "0"
