@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 
 import pytest
@@ -56,10 +57,13 @@ class TestShellSyntax:
         Raised again 460 -> 500: `update` now re-execs from a freshly fetched
         installer, which has to happen before any of the update runs and so
         cannot live in core/setup/ either.
+
+        Raised 500 -> 520: the venv/ensurepip probe must run before anything is
+        downloaded or written, so it is shell too.
         """
         text = _read_install_sh()
         lines = text.strip().splitlines()
-        assert len(lines) <= 500, f"install.sh has {len(lines)} lines — should be under 500"
+        assert len(lines) <= 520, f"install.sh has {len(lines)} lines — should be under 520"
 
 
 # ---------------------------------------------------------------------------
@@ -120,9 +124,9 @@ class TestFunctionsDefined:
             "tty_read_masked_line",
         ]:
             pattern = rf"^{old_func}\s*\(\)"
-            assert not re.search(
-                pattern, self.text, re.MULTILINE
-            ), f"Old function {old_func}() should be removed from the router"
+            assert not re.search(pattern, self.text, re.MULTILINE), (
+                f"Old function {old_func}() should be removed from the router"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +335,9 @@ class TestDispatchLogic:
         # install.py or the installed module, depending on install mode.
         pre_wipe = text[:wipe_idx]
         assert "list_installed_harnesses" in pre_wipe, "Full uninstall does not iterate installed harnesses before wipe"
-        assert (
-            'run_harness_py "$key" "$vp" uninstall' in pre_wipe
-        ), "Full uninstall does not dispatch per-harness uninstall before wipe"
+        assert 'run_harness_py "$key" "$vp" uninstall' in pre_wipe, (
+            "Full uninstall does not dispatch per-harness uninstall before wipe"
+        )
 
     def test_update_calls_pip_install(self):
         assert "pip" in self.text and "install" in self.text
@@ -586,3 +590,111 @@ class TestUpdateRefetchesItself:
         """A hung network must not stall the update indefinitely."""
         assert "--connect-timeout 5" in self.sh
         assert 'download_file "$INSTALL_SH_URL" "$fresh" 8' in self.sh
+
+
+class TestVenvProbeRunsBeforeAnythingIsWritten:
+    """Debian/Ubuntu ship python3 without python3-venv. The old installer downloaded
+    and extracted the tarball, then failed inside `python -m venv`, which leaves a
+    venv with bin/python but no pip -- and the retry after `apt install` then
+    reported "pip not found in venv" instead of installing.
+    """
+
+    FAKE_NO_ENSUREPIP = r"""#!/bin/bash
+# python3 whose venv/ensurepip modules are missing, as shipped without python3-venv.
+case "$*" in
+  *"import venv, ensurepip"*) exit 1 ;;
+  *"-m venv"*) d="${@: -1}"; mkdir -p "$d/bin"; cp /usr/bin/python3 "$d/bin/python"; echo "ensurepip is not available" >&2; exit 1 ;;
+esac
+exec /usr/bin/python3 "$@"
+"""
+
+    def _bash(self, script: str, home: str, extra_path: str = "") -> subprocess.CompletedProcess:
+        env = {"HOME": home, "PATH": (extra_path + ":" if extra_path else "") + "/usr/bin:/bin", "NO_COLOR": "1"}
+        # The file ends in `main "$@"`; load everything above it so the functions
+        # can be called directly.
+        functions = _read_install_sh().rsplit('main "$@"', 1)[0]
+        return subprocess.run(
+            ["bash", "-c", f"{functions}\n{script}"], capture_output=True, text=True, env=env, timeout=60
+        )
+
+    def _fake_python(self, tmp_path):
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        (bindir / "python3").write_text(self.FAKE_NO_ENSUREPIP, encoding="utf-8")
+        (bindir / "python3").chmod(0o755)
+        return str(bindir)
+
+    def test_probe_rejects_a_python_without_ensurepip_and_names_the_package(self, tmp_path):
+        bindir = self._fake_python(tmp_path)
+        r = self._bash(f'check_python_can_venv "{bindir}/python3"', str(tmp_path), bindir)
+        assert r.returncode == 1
+        assert "cannot create a virtual environment" in r.stderr
+        assert "python3.12-venv" in r.stderr or "venv/ensurepip" in r.stderr
+
+    def test_probe_accepts_a_python_that_can_venv(self, tmp_path):
+        r = self._bash("check_python_can_venv /usr/bin/python3", str(tmp_path))
+        assert r.returncode == 0, r.stderr
+
+    def test_install_writes_nothing_when_the_probe_fails(self):
+        """The probe sits between find_python and install_repo, so a machine that
+        cannot build a venv gets the message and an untouched home directory."""
+        sh = _read_install_sh()
+        install = sh[sh.index("install_harness() {") : sh.index("usage() {")]
+        assert install.index("check_python_can_venv") < install.index("install_repo")
+        assert 'check_python_can_venv "$python_cmd" || exit 1' in install
+
+    def test_a_failed_venv_creation_leaves_no_half_built_venv(self, tmp_path):
+        bindir = self._fake_python(tmp_path)
+        venv = tmp_path / "venv"
+        r = self._bash(f'VENV_DIR="{venv}"; setup_venv "{bindir}/python3"', str(tmp_path), bindir)
+        assert r.returncode == 1
+        assert not venv.exists(), "debris from a failed venv creation must be removed"
+
+    def test_a_venv_with_python_but_no_pip_is_rebuilt_not_reused(self, tmp_path):
+        """The state a user is left in by the old installer after `apt install python3-venv`."""
+        venv = tmp_path / "venv"
+        (venv / "bin").mkdir(parents=True)
+        shutil.copy("/usr/bin/python3", venv / "bin" / "python")
+        script = f'VENV_DIR="{venv}"; pip_install_harness() {{ return 0; }}; setup_venv /usr/bin/python3'
+        r = self._bash(script, str(tmp_path))
+        assert r.returncode == 0, r.stderr
+        assert "has no pip; rebuilding" in r.stdout
+        assert (venv / "bin" / "pip").exists()
+
+
+class TestBatMirrorsTheVenvHandling:
+    """install.sh and install.bat must not drift: whatever the shell installer
+    checks or repairs around Python and the venv, the batch installer does too."""
+
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.sh = _read_install_sh()
+        self.bat = _read_install_bat()
+
+    def test_both_probe_venv_capability_before_fetching_anything(self):
+        assert "import venv, ensurepip" in self.sh
+        assert "import venv, ensurepip" in self.bat
+        bat_install = self.bat[
+            self.bat.index("REM --- Install a harness ---") : self.bat.index("REM --- cmd_status ---")
+        ]
+        assert bat_install.index("call :check_python_can_venv") < bat_install.index("call :bootstrap_repo")
+        assert (
+            "if %ERRORLEVEL% neq 0 exit /b 1"
+            in bat_install.split("call :check_python_can_venv", 1)[1].split("call :bootstrap_repo", 1)[0]
+        )
+
+    def test_both_rebuild_a_venv_that_has_python_but_no_pip(self):
+        assert "has no pip; rebuilding it" in self.sh
+        assert "has no pip; rebuilding it" in self.bat
+        assert 'rmdir /s /q "%VENV_DIR%"' in self.bat
+
+    def test_both_remove_the_debris_of_a_failed_venv_creation(self):
+        sh_fail = self.sh.split('"$python_cmd" -m venv "$VENV_DIR"', 1)[1].split("return 1", 1)[0]
+        assert 'rm -rf "$VENV_DIR"' in sh_fail
+        bat_fail = self.bat.split('%FOUND_PYTHON% -m venv "%VENV_DIR%"', 1)[1].split("exit /b 1", 1)[0]
+        assert 'rmdir /s /q "%VENV_DIR%"' in bat_fail
+
+    def test_both_name_the_fix_when_python_is_missing(self):
+        assert "No Python 3.9+ found. Install it with:" in self.sh
+        assert self.bat.count("No Python 3.9+ found. Install it from") == 2, "install and update paths"
+        assert "Python 3.9+ is required" not in self.bat

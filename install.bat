@@ -67,8 +67,10 @@ if "%COMMAND%"=="uninstall" goto :cmd_uninstall
 
 REM --- Install a harness ---
 call :find_python
-if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
+if "%FOUND_PYTHON%"=="" ( echo [atatus] No Python 3.9+ found. Install it from https://www.python.org/downloads/ or: winget install Python.Python.3.12 >&2 & exit /b 1 )
 echo [atatus] Found Python: %FOUND_PYTHON%
+call :check_python_can_venv
+if %ERRORLEVEL% neq 0 exit /b 1
 call :bootstrap_repo
 if %ERRORLEVEL% neq 0 exit /b 1
 call :setup_venv
@@ -109,7 +111,7 @@ if /i "!SELF_DIR!"=="%INSTALL_DIR%\" if not defined ATATUS_UPDATE_REEXEC if not 
     echo [atatus] Could not fetch the latest installer - continuing with the local copy
 )
 call :find_python
-if "%FOUND_PYTHON%"=="" ( echo [atatus] Error: Python 3.9+ is required >&2 & exit /b 1 )
+if "%FOUND_PYTHON%"=="" ( echo [atatus] No Python 3.9+ found. Install it from https://www.python.org/downloads/ or: winget install Python.Python.3.12 >&2 & exit /b 1 )
 REM Re-registering runs each harness's installer, which prompts for the project
 REM name. An update re-registers what is already configured, so it always reuses
 REM the stored values instead of re-asking per harness. Matches install.sh.
@@ -257,13 +259,26 @@ del "%TMPZIP%" 2>nul
 echo [atatus] Extracted to %INSTALL_DIR%
 goto :eof
 
+REM --- check_python_can_venv: a Python that cannot build a venv must fail here, before
+REM anything is downloaded or written. Failing inside "python -m venv" leaves a venv with
+REM python.exe but no pip, and every retry then trips over that instead of the real cause.
+:check_python_can_venv
+%FOUND_PYTHON% -c "import venv, ensurepip" >nul 2>&1 && goto :eof
+echo [atatus] %FOUND_PYTHON% cannot create a virtual environment ^(venv/ensurepip missing^). >&2
+echo [atatus] Reinstall Python with the "pip" and "venv" components enabled ^(python.org installer or: winget install Python.Python.3.12^), then run this installer again. >&2
+exit /b 1
+
 REM --- setup_venv ---
 :setup_venv
 if exist "%VENV_PYTHON%" ( "%VENV_PYTHON%" -c "import core" >nul 2>&1 && ( echo [atatus] Venv ready & goto :eof ) )
-echo [atatus] Creating venv...
-%FOUND_PYTHON% -m venv "%VENV_DIR%" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( echo [atatus] Failed to create venv >&2 & exit /b 1 )
-if not exist "%VENV_PIP%" ( echo [atatus] pip not found in venv >&2 & exit /b 1 )
+REM A venv with a python but no pip is debris from an earlier failed run.
+if exist "%VENV_PYTHON%" if not exist "%VENV_PIP%" ( echo [atatus] Existing venv at %VENV_DIR% has no pip; rebuilding it & rmdir /s /q "%VENV_DIR%" 2>nul )
+if not exist "%VENV_PYTHON%" (
+    echo [atatus] Creating venv...
+    %FOUND_PYTHON% -m venv "%VENV_DIR%" >nul 2>&1
+    if !ERRORLEVEL! neq 0 ( rmdir /s /q "%VENV_DIR%" 2>nul & echo [atatus] Failed to create venv with %FOUND_PYTHON% >&2 & echo [atatus] Reinstall Python with the "venv" component enabled and run again. >&2 & exit /b 1 )
+)
+if not exist "%VENV_PIP%" ( echo [atatus] pip not found in venv at %VENV_DIR% >&2 & exit /b 1 )
 echo [atatus] Installing atatus-coding-harness-tracing...
 call :pip_install_harness ""
 if !ERRORLEVEL! neq 0 exit /b 1

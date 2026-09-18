@@ -87,6 +87,21 @@ find_python() {
     return 1
 }
 
+# Debian/Ubuntu ship python3 without python3-venv (no ensurepip). Probe before any
+# download or write: failing inside `python -m venv` leaves a venv with bin/python
+# but no pip, and every retry then trips over that instead of the real cause.
+venv_install_hint() {
+    local pyver; pyver=$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 3)
+    if command_exists apt-get; then echo "sudo apt-get install -y python${pyver}-venv"
+    else echo "install the venv/ensurepip modules for $1 with your package manager"; fi
+}
+check_python_can_venv() {
+    "$1" -c "import venv, ensurepip" 2>/dev/null && return 0
+    err "$1 cannot create a virtual environment (venv/ensurepip missing). Install them and run again:"
+    err "    $(venv_install_hint "$1")"
+    return 1
+}
+
 # -- Venv helpers ------------------------------------------------------------
 venv_python() {
     [[ -x "${VENV_DIR}/bin/python" ]] && { echo "${VENV_DIR}/bin/python"; return; }
@@ -236,15 +251,21 @@ pip_install_harness() {
 
 setup_venv() {
     local python_cmd="$1"
+    # A venv with a python but no pip is debris from an earlier failed run.
+    if venv_python &>/dev/null && ! venv_pip &>/dev/null; then
+        warn "Existing venv at ${VENV_DIR} has no pip; rebuilding it"
+        rm -rf "$VENV_DIR"
+    fi
     if ! venv_python &>/dev/null; then
         info "Creating venv..."
         "$python_cmd" -m venv "$VENV_DIR" 2>/dev/null || {
+            rm -rf "$VENV_DIR"
             err "Failed to create venv with $python_cmd"
-            err "You may need to install the venv module: apt install python3-venv (Debian/Ubuntu)"
+            err "Install the venv module and run again: $(venv_install_hint "$python_cmd")"
             return 1
         }
     fi
-    local pip; pip=$(venv_pip) || { err "pip not found in venv"; return 1; }
+    local pip; pip=$(venv_pip) || { err "pip not found in venv at ${VENV_DIR}"; return 1; }
     info "Installing atatus-coding-harness-tracing into venv..."
     pip_install_harness "$pip" || return 1
 
@@ -296,8 +317,9 @@ install_harness() {
         exit 1
     }
     info "Found Python: ${python_cmd} ($("$python_cmd" --version 2>&1))"
+    check_python_can_venv "$python_cmd" || exit 1
     install_repo
-    setup_venv "$python_cmd"
+    setup_venv "$python_cmd" || exit 1
     local vp; vp=$(venv_python) || { err "Venv python not found after setup"; exit 1; }
     if [[ "$skills" == true ]]; then
         run_harness_py "$cmd" "$vp" install --with-skills
