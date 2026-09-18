@@ -427,13 +427,14 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     continuation = _background_agent_for_notification(state, input_json)
     if continuation is not None and input_json.get("source", "system") != "user":
         agent_id, descriptor = continuation
-        parent_span_id = descriptor.get("subagent_span_id") or descriptor.get("tool_span_id")
+        parent_span_id = descriptor.get("tool_span_id")
         state.set("current_trace_id", str(descriptor["trace_id"]))
         state.set("current_trace_span_id", str(parent_span_id))
         state.set("current_trace_start_time", str(get_timestamp_ms()))
         state.set("current_trace_prompt", "")
         state.set("current_prompt_id", prompt_id) if prompt_id else state.delete("current_prompt_id")
         state.set("continuation_agent_id", agent_id)
+        state.set("continuation_is_final", "false" if descriptor.get("peer_message") else "true")
         _mark_continuation(state, str(descriptor["trace_id"]), agent_id, in_flight=True)
         _record_trace_start_line(state, input_json)
         log(f"Task notification for {agent_id}; continuing trace {descriptor['trace_id']}")
@@ -819,13 +820,22 @@ def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, d
         agent_input = None
         if parent_tool is not None and isinstance(parent_tool.input, dict):
             agent_input = parent_tool.input.get("prompt")
+        started_at_ms = descriptor.get("started_at_ms")
+        # SubagentStart fires when the process spawns, before the Agent tool_use record
+        # lands; the span cannot begin before the call that made it. With no recorded
+        # start at all, the call is the best evidence - never the turn's start.
+        tool_start = parent_tool.started_at_ms if isinstance(parent_tool.started_at_ms, int) else None
+        if isinstance(started_at_ms, int) and tool_start is not None:
+            started_at_ms = max(started_at_ms, tool_start)
+        elif not isinstance(started_at_ms, int):
+            started_at_ms = tool_start
         agent_event = AgentEvent(
             event_id=f"agent:{agent_id}",
             parent_event_id=parent_event_id,
             session_id=root.session_id,
             turn_id=root.turn_id,
             sequence=(parent_tool.sequence + 1) if parent_tool is not None else len(graph.events),
-            started_at_ms=descriptor.get("started_at_ms"),
+            started_at_ms=started_at_ms,
             ended_at_ms=descriptor.get("ended_at_ms"),
             status=EventStatus.COMPLETED,
             input=agent_input,
@@ -909,6 +919,7 @@ def _acknowledge_exported_turn(
                 "current_trace_prompt",
                 "current_prompt_id",
                 "continuation_agent_id",
+                "continuation_is_final",
                 "export_attempted_trace_id",
                 "trace_start_line",
                 "pending_expansion_type",
@@ -934,11 +945,16 @@ def _background_agents(state) -> dict[str, dict]:
     return _decode_pending_subagents(state.get(BACKGROUND_AGENTS_KEY) or "")
 
 
-def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str, str]) -> dict[str, dict]:
-    """Remember every Agent tool the turn launched in the background, keyed by agent id
-    and by tool_use_id, so a SubagentStop or a task notification that lands after this
-    turn has closed can still find its way back into this trace."""
+def _register_background_agents(
+    state, graph, trace_id: str, span_ids: dict[str, str], already_spliced: "set[str] | None" = None
+) -> dict[str, dict]:
+    """Remember every Agent tool the turn launched in the background and that is still
+    running at export, keyed by agent id and by tool_use_id, so a SubagentStop or a task
+    notification that lands after this turn has closed can still find its way back into
+    this trace. An agent whose SubagentStop already arrived inside the turn is in the
+    graph and needs nothing held for it."""
     launched: dict[str, dict] = {}
+    spliced = already_spliced or set()
     for event in graph.events:
         if not isinstance(event, ToolEvent) or not isinstance(event.output, dict):
             continue
@@ -952,6 +968,7 @@ def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str,
         launched[agent_id] = {
             "trace_id": trace_id,
             "tool_span_id": tool_span_id,
+            **({"subagent_span_id": span_ids.get(f"agent:{agent_id}", "")} if agent_id in spliced else {}),
             "tool_use_id": event.tool_call_id or "",
             "agent_type": (event.input or {}).get("subagent_type") if isinstance(event.input, dict) else None,
             "prompt": (event.input or {}).get("prompt") if isinstance(event.input, dict) else None,
@@ -968,6 +985,9 @@ def _register_background_agents(state, graph, trace_id: str, span_ids: dict[str,
             data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
             held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
             entry = held.get(trace_id) or {"spans": [], "pending": []}
+            # Every launch is awaited: the agent's completion comes back as a notification
+            # whose reaction is the parent's own work, after this Stop - even for an agent
+            # whose SubagentStop already landed inside the turn.
             entry["pending"] = sorted(set(entry.get("pending", [])) | set(launched))
             held[trace_id] = entry
             data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
@@ -1113,7 +1133,7 @@ def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, d
                 return agent_id, descriptor
     match = _AGENT_MESSAGE_FROM.search(prompt)
     if match is not None and match.group(1) in agents:
-        return match.group(1), agents[match.group(1)]
+        return match.group(1), {**agents[match.group(1)], "peer_message": True}
     return None
 
 
@@ -1263,18 +1283,24 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             root_parent_span_id=trace_span_id if continuation else "",
             skip_root=continuation,
         )
-        launched = _register_background_agents(state, graph, trace_id, span_id_overrides)
+        launched = _register_background_agents(
+            state, graph, trace_id, span_id_overrides, already_spliced=set(matched_subagents)
+        )
         if launched:
             payload = _hold_ancestor_spans(state, payload, trace_id, {d["tool_span_id"] for d in launched.values()})
         if continuation:
-            _mark_continuation(state, trace_id, str(state.get("continuation_agent_id")), in_flight=False)
-            _extend_held_spans(state, trace_id, int(root_event.ended_at_ms or get_timestamp_ms()))
+            agent_id = str(state.get("continuation_agent_id"))
+            _mark_continuation(state, trace_id, agent_id, in_flight=False)
+            settled = agent_id if state.get("continuation_is_final") != "false" else ""
+            _extend_held_spans(state, trace_id, int(root_event.ended_at_ms or get_timestamp_ms()), agent_id=settled)
         return _TurnExport(payload, reason, matched_observations, matched_subagents)
 
     if state.get("continuation_agent_id"):
         # No model calls to attach and no root to send; the notification itself is not a turn.
-        _mark_continuation(state, trace_id, str(state.get("continuation_agent_id")), in_flight=False)
-        _extend_held_spans(state, trace_id, get_timestamp_ms())
+        agent_id = str(state.get("continuation_agent_id"))
+        _mark_continuation(state, trace_id, agent_id, in_flight=False)
+        settled = agent_id if state.get("continuation_is_final") != "false" else ""
+        _extend_held_spans(state, trace_id, get_timestamp_ms(), agent_id=settled)
         return _TurnExport({}, reason, [], {})
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
@@ -1468,7 +1494,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     )
     _send_span_async(payload)
     _update_background_agent(state, agent_id, subagent_span_id=subagent_span_id, ended_at_ms=agent_event.ended_at_ms)
-    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), agent_id=agent_id)
+    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms))
     state.delete(f"subagent_{agent_id}_start_time")
     state.delete(f"subagent_{agent_id}_prompt")
     log(f"Background subagent {agent_id} attached to trace {trace_id}")

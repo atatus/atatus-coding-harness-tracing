@@ -793,29 +793,30 @@ class TestBackgroundSubagentsStayInTheirTrace:
         }
         _run_hook(handlers.subagent_stop, state, payload, captured)
 
-    def test_last_subagent_stop_attaches_under_the_agent_tool_and_releases_the_ancestors(self, launched, tmp_path):
+    def test_subagent_stop_attaches_under_the_held_agent_tool_but_does_not_release(self, launched, tmp_path):
+        """The agent's completion still has to come back as a notification whose reaction
+        is the parent's own work; the ancestors wait for that, not for the SubagentStop."""
         state, _, captured = launched
         before = len(self._all_spans(captured))
         self._finish_agent(state, tmp_path, captured)
         sent = self._all_spans(captured)[before:]
         assert {s["traceId"] for s in sent} == {"a" * 32}
-        by_name = {s["name"]: s for s in sent}
-        agent = by_name["Subagent: general-purpose"]
-        tool = by_name["Agent"]
-        root = by_name["Turn 1"]
+        agent = next(s for s in sent if s["name"].startswith("Subagent"))
+        held = json.loads(state.get("held_spans"))["a" * 32]
+        tool = next(s for s in held["spans"] if s["name"] == "Agent")
         assert agent["parentSpanId"] == tool["spanId"]
         assert _attrs(agent)["subagent.background"] == "true"
         assert _attrs(agent)["output.value"] == "fetched"
-        # Root, model call and Agent tool now end no earlier than the agent does.
+        assert not [s for s in sent if s["name"] == "Turn 1"], "root must still be held"
+        assert held["pending"] == ["agent-A"]
         for name in ("Turn 1", "LLM call 2: claude-haiku-4-5-20251001", "Agent"):
-            assert int(by_name[name]["endTimeUnixNano"]) >= int(agent["endTimeUnixNano"]), name
-        assert "parentSpanId" not in root
-        assert state.get("held_spans") is None or "a" * 32 not in json.loads(state.get("held_spans"))
+            span = next(s for s in held["spans"] if s["name"] == name)
+            assert int(span["endTimeUnixNano"]) >= int(agent["endTimeUnixNano"]), name
 
     def test_notification_prompt_continues_the_trace_instead_of_opening_one(self, launched, tmp_path):
         state, transcript, captured = launched
         self._finish_agent(state, tmp_path, captured)
-        agent = next(s for s in self._all_spans(captured) if _attrs(s)["openinference.span.kind"] == "AGENT")
+        agent = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
         payload = {
             "session_id": "s1",
             "prompt": _notification("toolu_A"),
@@ -853,13 +854,42 @@ class TestBackgroundSubagentsStayInTheirTrace:
         )
         sent = self._all_spans(captured)[before:]
         assert {s["traceId"] for s in sent} == {"a" * 32}
-        assert not [s for s in sent if s["name"].startswith("Turn")], "no root for a continuation"
-        llm = next(s for s in sent if _attrs(s)["openinference.span.kind"] == "LLM")
-        assert llm["parentSpanId"] == agent["spanId"]
-        read = next(s for s in sent if _attrs(s)["openinference.span.kind"] == "TOOL")
-        assert read["parentSpanId"] == llm["spanId"]
+        llm = next(
+            s for s in sent if _attrs(s)["openinference.span.kind"] == "LLM" and s["parentSpanId"] == agent["spanId"]
+        )
+        read = next(
+            s for s in sent if _attrs(s)["openinference.span.kind"] == "TOOL" and s["parentSpanId"] == llm["spanId"]
+        )
+        assert read
+        # The last notification's reaction is what releases the ancestors, stretched over it.
+        root = next(s for s in sent if s["name"] == "Turn 1")
+        assert int(root["endTimeUnixNano"]) >= int(read["endTimeUnixNano"])
         assert state.get("current_trace_id") is None
         assert state.get("continuation_agent_id") is None
+        assert "a" * 32 not in json.loads(state.get("held_spans") or "{}")
+
+    def test_notification_reaction_hangs_off_the_agent_tool_not_the_subagent(self, launched, tmp_path):
+        """The subagent span is already on the wire with its own end; the parent's reaction
+        happens after it, so it parents to the Agent tool call, which is held and grows."""
+        state, transcript, captured = launched
+        self._finish_agent(state, tmp_path, captured)
+        spans = self._all_spans(captured)
+        tool = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
+        sub = next(s for s in spans if s["name"].startswith("Subagent"))
+        _run_hook(
+            handlers.user_prompt_submit,
+            state,
+            {
+                "session_id": "s1",
+                "prompt": _notification("toolu_A"),
+                "prompt_id": "p-notif",
+                "source": "system",
+                "transcript_path": str(transcript),
+            },
+            captured,
+        )
+        assert state.get("current_trace_span_id") == tool["spanId"]
+        assert state.get("current_trace_span_id") != sub["spanId"]
 
     def test_notification_before_the_agent_stopped_lands_under_the_agent_tool(self, launched, tmp_path):
         state, transcript, captured = launched
@@ -1014,3 +1044,66 @@ class TestParentsOutlastTheirChildren:
         ]
         assert reaction, "the reaction model call was not emitted"
         assert int(root["endTimeUnixNano"]) >= max(int(s["endTimeUnixNano"]) for s in spans)
+
+
+class TestAgentThatStoppedInsideTheTurnIsStillAwaited:
+    """Two background agents. One finishes while the turn is still running - its SubagentStop
+    is buffered and spliced into the turn at Stop. Its completion notification still comes
+    back after Stop, and the reaction to it is the parent's work, so the ancestors wait for
+    both notifications regardless of when each SubagentStop landed."""
+
+    def test_spliced_agent_ships_in_the_turn_and_is_still_awaited(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            _agent_launch(
+                "toolu_FAST", "agent-fast", ts_use="2026-08-22T16:16:42.000Z", ts_res="2026-08-22T16:16:42.100Z"
+            )
+            + _agent_launch(
+                "toolu_SLOW", "agent-slow", ts_use="2026-08-22T16:16:43.000Z", ts_res="2026-08-22T16:16:43.100Z"
+            ),
+        )
+        state = _live_turn_state(tmp_path)
+        captured = []
+        fast_transcript = _write(
+            tmp_path / "fast.jsonl",
+            [_assistant("fu1", "fmsg", [{"type": "text", "text": "fast done"}], ts="2026-08-22T16:16:45.000Z")],
+        )
+        _run_hook(
+            handlers.subagent_stop,
+            state,
+            {
+                "session_id": "s1",
+                "agent_id": "agent-fast",
+                "agent_type": "general-purpose",
+                "agent_transcript_path": str(fast_transcript),
+                "transcript_path": str(transcript),
+            },
+            captured,
+        )
+        assert captured == [], "a foreground stop is buffered, not sent"
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        held = json.loads(state.get("held_spans"))["a" * 32]
+        assert held["pending"] == ["agent-fast", "agent-slow"]
+        registry = json.loads(state.get("background_agents"))
+        assert registry["agent-fast"].get("subagent_span_id"), "spliced agent keeps its span id"
+        sent_names = [s["name"] for p in captured if p for s in _spans(p)]
+        assert "Subagent: general-purpose" in sent_names, "the fast agent shipped inside the turn"
+        assert "Turn 1" not in sent_names
+
+        for agent, tool_use in (("agent-fast", "toolu_FAST"), ("agent-slow", "toolu_SLOW")):
+            _run_hook(
+                handlers.user_prompt_submit,
+                state,
+                {
+                    "session_id": "s1",
+                    "prompt": _notification(tool_use),
+                    "prompt_id": f"p-{agent}",
+                    "source": "system",
+                    "transcript_path": str(transcript),
+                },
+                captured,
+            )
+            _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        sent_names = [s["name"] for p in captured if p for s in _spans(p)]
+        assert "Turn 1" in sent_names, "root released after the last notification"
+        assert "a" * 32 not in json.loads(state.get("held_spans") or "{}")
