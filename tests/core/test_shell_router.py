@@ -60,10 +60,13 @@ class TestShellSyntax:
 
         Raised 500 -> 520: the venv/ensurepip probe must run before anything is
         downloaded or written, so it is shell too.
+
+        Raised 520 -> 560: the bounded git fetch and the source stamp that lets a
+        no-change rerun skip pip both run before the venv is usable.
         """
         text = _read_install_sh()
         lines = text.strip().splitlines()
-        assert len(lines) <= 520, f"install.sh has {len(lines)} lines — should be under 520"
+        assert len(lines) <= 560, f"install.sh has {len(lines)} lines — should be under 560"
 
 
 # ---------------------------------------------------------------------------
@@ -698,3 +701,72 @@ class TestBatMirrorsTheVenvHandling:
         assert "No Python 3.9+ found. Install it with:" in self.sh
         assert self.bat.count("No Python 3.9+ found. Install it from") == 2, "install and update paths"
         assert "Python 3.9+ is required" not in self.bat
+
+
+class TestReinstallIsFastAndNeverHangs:
+    """A rerun of the documented install line on a machine that already has the
+    harness used to make four sequential git round trips (a silent minute on a bad
+    link) and then a full pip reinstall of an unchanged tree. Both installers now
+    make one bounded fetch, never prompt for credentials, fall back to the tarball
+    over the existing tree, and reuse a venv built from the same source."""
+
+    @pytest.fixture(autouse=True)
+    def _load(self):
+        self.sh = _read_install_sh()
+        self.bat = _read_install_bat()
+
+    def test_git_never_prompts_and_is_time_bounded(self):
+        assert "GIT_TERMINAL_PROMPT=0" in self.sh and "GIT_TERMINAL_PROMPT=0" in self.bat
+        assert "core.askPass=true" in self.sh and "core.askPass=true" in self.bat
+        assert "http.lowSpeedTime=10" in self.sh and "http.lowSpeedTime=10" in self.bat
+        assert "timeout_cmd 20 git" in self.sh
+        assert self.bat.count("core.askPass=true") == 2, "install sync and update pull"
+
+    def test_one_fetch_then_the_tarball(self):
+        sync = self.sh[self.sh.index("git_sync_harness_repo() {") : self.sh.index("# True only when this script")]
+        assert sync.count("fetch --depth 1") == 1 and "pull --ff-only" not in sync
+        bat_sync = self.bat[self.bat.index("\n:bootstrap_repo") : self.bat.index("\n:download_tarball")]
+        assert bat_sync.count("fetch --depth 1") == 1 and "pull --ff-only" not in bat_sync
+        assert "call :download_tarball" in bat_sync.split("git fetch failed", 1)[1]
+
+    def test_a_failed_fetch_does_not_wipe_the_install(self):
+        """The venv lives inside INSTALL_DIR; the old .bat rmdir'd it on every flaky network."""
+        bat_sync = self.bat[self.bat.index("\n:bootstrap_repo") : self.bat.index("\n:download_tarball")]
+        assert 'rmdir /s /q "%INSTALL_DIR%"' not in bat_sync
+        assert "re-cloning" not in self.bat
+
+    def test_unchanged_tree_skips_pip_in_both(self):
+        for src in (self.sh, self.bat):
+            assert ".atatus-source" in src
+            assert "already current" in src
+        assert "record_venv_source" in self.sh.split('pip_install_harness "$pip" -U', 1)[1][:80]
+        assert "call :record_venv_source" in self.bat
+
+    def test_tarball_download_is_time_bounded_in_both(self):
+        assert "--max-time" in self.sh
+        assert "-TimeoutSec 120" in self.bat and "--max-time 120" in self.bat
+
+    def test_venv_reuse_is_behavioural_not_just_import_core(self, tmp_path):
+        """A venv from an older tree must be reinstalled, not reused because `import core` works."""
+        functions = _read_install_sh().rsplit('main "$@"', 1)[0]
+        venv = tmp_path / "venv"
+        (venv / "bin").mkdir(parents=True)
+        shutil.copy("/usr/bin/python3", venv / "bin" / "python")
+        (venv / "bin" / "pip").write_text("#!/bin/sh\nexit 0\n")
+        (venv / "bin" / "pip").chmod(0o755)
+        install = tmp_path / "harness"
+        (install / "core").mkdir(parents=True)
+        (install / "core" / "__init__.py").write_text("")
+        (install / "tracing").mkdir()
+        (install / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (venv / ".atatus-source").write_text("stale-stamp")
+        env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "NO_COLOR": "1"}
+        script = (
+            f'{functions}\nINSTALL_DIR="{install}"; VENV_DIR="{venv}"; WHEEL_DIR=""; '
+            f"pip_install_harness() {{ echo PIP-RAN; }}; setup_venv /usr/bin/python3"
+        )
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+        assert "PIP-RAN" in r.stdout, r.stderr
+        assert (venv / ".atatus-source").read_text().strip() != "stale-stamp"
+        r2 = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+        assert "PIP-RAN" not in r2.stdout and "already current" in r2.stdout

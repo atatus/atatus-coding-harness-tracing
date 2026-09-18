@@ -131,9 +131,10 @@ if defined WHEEL_DIR (
     echo [atatus] Updating from local wheels in %WHEEL_DIR%...
 ) else if exist "%INSTALL_DIR%\.git" (
     echo [atatus] Pulling latest changes...
-    git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1
+    set "GIT_TERMINAL_PROMPT=0"
+    git -C "%INSTALL_DIR%" -c core.askPass=true -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 pull --ff-only >nul 2>&1
     if !ERRORLEVEL! neq 0 (
-        echo [atatus] git pull failed — falling back to tarball re-extract
+        echo [atatus] git pull failed - falling back to tarball re-extract
         call :download_tarball
         if !ERRORLEVEL! neq 0 exit /b 1
     )
@@ -223,14 +224,17 @@ if defined WHEEL_DIR (
     if /i not "%~f0"=="%INSTALL_DIR%\install.bat" copy /y "%~f0" "%INSTALL_DIR%\install.bat" >nul
     goto :eof
 )
+REM One bounded fetch, never a credential prompt; on failure fall through to the
+REM tarball over the existing tree. The venv lives inside INSTALL_DIR, so the old
+REM "re-clone" path wiped it on every flaky network.
+set "GIT_TERMINAL_PROMPT=0"
 if exist "%INSTALL_DIR%\.git" (
-    echo [atatus] Repository at %INSTALL_DIR%, syncing...
-    git -C "%INSTALL_DIR%" fetch --depth 1 origin "%INSTALL_BRANCH%" >nul 2>&1 && git -C "%INSTALL_DIR%" checkout -B "%INSTALL_BRANCH%" FETCH_HEAD >nul 2>&1 && goto :eof
-    git -C "%INSTALL_DIR%" pull --ff-only >nul 2>&1 && goto :eof
-    echo [atatus] git update failed — re-cloning
-    rmdir /s /q "%INSTALL_DIR%" 2>nul
+    echo [atatus] Syncing with origin/%INSTALL_BRANCH%...
+    git -C "%INSTALL_DIR%" -c core.askPass=true -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 fetch --depth 1 origin "%INSTALL_BRANCH%" >nul 2>&1 && git -C "%INSTALL_DIR%" checkout -B "%INSTALL_BRANCH%" FETCH_HEAD >nul 2>&1 && goto :eof
+    echo [atatus] git fetch failed - falling back to the tarball
+    call :download_tarball
+    goto :eof
 )
-if exist "%INSTALL_DIR%" if not exist "%INSTALL_DIR%\.git" ( rmdir /s /q "%INSTALL_DIR%" 2>nul )
 where git >nul 2>&1 && (
     echo [atatus] Cloning coding-harness-tracing...
     git clone --depth 1 --branch "%INSTALL_BRANCH%" "%REPO_URL%" "%INSTALL_DIR%" >nul 2>&1 && goto :eof
@@ -243,8 +247,8 @@ REM --- download_tarball ---
 :download_tarball
 echo [atatus] Downloading tarball...
 set "TMPZIP=%TEMP%\atatus-install-%RANDOM%.tar.gz"
-powershell -NoProfile -Command "Invoke-WebRequest -Uri '%TARBALL_URL%' -OutFile '%TMPZIP%'" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( curl -sSfL "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [atatus] Download failed >&2 & exit /b 1 ) )
+powershell -NoProfile -Command "Invoke-WebRequest -Uri '%TARBALL_URL%' -OutFile '%TMPZIP%' -TimeoutSec 120" >nul 2>&1
+if !ERRORLEVEL! neq 0 ( curl -sSfL --connect-timeout 5 --max-time 120 "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [atatus] Download failed >&2 & exit /b 1 ) )
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 tar xzf "%TMPZIP%" --strip-components=1 -C "%INSTALL_DIR%" >nul 2>&1
 if !ERRORLEVEL! neq 0 (
@@ -268,9 +272,35 @@ echo [atatus] %FOUND_PYTHON% cannot create a virtual environment ^(venv/ensurepi
 echo [atatus] Reinstall Python with the "pip" and "venv" components enabled ^(python.org installer or: winget install Python.Python.3.12^), then run this installer again. >&2
 exit /b 1
 
+REM --- source stamp: a reinstall with an unchanged tree spent seconds in pip for
+REM nothing. The tree is identified by the git commit, or by the tarball's SHA.
+:source_stamp
+set "SOURCE_STAMP="
+for /f "delims=" %%H in ('git -C "%INSTALL_DIR%" rev-parse HEAD 2^>nul') do set "SOURCE_STAMP=%%H"
+if not "%SOURCE_STAMP%"=="" goto :eof
+REM Tarball checkout: hash the package sources, as install.sh does.
+set "STAMP_LIST=%TEMP%\atatus-stamp-%RANDOM%.txt"
+( for /r "%INSTALL_DIR%\core" %%F in (*) do @echo %%~fF %%~zF %%~tF ) > "%STAMP_LIST%" 2>nul
+( for /r "%INSTALL_DIR%\tracing" %%F in (*) do @echo %%~fF %%~zF %%~tF ) >> "%STAMP_LIST%" 2>nul
+for /f "skip=1 tokens=1" %%H in ('certutil -hashfile "%STAMP_LIST%" SHA1 ^| findstr /v "CertUtil"') do if "%SOURCE_STAMP%"=="" set "SOURCE_STAMP=%%H"
+del "%STAMP_LIST%" 2>nul
+goto :eof
+:record_venv_source
+call :source_stamp
+if not "%SOURCE_STAMP%"=="" ( >"%VENV_DIR%\.atatus-source" echo %SOURCE_STAMP% )
+goto :eof
+:venv_is_current
+if defined WHEEL_DIR exit /b 1
+if not exist "%VENV_DIR%\.atatus-source" exit /b 1
+call :source_stamp
+if "%SOURCE_STAMP%"=="" exit /b 1
+set /p VENV_STAMP=<"%VENV_DIR%\.atatus-source"
+if not "%VENV_STAMP%"=="%SOURCE_STAMP%" exit /b 1
+"%VENV_PYTHON%" -c "import core" >nul 2>&1
+exit /b !ERRORLEVEL!
+
 REM --- setup_venv ---
 :setup_venv
-if exist "%VENV_PYTHON%" ( "%VENV_PYTHON%" -c "import core" >nul 2>&1 && ( echo [atatus] Venv ready & goto :eof ) )
 REM A venv with a python but no pip is debris from an earlier failed run.
 if exist "%VENV_PYTHON%" if not exist "%VENV_PIP%" ( echo [atatus] Existing venv at %VENV_DIR% has no pip; rebuilding it & rmdir /s /q "%VENV_DIR%" 2>nul )
 if not exist "%VENV_PYTHON%" (
@@ -279,9 +309,11 @@ if not exist "%VENV_PYTHON%" (
     if !ERRORLEVEL! neq 0 ( rmdir /s /q "%VENV_DIR%" 2>nul & echo [atatus] Failed to create venv with %FOUND_PYTHON% >&2 & echo [atatus] Reinstall Python with the "venv" component enabled and run again. >&2 & exit /b 1 )
 )
 if not exist "%VENV_PIP%" ( echo [atatus] pip not found in venv at %VENV_DIR% >&2 & exit /b 1 )
+call :venv_is_current && ( echo [atatus] Venv already current at %VENV_DIR% & goto :eof )
 echo [atatus] Installing atatus-coding-harness-tracing...
 call :pip_install_harness ""
 if !ERRORLEVEL! neq 0 exit /b 1
+call :record_venv_source
 echo [atatus] Venv ready at %VENV_DIR%
 goto :eof
 

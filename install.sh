@@ -115,19 +115,19 @@ venv_pip() {
 }
 
 # -- Repository download ----------------------------------------------------
+timeout_cmd() { local secs="$1"; shift; if command_exists timeout; then timeout "$secs" "$@"; else "$@"; fi; }
+
+git_q() { GIT_TERMINAL_PROMPT=0 timeout_cmd 20 git -c core.askPass=true -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@" 2>/dev/null; }
+
 git_sync_harness_repo() {
     local branch="$1"
     [[ -d "${INSTALL_DIR}/.git" ]] || return 1
     info "Syncing with origin/${branch}..."
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$branch" 2>/dev/null \
-        && git -C "$INSTALL_DIR" checkout -B "$branch" FETCH_HEAD 2>/dev/null && return 0
-    git -C "$INSTALL_DIR" fetch origin "$branch" 2>/dev/null \
-        && git -C "$INSTALL_DIR" checkout -B "$branch" FETCH_HEAD 2>/dev/null && return 0
-    warn "git fetch/checkout failed — trying pull --ff-only"
-    git -C "$INSTALL_DIR" pull --ff-only origin "$branch" 2>/dev/null && return 0
-    git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null && return 0
-    return 1
+    git_q -C "$INSTALL_DIR" fetch --depth 1 origin "$branch" \
+        || { warn "git fetch failed - falling back to the tarball"; return 1; }
+    git_q -C "$INSTALL_DIR" checkout -B "$branch" FETCH_HEAD
 }
+
 
 # True only when this script is the copy the installer placed in INSTALL_DIR,
 # which is the one an update overwrites underneath itself. A pipe has no file.
@@ -249,6 +249,19 @@ pip_install_harness() {
     fi
 }
 
+
+source_stamp() {
+    git_q -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null \
+        || cat "${INSTALL_DIR}/VERSION" 2>/dev/null || echo "unknown-$(date +%s)"
+}
+record_venv_source() { source_stamp > "${VENV_DIR}/.atatus-source" 2>/dev/null || true; }
+venv_is_current() {
+    [[ -n "$WHEEL_DIR" ]] && return 1
+    [[ -f "${VENV_DIR}/.atatus-source" ]] || return 1
+    [[ "$(cat "${VENV_DIR}/.atatus-source")" == "$(source_stamp)" ]] || return 1
+    local vp; vp=$(venv_python) && "$vp" -c "import core" 2>/dev/null
+}
+
 setup_venv() {
     local python_cmd="$1"
     # A venv with a python but no pip is debris from an earlier failed run.
@@ -266,8 +279,13 @@ setup_venv() {
         }
     fi
     local pip; pip=$(venv_pip) || { err "pip not found in venv at ${VENV_DIR}"; return 1; }
+    if venv_is_current; then
+        info "Venv already current at ${VENV_DIR}"
+        return 0
+    fi
     info "Installing atatus-coding-harness-tracing into venv..."
     pip_install_harness "$pip" || return 1
+    record_venv_source
 
     [[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip"
 
@@ -486,12 +504,13 @@ main() {
                 info "Updating from local wheels in ${WHEEL_DIR}..."
             elif [[ -d "${INSTALL_DIR}/.git" ]]; then
                 info "Pulling latest changes..."
-                git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || {
+                git_q -C "$INSTALL_DIR" pull --ff-only || {
                     warn "git pull failed — falling back to tarball re-extract"; install_repo_tarball; }
             else install_repo_tarball; fi
             local pip; pip=$(venv_pip) || { err "Venv not found — run install first"; exit 1; }
             info "Reinstalling atatus-coding-harness-tracing..."
             pip_install_harness "$pip" -U || exit 1
+            record_venv_source
             local vp; vp=$(venv_python) || { err "venv python not found"; exit 1; }
             local harnesses
             harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
