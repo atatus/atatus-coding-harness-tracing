@@ -23,11 +23,39 @@ from core.event_model import (
 )
 
 
+def transcript_window(
+    transcript: Path, start_line: int = 0, start_offset: "int | None" = None
+) -> "list[tuple[int, str]]":
+    """Lines of the transcript from the turn's start, as (line_index, text).
+
+    Hooks run inline in the harness's tool loop, so a 10 MB session file must not be
+    read whole on every turn. With the byte offset recorded at prompt time the read
+    is O(window); without it the file is streamed and skipped up to ``start_line``.
+    """
+    lines: list[tuple[int, str]] = []
+    # Binary so the recorded byte offset is exact; decoded per line below.
+    fh = open(transcript, "rb")  # noqa: SIM115
+    try:
+        if start_offset is not None and start_offset >= 0:
+            fh.seek(start_offset)
+            for index, raw in enumerate(fh, start=max(0, start_line)):
+                lines.append((index, raw.decode("utf-8", "replace").rstrip("\r\n")))
+            return lines
+        for index, raw in enumerate(fh):
+            if index < max(0, start_line):
+                continue
+            lines.append((index, raw.decode("utf-8", "replace").rstrip("\r\n")))
+    finally:
+        fh.close()
+    return lines
+
+
 def parse_claude_transcript(
     transcript: Path,
     root_event: BaseEvent,
     *,
     start_line: int = 0,
+    start_offset: "int | None" = None,
 ) -> EventGraph:
     """Return a typed event graph for one main-agent or subagent transcript.
 
@@ -46,7 +74,7 @@ def parse_claude_transcript(
     last_timestamp_ms: int | None = None
 
     try:
-        lines = transcript.read_text(encoding="utf-8").splitlines()
+        window = transcript_window(transcript, start_line, start_offset)
     except (OSError, UnicodeError) as exc:
         graph.diagnostics = [
             GraphDiagnostic(
@@ -57,8 +85,8 @@ def parse_claude_transcript(
         ]
         return graph
 
-    for line_index, raw_line in enumerate(lines):
-        if line_index < max(0, start_line) or not raw_line.strip():
+    for line_index, raw_line in window:
+        if not raw_line.strip():
             continue
         try:
             entry = json.loads(raw_line)
@@ -415,4 +443,4 @@ def _string(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-__all__ = ["parse_claude_transcript"]
+__all__ = ["parse_claude_transcript", "transcript_window"]

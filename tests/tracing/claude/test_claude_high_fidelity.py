@@ -17,6 +17,7 @@ import pytest
 import tracing.claude_code.hooks.handlers as handlers
 from core.common import StateManager
 from core.event_model import EventStatus, ModelCallEvent, ToolEvent, TurnEvent
+from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer
 from tracing.claude_code.hooks.transcript import parse_claude_transcript
 
 
@@ -1107,3 +1108,121 @@ class TestAgentThatStoppedInsideTheTurnIsStillAwaited:
         sent_names = [s["name"] for p in captured if p for s in _spans(p)]
         assert "Turn 1" in sent_names, "root released after the last notification"
         assert "a" * 32 not in json.loads(state.get("held_spans") or "{}")
+
+
+class TestSubagentHooksDoNotContendOnTheSessionFile:
+    """Ten background agents each fire PreToolUse/PostToolUse with the parent's session_id.
+    Routing them all into the session file made every tool call rewrite one shared,
+    ever-growing buffer under one lock; the agents' routine work stalled behind it."""
+
+    def test_subagent_tool_hooks_land_in_the_agent_file_not_the_session_file(self, tmp_path, monkeypatch):
+        import tracing.claude_code.hooks.adapter as adapter
+
+        monkeypatch.setattr(adapter, "STATE_DIR", tmp_path)
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        session = StateManager(tmp_path, tmp_path / "state_s1.json", tmp_path / ".lock_s1")
+        session.init_state()
+        session.set("session_id", "s1")
+        payload = {
+            "session_id": "s1",
+            "agent_id": "agent-A",
+            "tool_use_id": "tu-9",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/x"},
+            "transcript_path": str(transcript),
+        }
+        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: session):
+            handlers._handle_pre_tool_use(payload)
+            handlers._handle_post_tool_use({**payload, "tool_response": "ok"})
+        assert session.get(ToolBuffer.STATE_KEY) in (None, "", "{}")
+        agent_file = tmp_path / "state_s1__agent_agent-A.json"
+        assert agent_file.is_file()
+        assert "tu-9" in agent_file.read_text(encoding="utf-8")
+
+    def test_large_tool_bodies_are_not_copied_into_state(self, tmp_path):
+        state = _live_turn_state(tmp_path)
+        big = "x" * 200_000
+        buffer = ToolBuffer(state)
+        buffer.record_start("tu-big", tool_name="Write", tool_input={"content": big}, started_at_ms=1)
+        buffer.record_result("tu-big", status="success", tool_response=big, ended_at_ms=2)
+        assert state.state_file.stat().st_size < 20_000
+        obs = buffer.get("tu-big")
+        assert obs.tool_input == TRUNCATED_BODY and obs.tool_response == TRUNCATED_BODY
+        assert obs.started_at_ms == 1 and obs.ended_at_ms == 2 and obs.status == "success"
+
+    def test_truncated_body_never_replaces_the_transcript_body(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        ToolBuffer(state).record_start("tu1", tool_name="Bash", tool_input={"command": "x" * 20_000}, started_at_ms=1)
+        ToolBuffer(state).record_result("tu1", status="success", tool_response="y" * 20_000, ended_at_ms=2)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        bash = next(s for s in _spans(captured[0]) if s["name"] == "Bash")
+        assert TRUNCATED_BODY not in json.dumps(bash)
+        assert _attrs(bash).get("tool.command") == "ls"
+
+    def test_agent_observations_are_applied_at_export_and_the_agent_file_is_dropped(self, tmp_path, monkeypatch):
+        import tracing.claude_code.hooks.adapter as adapter
+
+        monkeypatch.setattr(adapter, "STATE_DIR", tmp_path)
+        transcript = _write(tmp_path / "t.jsonl", _agent_launch("toolu_A", "agent-A"))
+        state = _live_turn_state(tmp_path)
+        captured = []
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        agent_transcript = _write(
+            tmp_path / "agent.jsonl",
+            [
+                _assistant(
+                    "au1",
+                    "amsg",
+                    [{"type": "tool_use", "id": "tu-a1", "name": "Bash", "input": {"command": "curl"}}],
+                    ts="2026-08-22T16:17:00.000Z",
+                ),
+                _tool_result("tu-a1", ts="2026-08-22T16:17:01.000Z"),
+            ],
+        )
+        tool_payload = {
+            "session_id": "s1",
+            "agent_id": "agent-A",
+            "tool_use_id": "tu-a1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "curl"},
+            "transcript_path": str(agent_transcript),
+        }
+        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: state):
+            handlers._handle_pre_tool_use(tool_payload)
+            handlers._handle_post_tool_use_failure({**tool_payload, "tool_response": "boom", "error": "exit 7"})
+        agent_file = tmp_path / "state_s1__agent_agent-A.json"
+        assert agent_file.is_file()
+        _run_hook(
+            handlers.subagent_stop,
+            state,
+            {
+                "session_id": "s1",
+                "agent_id": "agent-A",
+                "agent_type": "general-purpose",
+                "agent_transcript_path": str(agent_transcript),
+                "transcript_path": str(transcript),
+            },
+            captured,
+        )
+        bash = next(
+            s
+            for p in captured
+            if p
+            for s in _spans(p)
+            if s["name"] == "Bash" and _attrs(s).get("tool.call.id") == "tu-a1"
+        )
+        assert bash["status"]["code"] == 2, "the agent's own hook observed the failure"
+        assert not agent_file.exists(), "consumed at export"
+
+    def test_buffer_never_exceeds_the_observation_ceiling(self, tmp_path):
+        from tracing.claude_code.hooks.tool_buffer import MAX_OBSERVATIONS
+
+        state = _live_turn_state(tmp_path)
+        buffer = ToolBuffer(state)
+        for i in range(MAX_OBSERVATIONS + 50):
+            buffer.record_result(f"tu-{i:04d}", status="success", tool_response="ok", ended_at_ms=i)
+        kept = buffer.all()
+        assert len(kept) == MAX_OBSERVATIONS
+        assert min(o.ended_at_ms for o in kept) == 50, "the oldest are the ones evicted"

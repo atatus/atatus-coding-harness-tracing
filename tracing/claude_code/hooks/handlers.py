@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.common import (
+    StateManager,
     build_multi_span,
     build_span,
     env,
@@ -47,14 +48,16 @@ from tracing.claude_code.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
     check_requirements,
+    discard_agent_state,
     ensure_session_initialized,
     gc_stale_state_files,
+    resolve_agent_state,
     resolve_session,
     resolve_transcript_path,
 )
 from tracing.claude_code.hooks.span_renderer import render_event_graph
-from tracing.claude_code.hooks.tool_buffer import ToolBuffer, ToolObservation
-from tracing.claude_code.hooks.transcript import parse_claude_transcript
+from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
+from tracing.claude_code.hooks.transcript import parse_claude_transcript, transcript_window
 
 # ---------------------------------------------------------------------------
 # Shared helper
@@ -99,9 +102,18 @@ def _handle_session_start(input_json: dict) -> None:
     log(f"Session started: {state.get('session_id')}")
 
 
+def _tool_state(input_json: dict):
+    """A subagent's tool hooks carry agent_id; their observations belong to that
+    agent's own state file, which is what its export reads."""
+    agent_id = input_json.get("agent_id")
+    if isinstance(agent_id, str) and agent_id and _has_live_transcript(input_json):
+        return resolve_agent_state(input_json, agent_id)
+    return resolve_session(input_json)
+
+
 def _handle_pre_tool_use(input_json: dict) -> None:
     """Handle pre_tool_use: record tool start time and buffer the start observation."""
-    state = resolve_session(input_json)
+    state = _tool_state(input_json)
     tool_id = input_json.get("tool_use_id") or generate_trace_id()
     started_at_ms = get_timestamp_ms()
     state.set(f"tool_{tool_id}_start", str(started_at_ms))
@@ -117,9 +129,9 @@ def _handle_pre_tool_use(input_json: dict) -> None:
 
 def _handle_post_tool_use(input_json: dict) -> None:
     """Handle post_tool_use: build and send a TOOL span."""
-    state = resolve_session(input_json)
+    state = _tool_state(input_json)
     session_id = state.get("session_id")
-    if session_id is None:
+    if not _has_live_transcript(input_json) and session_id is None:
         return
 
     if _has_live_transcript(input_json):
@@ -249,9 +261,9 @@ def _handle_post_tool_use(input_json: dict) -> None:
 
 def _handle_post_tool_use_failure(input_json: dict) -> None:
     """Handle post_tool_use_failure: build and send a TOOL span with error attributes."""
-    state = resolve_session(input_json)
+    state = _tool_state(input_json)
     session_id = state.get("session_id")
-    if session_id is None:
+    if not _has_live_transcript(input_json) and session_id is None:
         return
 
     if _has_live_transcript(input_json):
@@ -461,11 +473,23 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
 def _record_trace_start_line(state, input_json: dict) -> None:
     transcript = input_json.get("transcript_path", "")
     if transcript and Path(transcript).is_file():
-        with open(transcript, encoding="utf-8") as f:
+        # The byte offset lets every later read of this turn seek past the history
+        # instead of streaming the whole session file to find its own start. The
+        # line index is kept only as the label the parser reports in diagnostics.
+        offset = Path(transcript).stat().st_size
+        with open(transcript, encoding="utf-8", errors="replace") as f:
             line_count = sum(1 for _ in f)
         state.set("trace_start_line", str(line_count))
+        state.set("trace_start_offset", str(offset))
     else:
         state.set("trace_start_line", "0")
+        state.set("trace_start_offset", "0")
+
+
+def _trace_window(state) -> "tuple[int, int | None]":
+    start_line = int(state.get("trace_start_line") or "0")
+    raw_offset = state.get("trace_start_offset")
+    return start_line, (int(raw_offset) if raw_offset and raw_offset.isdigit() else None)
 
 
 def _usage_int(usage: dict, key: str) -> int:
@@ -525,7 +549,7 @@ class _TokenUsage:
         return attrs
 
 
-def _wait_for_transcript_flush(transcript: Path, start_line: int) -> bool:
+def _wait_for_transcript_flush(transcript: Path, start_line: int, start_offset: "int | None" = None) -> bool:
     """Poll briefly for an assistant entry at/after *start_line*.
 
     Claude Code writes the session JSONL asynchronously, so a Stop hook can fire
@@ -549,17 +573,14 @@ def _wait_for_transcript_flush(transcript: Path, start_line: int) -> bool:
     deadline = time.monotonic() + (cap_ms / 1000.0)
     while True:
         try:
-            with open(transcript, encoding="utf-8") as f:
-                for i, line in enumerate(f):
-                    if i < start_line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    msg = entry.get("message")
-                    if isinstance(msg, dict) and msg.get("role") == "assistant":
-                        return True
+            for _, line in transcript_window(transcript, start_line, start_offset):
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = entry.get("message")
+                if isinstance(msg, dict) and msg.get("role") == "assistant":
+                    return True
         except OSError:
             return False
         if time.monotonic() >= deadline:
@@ -571,6 +592,7 @@ def _wait_for_transcript_flush(transcript: Path, start_line: int) -> bool:
 def _scan_transcript_for_usage(
     transcript: Path,
     start_line: int,
+    start_offset: "int | None" = None,
 ) -> "tuple[str, _TokenUsage, str]":
     """Walk the transcript JSONL from *start_line* forward and return:
     (combined_text, usage, model_name)
@@ -584,64 +606,61 @@ def _scan_transcript_for_usage(
     # clean multiple. Count each API message exactly once.
     seen_message_ids: set = set()
 
-    with open(transcript, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if i < start_line:
+    for _, line in transcript_window(transcript, start_line, start_offset):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = entry.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+
+        message_id = msg.get("id")
+        if message_id:
+            if message_id in seen_message_ids:
                 continue
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            msg = entry.get("message")
-            if not isinstance(msg, dict) or msg.get("role") != "assistant":
-                continue
+            seen_message_ids.add(message_id)
 
-            message_id = msg.get("id")
-            if message_id:
-                if message_id in seen_message_ids:
-                    continue
-                seen_message_ids.add(message_id)
+        content = msg.get("content")
+        if isinstance(content, list):
+            text = "\n".join(
+                item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"
+            )
+        elif isinstance(content, str):
+            text = content
+        else:
+            text = ""
+        if text:
+            output = f"{output}\n{text}" if output else text
 
-            content = msg.get("content")
-            if isinstance(content, list):
-                text = "\n".join(
-                    item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"
-                )
-            elif isinstance(content, str):
-                text = content
-            else:
-                text = ""
-            if text:
-                output = f"{output}\n{text}" if output else text
+        model = msg.get("model", "") or model
 
-            model = msg.get("model", "") or model
+        # Anthropic reports input_tokens (uncached), cache_read_input_tokens,
+        # and cache_creation_input_tokens as disjoint buckets. The prompt
+        # total is their sum (the OpenInference total), while the two cache
+        # buckets are tracked separately and surfaced as prompt_details so
+        # downstream cost pricing can apply the cheaper cache-read /
+        # cache-write rates instead of the full input rate.
+        usage = msg.get("usage", {})
+        uncached = _usage_int(usage, "input_tokens")
+        cache_read = _usage_int(usage, "cache_read_input_tokens")
+        cache_write = _usage_int(usage, "cache_creation_input_tokens")
 
-            # Anthropic reports input_tokens (uncached), cache_read_input_tokens,
-            # and cache_creation_input_tokens as disjoint buckets. The prompt
-            # total is their sum (the OpenInference total), while the two cache
-            # buckets are tracked separately and surfaced as prompt_details so
-            # downstream cost pricing can apply the cheaper cache-read /
-            # cache-write rates instead of the full input rate.
-            usage = msg.get("usage", {})
-            uncached = _usage_int(usage, "input_tokens")
-            cache_read = _usage_int(usage, "cache_read_input_tokens")
-            cache_write = _usage_int(usage, "cache_creation_input_tokens")
+        # ``cache_creation`` breaks the write down by entry lifetime. The
+        # one-hour tier is priced above the five-minute default, so the
+        # split has to travel with the count -- without it every write is
+        # billed at the cheaper rate.
+        cache_creation = usage.get("cache_creation") or {}
+        cache_write_1h = _usage_int(cache_creation, "ephemeral_1h_input_tokens")
 
-            # ``cache_creation`` breaks the write down by entry lifetime. The
-            # one-hour tier is priced above the five-minute default, so the
-            # split has to travel with the count -- without it every write is
-            # billed at the cheaper rate.
-            cache_creation = usage.get("cache_creation") or {}
-            cache_write_1h = _usage_int(cache_creation, "ephemeral_1h_input_tokens")
-
-            usage_totals.prompt += uncached + cache_read + cache_write
-            usage_totals.cache_read += cache_read
-            usage_totals.cache_write += cache_write
-            usage_totals.cache_write_1h += cache_write_1h
-            usage_totals.completion += _usage_int(usage, "output_tokens")
+        usage_totals.prompt += uncached + cache_read + cache_write
+        usage_totals.cache_read += cache_read
+        usage_totals.cache_write += cache_write
+        usage_totals.cache_write_1h += cache_write_1h
+        usage_totals.completion += _usage_int(usage, "output_tokens")
 
     return output, usage_totals, model
 
@@ -667,9 +686,9 @@ def _merge_tool_observations(graph, observations) -> list:
         matched.append(observation)
         if observation.tool_name:
             event.tool_name = observation.tool_name
-        if observation.tool_input is not None:
+        if observation.tool_input is not None and observation.tool_input != TRUNCATED_BODY:
             event.input = observation.tool_input
-        if observation.tool_response is not None:
+        if observation.tool_response is not None and observation.tool_response != TRUNCATED_BODY:
             if isinstance(event.output, dict) and isinstance(event.output.get("toolUseResult"), dict):
                 event.output = {
                     "content": observation.tool_response,
@@ -681,7 +700,8 @@ def _merge_tool_observations(graph, observations) -> list:
         _overlay_timestamp(graph, event, "ended_at_ms", observation.ended_at_ms)
         if observation.status == "error":
             event.status = EventStatus.FAILED
-            event.error = str(observation.error or observation.tool_response or "Tool call failed")
+            response = observation.tool_response if observation.tool_response != TRUNCATED_BODY else None
+            event.error = str(observation.error or response or "Tool call failed")
         elif observation.status == "success":
             event.status = EventStatus.COMPLETED
     return matched
@@ -760,6 +780,7 @@ def _buffer_subagent(state, input_json: dict, ended_at_ms: int) -> bool:
         "agent_id": agent_id,
         "agent_type": input_json.get("agent_type") or "unknown",
         "transcript_path": transcript_path,
+        "agent_state_file": str(resolve_agent_state(input_json, agent_id).state_file),
         "started_at_ms": None,
         "ended_at_ms": ended_at_ms,
         "output": input_json.get("last_assistant_message") or "",
@@ -789,6 +810,22 @@ def _agent_id_from_tool(event: ToolEvent) -> str:
         return ""
     agent_id = result.get("agentId")
     return agent_id if isinstance(agent_id, str) else ""
+
+
+def _overlay_agent_observations(subgraph, descriptor: dict) -> None:
+    """Apply the timing/status the subagent's own tool hooks recorded, then drop its
+    state file: the agent is finished and this export is the only reader."""
+    agent_state_file = descriptor.get("agent_state_file")
+    if not isinstance(agent_state_file, str) or not agent_state_file:
+        return
+    path = Path(agent_state_file)
+    if not path.is_file():
+        return
+    agent_state = StateManager(path.parent, path, path.parent / f".lock_{path.stem.replace('state_', '', 1)}")
+    try:
+        _merge_tool_observations(subgraph, ToolBuffer(agent_state).all())
+    finally:
+        discard_agent_state(agent_state)
 
 
 def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, dict]:
@@ -845,6 +882,7 @@ def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, d
         )
         transcript_path = Path(str(descriptor.get("transcript_path") or ""))
         subgraph = parse_claude_transcript(transcript_path, agent_event)
+        _overlay_agent_observations(subgraph, descriptor)
         insertion_index = graph.events.index(parent_tool) + 1 if parent_tool is not None else len(graph.events)
         graph.events[insertion_index:insertion_index] = subgraph.events
         graph.diagnostics.extend(subgraph.diagnostics)
@@ -898,6 +936,13 @@ def _acknowledge_exported_turn(
             for observation in observations:
                 if current_observations.get(observation.tool_use_id) == observation:
                     current_observations.pop(observation.tool_use_id, None)
+            # An observation the turn's transcript never matched will not match a later
+            # turn's either; left in place it is re-read and rewritten by every hook.
+            turn_started = int(data.get("current_trace_start_time") or 0)
+            for tool_use_id, observation in list(current_observations.items()):
+                ended = observation.ended_at_ms or observation.started_at_ms or 0
+                if ended and turn_started and ended < turn_started:
+                    current_observations.pop(tool_use_id, None)
             data[ToolBuffer.STATE_KEY] = ToolBuffer._encode(current_observations)
 
             current_subagents = _decode_pending_subagents(data.get("pending_subagents", ""))
@@ -922,6 +967,7 @@ def _acknowledge_exported_turn(
                 "continuation_is_final",
                 "export_attempted_trace_id",
                 "trace_start_line",
+                "trace_start_offset",
                 "pending_expansion_type",
                 "pending_command_name",
                 "pending_command_args",
@@ -1177,15 +1223,15 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
     # Claude Code v2 ships the assistant's final text directly.  Earlier versions
     # didn't, so we still scan the transcript when last_assistant_message is empty.
     output = input_json.get("last_assistant_message", "") or ""
-    start_line = int(state.get("trace_start_line") or "0")
+    start_line, start_offset = _trace_window(state)
     usage = _TokenUsage()
     model = ""
     if transcript is not None:
         # The flush race only exists on Stop; by the time a later hook closes the turn,
         # everything it wrote is already on disk.
         if reason is TurnEndReason.COMPLETED:
-            _wait_for_transcript_flush(transcript, start_line)
-        scanned_output, usage, model = _scan_transcript_for_usage(transcript, start_line)
+            _wait_for_transcript_flush(transcript, start_line, start_offset)
+        scanned_output, usage, model = _scan_transcript_for_usage(transcript, start_line, start_offset)
         if not output:
             output = scanned_output
     if not output:
@@ -1205,7 +1251,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
     )
     graph = None
     if transcript is not None:
-        graph = parse_claude_transcript(transcript, root_event, start_line=start_line)
+        graph = parse_claude_transcript(transcript, root_event, start_line=start_line, start_offset=start_offset)
         # The transcript can prove an interrupt the hook payload cannot.
         reason = root_event.end_reason or reason
         root_event.status = event_status_for(reason)
@@ -1478,6 +1524,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         source_id=agent_type,
     )
     graph = parse_claude_transcript(Path(transcript_path), agent_event)
+    _overlay_agent_observations(graph, {"agent_state_file": str(resolve_agent_state(input_json, agent_id).state_file)})
     if graph.events and graph.events[-1].ended_at_ms:
         agent_event.ended_at_ms = max(int(e.ended_at_ms) for e in graph.events if isinstance(e.ended_at_ms, int))
     subagent_span_id = generate_span_id()

@@ -14,6 +14,35 @@ from core.common import StateManager
 
 _VALID_STATUSES = {"pending", "success", "error"}
 
+# The transcript already carries every tool's full input and output. The hook's
+# unique contribution is timing and status, so a body past this size is left to the
+# transcript rather than copied into a state file that every later hook must rewrite.
+MAX_BODY_BYTES = 8 * 1024
+TRUNCATED_BODY = "[atatus: body omitted, see transcript]"
+# Hard ceiling on buffered observations. Every hook re-reads and rewrites the whole
+# state file under a lock, so its size is paid on every tool call; a session whose
+# observations stop matching would otherwise grow it without bound.
+MAX_OBSERVATIONS = 200
+
+
+def _evict_oldest(items: Dict[str, "ToolObservation"]) -> None:
+    excess = len(items) - MAX_OBSERVATIONS
+    if excess <= 0:
+        return
+    by_age = sorted(items, key=lambda k: items[k].ended_at_ms or items[k].started_at_ms or 0)
+    for tool_use_id in by_age[:excess]:
+        items.pop(tool_use_id, None)
+
+
+def _bounded(value: Any) -> Any:
+    safe = _json_safe(value)
+    try:
+        if len(json.dumps(safe)) <= MAX_BODY_BYTES:
+            return safe
+    except (TypeError, ValueError):
+        return safe
+    return TRUNCATED_BODY
+
 
 def _json_safe(value: Any) -> Any:
     """Return a deterministic, JSON-serializable copy of a hook value."""
@@ -98,7 +127,7 @@ class ToolBuffer:
         def update(items: Dict[str, ToolObservation]) -> Tuple[ToolObservation, bool]:
             observation = items.get(tool_use_id) or ToolObservation(tool_use_id=tool_use_id)
             observation.tool_name = tool_name
-            observation.tool_input = _json_safe(tool_input)
+            observation.tool_input = _bounded(tool_input)
             observation.started_at_ms = started_at_ms
             if hook_event_metadata is not None:
                 observation.hook_event_metadata = _json_safe(hook_event_metadata)
@@ -125,7 +154,7 @@ class ToolBuffer:
         def update(items: Dict[str, ToolObservation]) -> Tuple[ToolObservation, bool]:
             observation = items.get(tool_use_id) or ToolObservation(tool_use_id=tool_use_id)
             observation.status = status
-            observation.tool_response = _json_safe(tool_response)
+            observation.tool_response = _bounded(tool_response)
             observation.error = _json_safe(error)
             observation.ended_at_ms = ended_at_ms
             if hook_event_metadata is not None:
@@ -229,6 +258,7 @@ class ToolBuffer:
             items = self._decode(state_data.get(self.STATE_KEY))
             result, changed = operation(items)
             if changed:
+                _evict_oldest(items)
                 state_data[self.STATE_KEY] = self._encode(items)
                 self._state._write(state_data)
             return result

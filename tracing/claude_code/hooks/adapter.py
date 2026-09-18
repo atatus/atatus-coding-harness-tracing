@@ -7,6 +7,7 @@ session logic; individual hook events are handled by handlers.py.
 import os
 import platform
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -101,16 +102,41 @@ def resolve_session(input_json: dict) -> StateManager:
         else:
             session_key = _get_grandparent_pid()
 
-    state_file = STATE_DIR / f"state_{session_key}.json"
-    lock_path = STATE_DIR / f".lock_{session_key}"
+    return _state_for(session_key)
 
+
+def _state_for(session_key: str) -> StateManager:
     sm = StateManager(
         state_dir=STATE_DIR,
-        state_file=state_file,
-        lock_path=lock_path,
+        state_file=STATE_DIR / f"state_{session_key}.json",
+        lock_path=STATE_DIR / f".lock_{session_key}",
     )
     sm.init_state()
     return sm
+
+
+def agent_state_key(session_key: str, agent_id: str) -> str:
+    return f"{session_key}__agent_{agent_id}"
+
+
+def resolve_agent_state(input_json: dict, agent_id: str) -> StateManager:
+    """The per-subagent state file. A subagent's tool hooks land here rather than in
+    the session file, so ten agents running at once do not serialise on one lock and
+    rewrite one another's multi-megabyte buffer on every tool call."""
+    session_key = input_json.get("session_id") or os.environ.get("CLAUDE_SESSION_KEY", "")
+    if not session_key:
+        session_key = str(os.getppid()) if platform.system() == "Windows" else _get_grandparent_pid()
+    return _state_for(agent_state_key(session_key, agent_id))
+
+
+def discard_agent_state(state: StateManager) -> None:
+    if state.state_file is not None:
+        state.state_file.unlink(missing_ok=True)
+    if state._lock_path is not None and state._lock_path.exists():
+        try:
+            state._lock_path.unlink() if state._lock_path.is_file() else state._lock_path.rmdir()
+        except OSError:
+            pass
 
 
 def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
@@ -183,6 +209,15 @@ def gc_stale_state_files() -> None:
         return
     for f in STATE_DIR.glob("state_*.json"):
         key = f.stem.replace("state_", "", 1)
+        if "__agent_" in key:
+            # A subagent's file is consumed by its export; one still here after a day
+            # belongs to an agent whose stop never reached us.
+            try:
+                if time.time() - f.stat().st_mtime > 86400:
+                    f.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
         if not key.isdigit():
             continue
         pid = int(key)
