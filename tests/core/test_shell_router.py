@@ -577,8 +577,14 @@ class TestUpdateRefetchesItself:
         guard = [ln for ln in self.sh.splitlines() if "ATATUS_UPDATE_REEXEC:-" in ln][0]
         assert '-z "$WHEEL_DIR"' in guard
         assert "running_from_install_dir" in guard
-        assert '[[ -f "${BASH_SOURCE[0]}" ]] || return 1' in self.sh
+        assert '[[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]:-}" ]] || return 1' in self.sh
         assert '[[ "$self" == "$dir" ]]' in self.sh
+
+    def test_piped_bash_has_no_bash_source(self):
+        """`curl | bash -s -- update` leaves BASH_SOURCE empty; under `set -u` a
+        bare `${BASH_SOURCE[0]}` test aborts with "unbound variable" (macOS)."""
+        bare = [ln for ln in self.sh.splitlines() if re.search(r'-f "\$\{BASH_SOURCE\[0\]\}"', ln)]
+        assert bare == []
 
     def test_the_fresh_copy_is_not_written_into_the_install_dir(self):
         """It would sit inside the tree the update is rewriting, and INSTALL_DIR
@@ -591,8 +597,15 @@ class TestUpdateRefetchesItself:
 
     def test_the_fetch_is_time_bounded(self):
         """A hung network must not stall the update indefinitely."""
-        assert "--connect-timeout 5" in self.sh
-        assert 'download_file "$INSTALL_SH_URL" "$fresh" 8' in self.sh
+        assert "--connect-timeout 15" in self.sh
+        assert 'download_file "$INSTALL_SH_URL" "$fresh" 8 0' in self.sh
+
+    def test_tarball_download_retries_slow_tls(self):
+        """A 5s connect timeout with no retry died on `curl: (28) SSL connection
+        timeout` behind slow/filtered networks; the installer refresh stays
+        single-shot so it cannot stall the update start."""
+        assert '--retry "$retries" --retry-delay 2' in self.sh
+        assert 'retries="${4:-2}"' in self.sh
 
 
 class TestVenvProbeRunsBeforeAnythingIsWritten:

@@ -116,6 +116,11 @@ REM Re-registering runs each harness's installer, which prompts for the project
 REM name. An update re-registers what is already configured, so it always reuses
 REM the stored values instead of re-asking per harness. Matches install.sh.
 set "ATATUS_NONINTERACTIVE=1"
+if not exist "%VENV_PIP%" (
+    echo [atatus] Nothing installed at %INSTALL_DIR% - run the installer first, e.g.: >&2
+    echo [atatus]   install.bat claude >&2
+    exit /b 1
+)
 REM A wheel install has no repo to pull and no newer wheel to hand us. Silently
 REM converting it to a network install would change how it was installed behind
 REM the user's back, so refuse and say who can update.
@@ -142,7 +147,6 @@ if defined WHEEL_DIR (
     call :download_tarball
     if !ERRORLEVEL! neq 0 exit /b 1
 )
-if not exist "%VENV_PIP%" ( echo [atatus] Venv not found - run install first >&2 & exit /b 1 )
 echo [atatus] Reinstalling atatus-coding-harness-tracing...
 REM Stop here on failure: re-registering hooks against the package that is still
 REM installed would report success for an update that did not happen.
@@ -248,7 +252,7 @@ REM --- download_tarball ---
 echo [atatus] Downloading tarball...
 set "TMPZIP=%TEMP%\atatus-install-%RANDOM%.tar.gz"
 powershell -NoProfile -Command "Invoke-WebRequest -Uri '%TARBALL_URL%' -OutFile '%TMPZIP%' -TimeoutSec 120" >nul 2>&1
-if !ERRORLEVEL! neq 0 ( curl -sSfL --connect-timeout 5 --max-time 120 "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [atatus] Download failed >&2 & exit /b 1 ) )
+if !ERRORLEVEL! neq 0 ( curl -sSfL --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 "%TARBALL_URL%" -o "%TMPZIP%" 2>nul || ( echo [atatus] Could not download %TARBALL_URL% >&2 & echo [atatus] Check that github.com is reachable from this network ^(proxy/firewall^), then re-run. >&2 & exit /b 1 ) )
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 tar xzf "%TMPZIP%" --strip-components=1 -C "%INSTALL_DIR%" >nul 2>&1
 if !ERRORLEVEL! neq 0 (

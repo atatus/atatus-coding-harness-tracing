@@ -132,7 +132,7 @@ git_sync_harness_repo() {
 # True only when this script is the copy the installer placed in INSTALL_DIR,
 # which is the one an update overwrites underneath itself. A pipe has no file.
 running_from_install_dir() {
-    [[ -f "${BASH_SOURCE[0]}" ]] || return 1
+    [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]:-}" ]] || return 1
     local self; self="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
     local dir;  dir="$(cd "$INSTALL_DIR" 2>/dev/null && pwd)" || return 1
     [[ "$self" == "$dir" ]]
@@ -141,9 +141,11 @@ running_from_install_dir() {
 # max_time bounds the whole transfer: a hung network must not leave the user
 # staring at an update that never starts.
 download_file() {
-    local url="$1" dest="$2" max_time="${3:-120}"
-    if command_exists curl; then curl -sSfL --connect-timeout 5 --max-time "$max_time" "$url" -o "$dest"
-    elif command_exists wget; then wget -q --tries=1 --timeout="$max_time" -O "$dest" "$url"
+    local url="$1" dest="$2" max_time="${3:-120}" retries="${4:-2}"
+    if command_exists curl; then
+        curl -sSfL --connect-timeout 15 --max-time "$max_time" --retry "$retries" --retry-delay 2 "$url" -o "$dest"
+    elif command_exists wget; then
+        wget -q --tries=$((retries + 1)) --waitretry=2 --timeout="$max_time" -O "$dest" "$url"
     else err "Neither curl nor wget found — cannot download"; return 1; fi
 }
 
@@ -151,7 +153,11 @@ install_repo_tarball() {
     local tarball_url="${1:-$TARBALL_URL}"
     info "Downloading coding-harness-tracing tarball..."
     local tmp_tar; tmp_tar="$(mktemp)"
-    download_file "$tarball_url" "$tmp_tar" || { rm -f "$tmp_tar"; exit 1; }
+    download_file "$tarball_url" "$tmp_tar" || {
+        rm -f "$tmp_tar"
+        err "Could not download ${tarball_url}"
+        err "Check that github.com is reachable from this network (proxy/firewall), then re-run."
+        exit 1; }
     mkdir -p "$INSTALL_DIR"
     tar xzf "$tmp_tar" --strip-components=1 -C "$INSTALL_DIR"
     rm -f "$tmp_tar"
@@ -165,7 +171,7 @@ install_repo() {
     # documented as running from there and repo mode gets it via the extract.
     if [[ -n "$WHEEL_DIR" ]]; then
         mkdir -p "$INSTALL_DIR"
-        if [[ -f "${BASH_SOURCE[0]}" ]] && ! cmp -s "${BASH_SOURCE[0]}" "${INSTALL_DIR}/install.sh"; then
+        if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]:-}" ]] && ! cmp -s "${BASH_SOURCE[0]}" "${INSTALL_DIR}/install.sh"; then
             cp "${BASH_SOURCE[0]}" "${INSTALL_DIR}/install.sh" && chmod +x "${INSTALL_DIR}/install.sh"
         fi
         return 0
@@ -479,7 +485,7 @@ main() {
         update)
             if [[ -z "${ATATUS_UPDATE_REEXEC:-}" && -z "$WHEEL_DIR" ]] && running_from_install_dir; then
                 local fresh="${TMPDIR:-/tmp}/atatus-install-update.sh"
-                if download_file "$INSTALL_SH_URL" "$fresh" 8; then
+                if download_file "$INSTALL_SH_URL" "$fresh" 8 0; then
                     info "Fetched the latest installer"
                     export ATATUS_UPDATE_REEXEC=1
                     exec bash "$fresh" update ${args[@]+"${args[@]}"}
@@ -492,6 +498,10 @@ main() {
             # project name. An update re-registers what is already configured, so
             # it always reuses the stored values instead of re-asking per harness.
             export ATATUS_NONINTERACTIVE=1
+            local pip; pip=$(venv_pip) || {
+                err "Nothing installed at ${INSTALL_DIR} — run the installer first, e.g.:"
+                err "  curl -sSL ${INSTALL_SH_URL} | bash -s -- claude"
+                exit 1; }
             # A wheel install has no repo to pull and no newer wheel to hand us.
             # Silently converting it to a network install would change how it was
             # installed behind the user's back, so refuse and say who can update.
@@ -507,7 +517,6 @@ main() {
                 git_q -C "$INSTALL_DIR" pull --ff-only || {
                     warn "git pull failed — falling back to tarball re-extract"; install_repo_tarball; }
             else install_repo_tarball; fi
-            local pip; pip=$(venv_pip) || { err "Venv not found — run install first"; exit 1; }
             info "Reinstalling atatus-coding-harness-tracing..."
             pip_install_harness "$pip" -U || exit 1
             record_venv_source
