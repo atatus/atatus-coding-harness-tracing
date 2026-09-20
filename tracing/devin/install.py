@@ -14,6 +14,7 @@ alone rather than rebuilt, so a hand-edited config is never silently wiped.
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -191,7 +192,12 @@ def _register_hooks() -> None:
     """
     config = _load_config()
     original = json.dumps(config, sort_keys=True)
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    hook_cmd = shlex.quote(hook_path.as_posix())
+
+    # Older installers wrote native (unquoted) paths, which Git Bash on
+    # Windows can misinterpret. Drop only the legacy command for this event.
+    legacy_cmd = str(hook_path)
 
     hooks = config.setdefault("hooks", {})
     if not isinstance(hooks, dict):
@@ -203,7 +209,9 @@ def _register_hooks() -> None:
         if not isinstance(event_list, list):
             event_list = []
             hooks[event] = event_list
-        if not any(_matcher_has_command(matcher, hook_cmd) for matcher in event_list):
+        if legacy_cmd != hook_cmd:
+            event_list[:] = [matcher for matcher in event_list if not _matcher_has_command(matcher, {legacy_cmd})]
+        if not any(_matcher_has_command(matcher, {hook_cmd}) for matcher in event_list):
             event_list.append(_hook_entry(hook_cmd))
 
     if json.dumps(config, sort_keys=True) == original:
@@ -235,13 +243,14 @@ def _unregister_hooks() -> None:
     if not isinstance(hooks, dict):
         return
 
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    our_commands = {str(hook_path), shlex.quote(hook_path.as_posix())}
     changed = False
     for event in HOOK_EVENT_NAMES:
         event_list = hooks.get(event)
         if not isinstance(event_list, list):
             continue
-        filtered = [matcher for matcher in event_list if not _matcher_has_command(matcher, hook_cmd)]
+        filtered = [matcher for matcher in event_list if not _matcher_has_command(matcher, our_commands)]
         if filtered == event_list:
             continue  # our command wasn't present in this event
         changed = True
@@ -261,14 +270,14 @@ def _unregister_hooks() -> None:
     info(f"Cleaned tracing hooks from {CONFIG_FILE}")
 
 
-def _matcher_has_command(matcher: object, hook_cmd: str) -> bool:
-    """True if a Devin hook matcher entry contains our command."""
+def _matcher_has_command(matcher: object, hook_cmds: set[str]) -> bool:
+    """True if a Devin hook matcher entry contains one of our commands."""
     if not isinstance(matcher, dict):
         return False
     inner = matcher.get("hooks")
     if not isinstance(inner, list):
         return False
-    return any(isinstance(h, dict) and h.get("command") == hook_cmd for h in inner)
+    return any(isinstance(h, dict) and h.get("command") in hook_cmds for h in inner)
 
 
 if __name__ == "__main__":

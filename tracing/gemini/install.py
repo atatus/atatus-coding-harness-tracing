@@ -13,6 +13,7 @@ Usage (called by the shell router):
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 
 from core.setup import configure_harness, dry_run, info, remove_harness_entry, symlink_skills, unlink_skills, venv_bin
@@ -95,7 +96,7 @@ def _install_hooks() -> None:
     hooks_map: dict = data.setdefault("hooks", {})
 
     for event, entry_point in EVENTS.items():
-        cmd = str(venv_bin(entry_point))
+        cmd = shlex.quote(venv_bin(entry_point).as_posix())
         event_list: list = hooks_map.setdefault(event, [])
 
         # Remove any existing matcher-block that contains a hook with our name

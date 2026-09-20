@@ -15,6 +15,7 @@ Usage (called by the shell router):
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -84,7 +85,7 @@ def _install_hooks(filepath: Path) -> None:
         data["hooks"] = hooks_map
 
     for event, entry_point in HOOK_EVENTS.items():
-        cmd = str(venv_bin(entry_point))
+        cmd = shlex.quote(venv_bin(entry_point).as_posix())
         event_list = hooks_map.setdefault(event, [])
         if not isinstance(event_list, list):
             event_list = []

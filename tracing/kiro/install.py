@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -113,10 +114,18 @@ def _save_agent(path: Path, data: dict) -> None:
 def _register_kiro_hooks(agent_path: Path, name: str) -> None:
     """Add an entry for each HOOK_EVENT pointing at our hook binary."""
     data = _load_agent(agent_path, name)
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    hook_cmd = shlex.quote(hook_path.as_posix())
+
+    # Older installers wrote native (unquoted) paths, which Git Bash on
+    # Windows can misinterpret. Drop only the legacy command for this event.
+    legacy_cmd = str(hook_path)
+
     hooks = data.setdefault("hooks", {})
     for event in HOOK_EVENTS:
         event_list = hooks.setdefault(event, [])
+        if legacy_cmd != hook_cmd:
+            event_list[:] = [h for h in event_list if h.get("command") != legacy_cmd]
         if not any(h.get("command") == hook_cmd for h in event_list):
             event_list.append({"command": hook_cmd})
 
@@ -145,7 +154,8 @@ def _unregister_all_kiro_hooks() -> None:
     (description matches the skeleton), delete it."""
     if not KIRO_AGENTS_DIR.is_dir():
         return
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    our_commands = {str(hook_path), shlex.quote(hook_path.as_posix())}
     skeleton_desc = AGENT_SKELETON["description"]
 
     for agent_file in KIRO_AGENTS_DIR.glob("*.json"):
@@ -161,7 +171,7 @@ def _unregister_all_kiro_hooks() -> None:
         modified = False
         for event in list(hooks.keys()):
             event_list = hooks.get(event, [])
-            filtered = [h for h in event_list if isinstance(h, dict) and h.get("command") != hook_cmd]
+            filtered = [h for h in event_list if isinstance(h, dict) and h.get("command") not in our_commands]
             if filtered != event_list:
                 modified = True
             if filtered:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 
 from core.setup import (
@@ -89,10 +90,17 @@ def _register_cursor_hooks() -> None:
     """
     data = _load_hooks()
     hooks = data["hooks"]
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    hook_cmd = shlex.quote(hook_path.as_posix())
+
+    # Older installers wrote native (unquoted) paths, which Git Bash on
+    # Windows can misinterpret. Drop only the legacy command for this event.
+    legacy_cmd = str(hook_path)
 
     for event in HOOK_EVENTS:
         event_list = hooks.setdefault(event, [])
+        if legacy_cmd != hook_cmd:
+            event_list[:] = [h for h in event_list if h.get("command") != legacy_cmd]
         already = any(h.get("command") == hook_cmd for h in event_list)
         if not already:
             event_list.append({"command": hook_cmd})
@@ -118,11 +126,12 @@ def _unregister_cursor_hooks() -> None:
     if not hooks:
         return
 
-    hook_cmd = str(venv_bin(HOOK_BIN_NAME))
+    hook_path = venv_bin(HOOK_BIN_NAME)
+    our_commands = {str(hook_path), shlex.quote(hook_path.as_posix())}
 
     for event in list(hooks.keys()):
         event_list = hooks[event]
-        filtered = [h for h in event_list if h.get("command") != hook_cmd]
+        filtered = [h for h in event_list if h.get("command") not in our_commands]
         if filtered:
             hooks[event] = filtered
         else:

@@ -16,6 +16,7 @@ Usage (called by the shell router):
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 
 from core.setup import configure_harness, dry_run
@@ -95,7 +96,7 @@ def _install_hooks() -> None:
         event: [
             {
                 "type": "command",
-                "command": str(venv_bin(entry_point)),
+                "command": shlex.quote(venv_bin(entry_point).as_posix()),
                 "timeout": _c.HOOK_TIMEOUT_SECONDS,
             }
         ]
