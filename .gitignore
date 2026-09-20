@@ -53,3 +53,5 @@ run/
 wheel.json
 docs/superpowers/*
 .serena/*
+
+graphify-out

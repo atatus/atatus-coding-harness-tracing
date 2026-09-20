@@ -22,6 +22,7 @@ from tracing.claude_code.constants import (
     HARNESS_HOME,
     HARNESS_NAME,
     HOOK_EVENTS,
+    HOOK_TIMEOUT_SECONDS,
     SETTINGS_FILE,
 )
 
@@ -99,14 +100,17 @@ def _register_claude_hooks(project_name: str = HARNESS_NAME) -> None:
     env_block["ATATUS_PROJECT_NAME"] = project_name
     env_block.setdefault("ATATUS_TRACE_ENABLED", "true")
 
-    # Register hooks
+    # Register hooks. Existing entries get the timeout stamped too, so an update
+    # tightens installs that predate it instead of leaving them on the 60s default.
     hooks = settings.setdefault("hooks", {})
     for event, entry_point in HOOK_EVENTS.items():
         hook_cmd = str(venv_bin(entry_point))
         event_hooks = hooks.setdefault(event, [])
-        already = any(h.get("command", "") == hook_cmd for entry in event_hooks for h in entry.get("hooks", []))
-        if not already:
-            event_hooks.append({"hooks": [{"type": "command", "command": hook_cmd}]})
+        ours = [h for entry in event_hooks for h in entry.get("hooks", []) if h.get("command", "") == hook_cmd]
+        for h in ours:
+            h["timeout"] = HOOK_TIMEOUT_SECONDS
+        if not ours:
+            event_hooks.append({"hooks": [{"type": "command", "command": hook_cmd, "timeout": HOOK_TIMEOUT_SECONDS}]})
 
     if dry_run():
         info(f"would write Claude hooks to {SETTINGS_FILE}")

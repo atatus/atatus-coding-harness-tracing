@@ -1766,6 +1766,120 @@ class TestSendSpanAsync:
         assert time.monotonic() - started < 1.0
 
 
+class TestSendSpanAsyncWithoutFork:
+    """Windows has no fork(); the POST used to run inline in the hook, so a slow
+    collector cost the user up to the socket timeout on every turn. It now goes
+    to a detached ``core.sender`` process instead."""
+
+    @pytest.fixture(autouse=True)
+    def _no_fork(self, monkeypatch):
+        monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
+        monkeypatch.delattr(common.os, "fork", raising=False)
+
+    def test_the_send_is_handed_to_a_detached_process(self, monkeypatch):
+        spawned = {}
+
+        def fake_popen(cmd, **kwargs):
+            spawned["cmd"] = cmd
+            spawned["kwargs"] = kwargs
+            return mock.Mock()
+
+        monkeypatch.setattr(common.subprocess, "Popen", fake_popen)
+        sender = mock.Mock()
+        send_span_async({"x": 1}, sender=sender)
+
+        sender.assert_not_called()
+        assert spawned["cmd"][:3] == [common.sys.executable, "-m", "core.sender"]
+        envelope = json.loads(open(spawned["cmd"][3], encoding="utf-8").read())
+        assert envelope == {"payload": {"x": 1}}
+        assert spawned["kwargs"]["stdin"] is common.subprocess.DEVNULL
+        assert spawned["kwargs"]["creationflags"] == common._DETACHED_CREATION_FLAGS
+        os.unlink(spawned["cmd"][3])
+
+    def test_the_caller_does_not_wait_for_the_sender(self, monkeypatch):
+        popen = mock.Mock()
+        monkeypatch.setattr(common.subprocess, "Popen", popen)
+        started = time.monotonic()
+        send_span_async({"x": 2}, sender=lambda _s: time.sleep(5))
+        assert time.monotonic() - started < 0.5
+        os.unlink(popen.call_args.args[0][3])
+
+    def test_a_callback_ref_travels_in_the_envelope(self, monkeypatch):
+        spawned = {}
+        monkeypatch.setattr(common.subprocess, "Popen", lambda cmd, **k: spawned.setdefault("cmd", cmd) and mock.Mock())
+        send_span_async({"x": 3}, on_success=lambda: None, on_success_ref=("core.sender:deliver", {"k": 1}))
+        envelope = json.loads(open(spawned["cmd"][3], encoding="utf-8").read())
+        assert envelope["on_success"] == {"callable": "core.sender:deliver", "kwargs": {"k": 1}}
+        os.unlink(spawned["cmd"][3])
+
+    def test_a_bare_callback_keeps_the_synchronous_send(self, monkeypatch):
+        """A closure cannot cross the process boundary; losing the ack is worse
+        than the wait, so this caller is served inline as before."""
+        popen = mock.Mock()
+        monkeypatch.setattr(common.subprocess, "Popen", popen)
+        settled = mock.Mock()
+        send_span_async({"x": 4}, sender=lambda _s: True, on_success=settled)
+        popen.assert_not_called()
+        settled.assert_called_once_with()
+
+    def test_spawn_failure_falls_back_to_a_synchronous_send(self, monkeypatch):
+        monkeypatch.setattr(common.subprocess, "Popen", mock.Mock(side_effect=OSError("no exe")))
+        sender = mock.Mock(return_value=True)
+        send_span_async({"x": 5}, sender=sender)
+        sender.assert_called_once_with({"x": 5})
+
+
+class TestDetachedSender:
+    def _envelope(self, tmp_path, **extra):
+        path = tmp_path / "env.json"
+        path.write_text(json.dumps({"payload": {"resourceSpans": []}, **extra}))
+        return path
+
+    def test_delivers_the_payload_and_removes_the_envelope(self, tmp_path):
+        import core.sender as sender
+
+        path = self._envelope(tmp_path)
+        with mock.patch("core.common.send_span", return_value=True) as send:
+            assert sender.main([str(path)]) == 0
+        send.assert_called_once_with({"resourceSpans": []})
+        assert not path.exists()
+
+    def test_runs_the_follow_up_only_after_a_successful_send(self, tmp_path):
+        import core.sender as sender
+
+        calls = []
+        follow_up = {"callable": "core.sender:_probe_hook", "kwargs": {"a": 1}}
+        with mock.patch("core.sender._probe_hook", lambda **kw: calls.append(kw), create=True):
+            with mock.patch("core.common.send_span", return_value=False):
+                assert sender.main([str(self._envelope(tmp_path, on_success=follow_up))]) == 1
+            assert calls == []
+            with mock.patch("core.common.send_span", return_value=True):
+                assert sender.main([str(self._envelope(tmp_path, on_success=follow_up))]) == 0
+        assert calls == [{"a": 1}]
+
+    def test_refuses_callables_outside_our_packages(self, tmp_path):
+        """The envelope is ours, but a stray file in the temp dir must not turn
+        into arbitrary code execution."""
+        import core.sender as sender
+
+        path = self._envelope(tmp_path, on_success={"callable": "os:system", "kwargs": {"command": "true"}})
+        with mock.patch("core.common.send_span", return_value=True), mock.patch("os.system") as system:
+            assert sender.main([str(path)]) == 0
+        system.assert_not_called()
+
+    def test_bad_envelopes_exit_nonzero_without_sending(self, tmp_path):
+        import core.sender as sender
+
+        with mock.patch("core.common.send_span") as send:
+            assert sender.main([str(tmp_path / "missing.json")]) == 1
+            bad = tmp_path / "bad.json"
+            bad.write_text("not json")
+            assert sender.main([str(bad)]) == 1
+            assert sender.main([]) == 2
+        send.assert_not_called()
+        assert not bad.exists()
+
+
 # ── Additional FileLock coverage (mkdir fallback) ─────────────────────────
 
 

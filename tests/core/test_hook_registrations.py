@@ -193,6 +193,16 @@ class TestHooksJson:
         assert mapping["PermissionRequest"] == "atatus-hook-permission-request"
         assert mapping["SessionEnd"] == "atatus-hook-session-end"
 
+    def test_every_hook_carries_the_timeout_cap(self, hooks_data):
+        """The plugin manifest is the second registration surface for Claude
+        Code; it must bound a wedged hook the same way install.py does."""
+        from tracing.claude_code.constants import HOOK_TIMEOUT_SECONDS
+
+        for event, entries in hooks_data["hooks"].items():
+            for entry in entries:
+                for hook in entry["hooks"]:
+                    assert hook.get("timeout") == HOOK_TIMEOUT_SECONDS, event
+
     def test_hook_type_is_command(self, hooks_data):
         """All hooks must have type 'command'."""
         for event, hook_list in hooks_data["hooks"].items():

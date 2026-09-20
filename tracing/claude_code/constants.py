@@ -29,6 +29,9 @@ HOOK_EVENTS = {
     "PermissionDenied": "atatus-hook-permission-denied",
 }
 
+# Claude Code kills a hook that runs past this and carries on without it
+HOOK_TIMEOUT_SECONDS = 10
+
 # Env keys written into settings.json by the installer. Uninstall pops
 # any of these present so stale values don't linger after teardown.
 ATATUS_ENV_KEYS = (

@@ -689,6 +689,71 @@ class TestStopMarksTheExportBeforeSending:
         assert state.get("trace_count") == "2"
 
 
+class TestStopAckSurvivesTheDetachedSender:
+    """Without fork() the POST runs in ``core.sender``, which cannot carry the
+    ``_settle`` closure. Stop therefore also hands over an importable reference;
+    replaying it through the sender must acknowledge the turn exactly as the
+    in-process path does."""
+
+    def _stop_capturing_ref(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        seen = {}
+
+        def capture(span_dict, sender=None, on_success=None, on_success_ref=None):
+            seen["payload"] = span_dict
+            seen["ref"] = on_success_ref
+
+        with (
+            mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+            mock.patch.object(handlers, "send_span_async", capture),
+            mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+            mock.patch.object(
+                sys, "stdin", new=io.StringIO(json.dumps({"session_id": "s1", "transcript_path": str(transcript)}))
+            ),
+        ):
+            handlers.stop()
+        return state, seen
+
+    def test_stop_passes_a_json_safe_reference_alongside_the_closure(self, tmp_path):
+        state, seen = self._stop_capturing_ref(tmp_path)
+        target, kwargs = seen["ref"]
+        assert target == "tracing.claude_code.hooks.handlers:settle_exported_turn"
+        json.dumps(kwargs)
+        assert kwargs["trace_id"] == "a" * 32
+        assert kwargs["state_file"] == str(state.state_file)
+        assert state.get("current_trace_id") == "a" * 32, "not acked until the sender says so"
+
+    def test_replaying_the_reference_through_the_sender_acks_the_turn(self, tmp_path):
+        import core.sender as sender
+
+        state, seen = self._stop_capturing_ref(tmp_path)
+        target, kwargs = seen["ref"]
+        envelope = tmp_path / "env.json"
+        envelope.write_text(json.dumps({"payload": seen["payload"], "on_success": {"callable": target, "kwargs": kwargs}}))
+
+        with mock.patch("core.common.send_span", return_value=True):
+            assert sender.main([str(envelope)]) == 0
+
+        assert state.get("current_trace_id") is None
+        assert state.get("export_attempted_trace_id") is None
+        assert handlers.ToolBuffer(state).get("tu1") is None
+
+    def test_a_refused_send_leaves_the_turn_unacked(self, tmp_path):
+        import core.sender as sender
+
+        state, seen = self._stop_capturing_ref(tmp_path)
+        target, kwargs = seen["ref"]
+        envelope = tmp_path / "env.json"
+        envelope.write_text(json.dumps({"payload": seen["payload"], "on_success": {"callable": target, "kwargs": kwargs}}))
+
+        with mock.patch("core.common.send_span", return_value=False):
+            assert sender.main([str(envelope)]) == 1
+
+        assert state.get("current_trace_id") == "a" * 32
+        assert state.get("export_attempted_trace_id") == "a" * 32
+
+
 def _agent_launch(
     tool_use_id, agent_id, prompt="do X", ts_use="2026-08-22T16:16:42.920Z", ts_res="2026-08-22T16:16:43.000Z"
 ):

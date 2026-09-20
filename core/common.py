@@ -12,7 +12,9 @@ import functools
 import json
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -743,7 +745,51 @@ def send_span(span_dict: dict) -> bool:
         return False
 
 
-def send_span_async(span_dict: dict, sender=None, on_success=None) -> None:
+#: Detached-process flags for Windows, where the sender must not die with the hook.
+_DETACHED_CREATION_FLAGS = (
+    getattr(subprocess, "DETACHED_PROCESS", 0)
+    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+)
+
+
+def _spawn_detached_sender(span_dict: dict, on_success_ref=None) -> bool:
+    """Hand the POST to a detached ``core.sender`` process (the no-fork path).
+
+    The envelope goes through a temp file rather than a stdin pipe: a multi-MB turn
+    would block the hook on the 64 KB pipe buffer until the child got round to
+    reading it, which is the wait this exists to remove. Returns False when the
+    process could not be started so the caller can fall back to a synchronous send.
+    """
+    envelope: dict = {"payload": span_dict}
+    if on_success_ref is not None:
+        target, kwargs = on_success_ref
+        envelope["on_success"] = {"callable": target, "kwargs": kwargs}
+    path = None
+    try:
+        fd, path = tempfile.mkstemp(prefix="atatus-span-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(envelope, fh)
+        subprocess.Popen(
+            [sys.executable, "-m", "core.sender", path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=_DETACHED_CREATION_FLAGS,
+        )
+        return True
+    except (OSError, ValueError, TypeError) as e:
+        error(f"detached sender unavailable, sending inline: {e}")
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        return False
+
+
+def send_span_async(span_dict: dict, sender=None, on_success=None, on_success_ref=None) -> None:
     """Send a span without blocking the host.
 
     Hooks are invoked synchronously: the harness waits for the hook process to
@@ -760,10 +806,18 @@ def send_span_async(span_dict: dict, sender=None, on_success=None) -> None:
     back out. It must therefore be safe to run after the hook has already exited,
     and safe to skip entirely if the machine dies mid-send.
 
-    Falls back to a synchronous send when fork() is unavailable (Windows) or when
-    ATATUS_DISABLE_FORK=true, which tests use so spans stay visible in-process.
-    ``sender`` lets a harness route the fallback through its own module-level
-    ``send_span`` binding, which is what test doubles replace.
+    Without fork() (Windows) the send is handed to a detached ``core.sender``
+    process instead. A closure cannot cross that boundary, so a caller that needs
+    the delivery-gated side effect there passes ``on_success_ref`` as
+    ``("package.module:function", json_kwargs)``; the sender imports and calls it
+    after a successful POST. A bare ``on_success`` with no ref keeps the
+    synchronous send on that platform, since dropping the ack would be worse than
+    the wait.
+
+    Falls back to a synchronous send when ATATUS_DISABLE_FORK=true, which tests
+    use so spans stay visible in-process. ``sender`` lets a harness route the
+    fallback through its own module-level ``send_span`` binding, which is what
+    test doubles replace.
     """
     send = sender or send_span
 
@@ -776,7 +830,11 @@ def send_span_async(span_dict: dict, sender=None, on_success=None) -> None:
         _send_and_settle()
         return
     if not hasattr(os, "fork"):
-        _send_and_settle()
+        if on_success is not None and on_success_ref is None:
+            _send_and_settle()
+            return
+        if not _spawn_detached_sender(span_dict, on_success_ref):
+            _send_and_settle()
         return
 
     try:

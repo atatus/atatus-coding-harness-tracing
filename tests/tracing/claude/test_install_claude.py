@@ -450,3 +450,54 @@ class TestDryRun:
 
         config_file = fake_home / ".atatus" / "harness" / "config.json"
         assert not config_file.exists()
+
+
+class TestHookTimeout:
+    """Claude Code kills a hook that outlives its ``timeout`` and moves on; the
+    default is 60s. Every entry we register carries an explicit cap so a hook
+    that ever wedges costs the user seconds, not a minute per tool call."""
+
+    def test_fresh_install_stamps_the_timeout_on_every_hook(self, fake_home, monkeypatch):
+        import tracing.claude_code.install as claude_install
+        from tracing.claude_code.constants import HOOK_EVENTS, HOOK_TIMEOUT_SECONDS
+
+        _mock_prompts(monkeypatch)
+        claude_install.install(with_skills=False)
+
+        settings = json.loads((fake_home / ".claude" / "settings.json").read_text())
+        for event in HOOK_EVENTS:
+            for entry in settings["hooks"][event]:
+                for hook in entry["hooks"]:
+                    assert hook["timeout"] == HOOK_TIMEOUT_SECONDS
+
+    def test_update_stamps_the_timeout_onto_entries_that_predate_it(self, fake_home, monkeypatch):
+        """Re-running install must tighten an existing registration, not skip it
+        as "already present" and leave it on the 60s default."""
+        import tracing.claude_code.install as claude_install
+        from core.setup import venv_bin
+        from tracing.claude_code.constants import HOOK_EVENTS, HOOK_TIMEOUT_SECONDS
+
+        settings_file = fake_home / ".claude" / "settings.json"
+        settings_file.parent.mkdir(parents=True)
+        legacy = {
+            "hooks": {
+                event: [{"hooks": [{"type": "command", "command": str(venv_bin(ep))}]}]
+                for event, ep in HOOK_EVENTS.items()
+            }
+        }
+        settings_file.write_text(json.dumps(legacy))
+
+        _mock_prompts(monkeypatch)
+        claude_install.install(with_skills=False)
+
+        settings = json.loads(settings_file.read_text())
+        for event in HOOK_EVENTS:
+            assert len(settings["hooks"][event]) == 1
+            assert settings["hooks"][event][0]["hooks"][0]["timeout"] == HOOK_TIMEOUT_SECONDS
+
+    def test_timeout_is_a_bound_on_faults_not_on_normal_hooks(self):
+        """Our slowest measured hook is ~0.3s; the cap must sit far above that so
+        a loaded machine never has its telemetry cut mid-turn."""
+        from tracing.claude_code.constants import HOOK_TIMEOUT_SECONDS
+
+        assert 5 <= HOOK_TIMEOUT_SECONDS < 60

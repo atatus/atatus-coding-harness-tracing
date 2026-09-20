@@ -1330,22 +1330,21 @@ class TestSendSpanAsync:
             _send_span_async({"x": 1})
         send_mock.assert_called_once_with({"x": 1})
 
-    def test_no_fork_attr_uses_sync_send(self, monkeypatch):
-        """If os.fork is absent (Windows-like), fall back to sync send."""
+    def test_no_fork_attr_uses_the_detached_sender(self, monkeypatch):
+        """Without os.fork (Windows) the POST goes to a detached ``core.sender``
+        process, never inline in the hook."""
         monkeypatch.setenv("ATATUS_DISABLE_FORK", "false")
-        # Simulate Windows by removing os.fork from the module's view.
+        import core.common as common
         import tracing.gemini.hooks.handlers as h
 
-        real_fork = getattr(h.os, "fork", None)
-        try:
-            if real_fork is not None:
-                monkeypatch.delattr(h.os, "fork", raising=False)
-            with mock.patch("tracing.gemini.hooks.handlers.send_span") as send_mock:
-                _send_span_async({"x": 2})
-            send_mock.assert_called_once_with({"x": 2})
-        finally:
-            # monkeypatch.delattr restores automatically at teardown
-            pass
+        monkeypatch.delattr(h.os, "fork", raising=False)
+        popen = mock.Mock()
+        monkeypatch.setattr(common.subprocess, "Popen", popen)
+        with mock.patch("tracing.gemini.hooks.handlers.send_span") as send_mock:
+            _send_span_async({"x": 2})
+        send_mock.assert_not_called()
+        popen.assert_called_once()
+        h.os.unlink(popen.call_args.args[0][3])
 
     def test_fork_oserror_uses_sync_send(self, monkeypatch):
         """If os.fork() itself raises OSError, fall back to sync send."""

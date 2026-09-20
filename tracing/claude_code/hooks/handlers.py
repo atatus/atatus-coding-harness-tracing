@@ -64,10 +64,10 @@ from tracing.claude_code.hooks.transcript import parse_claude_transcript, transc
 # ---------------------------------------------------------------------------
 
 
-def _send_span_async(span_dict: dict, on_success=None) -> None:
+def _send_span_async(span_dict: dict, on_success=None, on_success_ref=None) -> None:
     """Detached span send. ``sender`` keeps this module's ``send_span`` binding
     on the synchronous fallback path so test doubles still intercept it."""
-    send_span_async(span_dict, sender=send_span, on_success=on_success)
+    send_span_async(span_dict, sender=send_span, on_success=on_success, on_success_ref=on_success_ref)
 
 
 def _read_stdin() -> dict:
@@ -1480,7 +1480,48 @@ def _handle_stop(input_json: dict) -> None:
         _settle()
         return
     state.set("export_attempted_trace_id", trace_id)
-    _send_span_async(export.payload, on_success=_settle)
+    _send_span_async(
+        export.payload,
+        on_success=_settle,
+        on_success_ref=_settle_ref(state, trace_id, trace_count, export.observations, export.subagents),
+    )
+
+
+def _settle_ref(state, trace_id: str, trace_count: str, observations: list, subagents: dict):
+    """``_settle`` as an importable reference, for the no-fork sender that cannot
+    carry the closure. None when the state is in-memory only (tests)."""
+    if state.state_file is None:
+        return None
+    return (
+        f"{__name__}:settle_exported_turn",
+        {
+            "state_dir": str(state.state_dir),
+            "state_file": str(state.state_file),
+            "lock_path": str(state._lock_path) if state._lock_path else None,
+            "trace_id": trace_id,
+            "trace_count": trace_count,
+            "observations": ToolBuffer._encode({o.tool_use_id: o for o in observations}),
+            "subagents": subagents,
+        },
+    )
+
+
+def settle_exported_turn(
+    *,
+    state_dir: str,
+    state_file: str,
+    lock_path: "str | None",
+    trace_id: str,
+    trace_count: str,
+    observations: str,
+    subagents: dict,
+) -> None:
+    """Acknowledge an exported turn from a detached sender process."""
+    state = StateManager(
+        state_dir=Path(state_dir), state_file=Path(state_file), lock_path=Path(lock_path) if lock_path else None
+    )
+    _acknowledge_exported_turn(state, trace_id, list(ToolBuffer._decode(observations).values()), subagents)
+    _periodic_gc(trace_count)
 
 
 def _handle_subagent_start(input_json: dict) -> None:
