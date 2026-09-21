@@ -149,6 +149,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
 
     user_id = env.get_user_id(SERVICE_NAME)
     state.set("user_id", user_id)
+    state.set("user_login_id", env.get_user_login_id(SERVICE_NAME))
 
     log(f"Session initialized: {session_id}")
 

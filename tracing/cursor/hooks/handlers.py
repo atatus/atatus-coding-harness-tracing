@@ -89,6 +89,11 @@ def _resolve_user_id(input_json: dict) -> str:
     return env.get_user_id(SERVICE_NAME) or _jq_str(input_json, "user_email")
 
 
+def _resolve_user_login_id(input_json: dict) -> str:
+    """Auto-detected login identity only, no manual override."""
+    return _jq_str(input_json, "user_email")
+
+
 def _to_int(v):
     """Coerce *v* to int if possible; return None for None, empty, or ``"--"``."""
     try:
@@ -227,6 +232,7 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
         return
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     root_attrs = {
         "openinference.span.kind": "CHAIN",
@@ -237,6 +243,8 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
         root_attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         root_attrs["user.id"] = user_id
+    if login_id:
+        root_attrs["user.login_id"] = login_id
     if model:
         root_attrs["llm.model_name"] = model
 
@@ -276,6 +284,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
     response = redact_content(env.log_prompts, response)
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     # The root is not sent here. It used to be, ending at this moment — but the
     # LLM span, Agent Stop and any late tool span all carry timestamps from the
@@ -285,6 +294,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         root_state["response"] = response
         root_state["model"] = model or root_state.get("model", "")
         root_state["user_id"] = user_id
+        root_state["login_id"] = login_id
         state_push(f"root_{safe_gen}", root_state)
         log(f"afterAgentResponse: root span {root_state.get('span_id')} held for stop")
 
@@ -297,6 +307,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         "model": model,
         "conversation_id": conversation_id,
         "user_id": user_id,
+        "login_id": login_id,
         "start_ms": now_ms,
     }
 
@@ -317,6 +328,8 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if model:
         attrs["llm.model_name"] = model
 
@@ -351,6 +364,7 @@ def _handle_after_agent_thought(input_json, conversation_id, gen_id, trace_id, n
     thought = _jq_str(input_json, "thought", "thinking", "text")
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "CHAIN",
@@ -361,6 +375,8 @@ def _handle_after_agent_thought(input_json, conversation_id, gen_id, trace_id, n
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Agent Thinking",
@@ -432,6 +448,7 @@ def _handle_after_shell_execution(input_json, conversation_id, gen_id, trace_id,
     output = redact_content(env.log_tool_content, output)
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -444,6 +461,8 @@ def _handle_after_shell_execution(input_json, conversation_id, gen_id, trace_id,
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if exit_code:
         attrs["shell.exit_code"] = exit_code
 
@@ -519,6 +538,7 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
     result = redact_content(env.log_tool_content, _jq_str(input_json, "result", "output", "result_json"))
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -531,6 +551,8 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         f"MCP: {tool_name}",
@@ -563,6 +585,7 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -574,6 +597,8 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Read File",
@@ -607,6 +632,7 @@ def _handle_after_file_edit(input_json, conversation_id, gen_id, trace_id, now_m
     input_val = f"{file_path}: {edits}" if edits else file_path
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -618,6 +644,8 @@ def _handle_after_file_edit(input_json, conversation_id, gen_id, trace_id, now_m
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "File Edit",
@@ -650,6 +678,7 @@ def _handle_before_tab_file_read(input_json, conversation_id, gen_id, trace_id, 
     file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -661,6 +690,8 @@ def _handle_before_tab_file_read(input_json, conversation_id, gen_id, trace_id, 
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Tab Read File",
@@ -692,6 +723,7 @@ def _handle_after_tab_file_edit(input_json, conversation_id, gen_id, trace_id, n
     input_val = f"{file_path}: {edits}" if edits else file_path
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -703,6 +735,8 @@ def _handle_after_tab_file_edit(input_json, conversation_id, gen_id, trace_id, n
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Tab File Edit",
@@ -729,6 +763,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
     loop_count = _jq_str(input_json, "loop_count", "loopCount", "iterations")
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     # Token counts from stop payload
     # Use explicit None checks — 0 is a valid token count but falsy with ``or``
@@ -782,6 +817,9 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         root_user = root_state.get("user_id") or user_id
         if root_user:
             root_attrs["user.id"] = root_user
+        root_login = root_state.get("login_id") or login_id
+        if root_login:
+            root_attrs["user.login_id"] = root_login
         root_model = root_state.get("model") or model
         if root_model:
             root_attrs["llm.model_name"] = root_model
@@ -826,6 +864,9 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         entry_user = entry.get("user_id")
         if entry_user:
             llm_attrs["user.id"] = entry_user
+        entry_login = entry.get("login_id")
+        if entry_login:
+            llm_attrs["user.login_id"] = entry_login
         entry_model = entry.get("model", "")
         if entry_model:
             llm_attrs["llm.model_name"] = entry_model
@@ -856,6 +897,8 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if status:
         attrs["cursor.stop.status"] = status
     if loop_count:
@@ -910,8 +953,11 @@ def _handle_session_start(input_json, conversation_id, gen_id, trace_id, now_ms)
         attrs["cursor.session.cwd"] = cwd
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Session Start",
@@ -948,6 +994,7 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
     reason = _jq_str(input_json, "reason")
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "CHAIN",
@@ -957,6 +1004,8 @@ def _handle_session_end(input_json, conversation_id, gen_id, trace_id, now_ms):
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if duration_ms is not None:
         attrs["cursor.session.duration_ms"] = duration_ms
     if final_status:
@@ -1085,6 +1134,7 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
     output = redact_content(env.log_tool_content, output)
 
     user_id = _resolve_user_id(input_json)
+    login_id = _resolve_user_login_id(input_json)
 
     attrs = {
         "openinference.span.kind": "TOOL",
@@ -1094,6 +1144,8 @@ def _handle_post_tool_use(input_json, conversation_id, gen_id, trace_id, now_ms)
         attrs["cursor.conversation.id"] = conversation_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if tool_name:
         attrs["tool.name"] = tool_name
     if tool_input:

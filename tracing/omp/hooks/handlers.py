@@ -182,8 +182,11 @@ def _emit_turn_root(state: StateManager, output_value: str) -> None:
         "output.value": output_value,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Turn",
@@ -264,8 +267,11 @@ def _emit_llm_span(state: StateManager, message: Any) -> str:
         attrs["llm.cost"] = cost
 
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     llm_span_id = generate_span_id()
     span = build_span(
@@ -316,8 +322,11 @@ def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict, llm_spa
         attrs[key] = redact_content(env.log_tool_details, value)
 
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     is_error = bool(tool_result.get("isError"))
     status_message = redact_content(env.log_tool_content, output_text) if is_error else ""

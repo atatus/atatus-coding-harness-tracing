@@ -35,6 +35,7 @@ from tracing.kiro.hooks.adapter import (
     check_requirements,
     ensure_session_initialized,
     extract_sidecar_attrs,
+    resolve_user_login_id,
     gc_stale_state_files,
     load_session_sidecar,
     resolve_session,
@@ -130,6 +131,9 @@ def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
     user_id = state.get("user_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    login_id = resolve_user_login_id(state)
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         f"Tool: {tool_name}" if tool_name else "Tool",
@@ -185,6 +189,9 @@ def _handle_stop(input_json: dict, state: StateManager) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    login_id = resolve_user_login_id(state)
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     # Enrich with sidecar data — always the most recent turn (-1).
     # `trace_count` is our own counter and drifts from the sidecar's turn list

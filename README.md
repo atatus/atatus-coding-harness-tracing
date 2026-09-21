@@ -93,6 +93,27 @@ If you've already configured *another* harness, the installer offers a **copy-fr
 
 A free-form identifier attached to every span as `user.id`. Useful when multiple teammates report into the same project. Leave blank to skip; on a re-configure, blank keeps the stored value and `-` clears it.
 
+#### `user.login_id` — auto-detected, no setup
+
+Alongside `user.id`, every span also carries `user.login_id` when the harness's own local
+login state exposes one — no prompt, no config, no env var to set. Where a harness exposes
+an email (from its own login/auth files or, for Cursor, its hook payload), that's the value;
+GitHub Copilot has no local email at all, so it carries a GitHub username there instead. It's
+never overridable — if a harness's login state is wrong or absent, `user.login_id` is simply
+omitted from that span.
+
+| Harness | Source | Notes |
+|---|---|---|
+| Claude Code | local config file, `claude auth status` as fallback | respects `CLAUDE_CONFIG_DIR` (multi-account setups, e.g. claude-switch) |
+| Codex | local ChatGPT-login credential file | |
+| Gemini CLI | local Google-account file | |
+| Cursor | the hook's own payload | already carries the logged-in user's email natively |
+| Kiro | `kiro-cli user whoami` | resolved in the background — the CLI takes ~2s, so the first span or two in a session may not have it yet; later spans do |
+| GitHub Copilot | local config file | **a GitHub username, not an email** — Copilot has no local email surface |
+| opencode | local credential file | only populated when signed in via an OAuth provider; an API-key provider carries no email |
+| omp | unverified | no confirmed install to test the detection against yet |
+| Devin, Antigravity | not implemented | out of scope for now |
+
 #### 4. Content logging
 
 Three questions that apply to **all** harnesses. Press Enter to accept each default:

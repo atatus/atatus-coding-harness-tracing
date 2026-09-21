@@ -2249,6 +2249,42 @@ class TestGetUserId:
         assert env.user_id == "carol"
 
 
+# ── env.get_user_login_id dispatcher tests ─────────────────────────────────
+
+
+class TestGetUserLoginId:
+    """get_user_login_id has no config/env override tier — it's a pure
+    service_name -> detector dispatch, unlike get_user_id's precedence
+    ladder above."""
+
+    def test_unknown_service_name_returns_empty(self):
+        assert env.get_user_login_id("not-a-real-harness") == ""
+        assert env.get_user_login_id() == ""
+
+    def test_dispatches_to_the_matching_detector(self, monkeypatch):
+        monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"claude-code": lambda: "alice@example.com"})
+        assert env.get_user_login_id("claude-code") == "alice@example.com"
+
+    def test_detector_returning_empty_string_is_passed_through(self, monkeypatch):
+        monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"gemini": lambda: ""})
+        assert env.get_user_login_id("gemini") == ""
+
+    def test_detector_raising_is_swallowed(self, monkeypatch):
+        def boom():
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"codex": boom})
+        assert env.get_user_login_id("codex") == ""
+
+    def test_config_and_env_have_no_effect(self, monkeypatch):
+        """Unlike user_id, ATATUS_USER_ID/config.json cannot influence this."""
+        monkeypatch.setenv("ATATUS_USER_ID", "carol")
+        monkeypatch.setattr("core.config.load_config", lambda config_path=None: {"user_id": "alice"})
+        env.__dict__.pop("_top_level_config", None)
+        monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"claude-code": lambda: "real@example.com"})
+        assert env.get_user_login_id("claude-code") == "real@example.com"
+
+
 class TestStampAtatusIdentity:
     """Project identity must travel in the payload, not only in config.
 

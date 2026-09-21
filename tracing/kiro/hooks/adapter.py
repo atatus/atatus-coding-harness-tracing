@@ -21,7 +21,14 @@ from typing import Any
 
 from core.common import StateManager, env, get_timestamp_ms, log, redirect_stderr_to_log_file
 from core.constants import STATE_BASE_DIR
+from core.identity import read_kiro_login_probe, start_kiro_login_probe
 from tracing.kiro.constants import HARNESS_NAME, KIRO_SESSIONS_DIR
+
+# How long to keep checking the background login probe before giving up and
+# caching "" for the rest of the session. Real observed latency is ~1.9s;
+# this is a generous multiple, not a tight bound — unlike the subprocess
+# timeouts elsewhere, nothing here is ever blocked waiting on this deadline.
+_LOGIN_PROBE_GRACE_MS = 10_000
 
 STATE_DIR: Path = STATE_BASE_DIR / HARNESS_NAME
 SCOPE_NAME = "atatus-kiro-tracing"
@@ -87,7 +94,43 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     state.set("tool_count", "0")
     state.set("user_id", env.get_user_id(SERVICE_NAME) or "")
 
+    # user_login_id is resolved asynchronously — see resolve_user_login_id().
+    # Kick off the background probe now so it has the most time to finish
+    # before any span needs the value; never wait on it here.
+    probe_path = STATE_DIR / f".login_probe_{session_id or os.getpid()}"
+    state.set("user_login_id_probe_path", str(probe_path))
+    state.set("user_login_id_probe_started_at", str(get_timestamp_ms()))
+    start_kiro_login_probe(probe_path)
+
     log(f"Session initialized: {session_id}")
+
+
+def resolve_user_login_id(state: StateManager) -> str:
+    """Non-blocking read of the async login-id probe started at session init.
+
+    Returns the cached value once resolved. Until then, returns "" for the
+    current span without giving up — the next hook call in this session will
+    check again — except once _LOGIN_PROBE_GRACE_MS has passed with no result,
+    at which point it caches "" permanently so a probe that never finishes
+    (kiro-cli missing, not logged in, hung) doesn't get re-checked forever.
+    """
+    cached = state.get("user_login_id")
+    if cached is not None:
+        return cached
+
+    probe_path_str = state.get("user_login_id_probe_path")
+    if not probe_path_str:
+        return ""
+
+    result = read_kiro_login_probe(Path(probe_path_str))
+    if result is not None:
+        state.set("user_login_id", result)
+        return result
+
+    started_at = int(state.get("user_login_id_probe_started_at") or "0")
+    if started_at and get_timestamp_ms() - started_at > _LOGIN_PROBE_GRACE_MS:
+        state.set("user_login_id", "")
+    return ""
 
 
 def gc_stale_state_files() -> None:

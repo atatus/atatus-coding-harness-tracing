@@ -223,6 +223,7 @@ def _handle_post_tool_use(input_json: dict) -> None:
 
     # Build attributes
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     attrs = {
         "session.id": session_id,
         **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
@@ -235,6 +236,8 @@ def _handle_post_tool_use(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -360,6 +363,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
 
     # Build attributes
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     attrs = {
         "session.id": session_id,
         **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
@@ -374,6 +378,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -1213,6 +1219,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
     user_prompt = state.get("current_trace_prompt") or ""
     trace_count = state.get("trace_count") or "0"
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     prompt_id = state.get("current_prompt_id") or ""
 
     # Stop vouches for the turn by itself; any other closer needs the transcript as evidence.
@@ -1314,7 +1321,10 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             span_id_overrides.setdefault(event.event_id, generate_span_id())
         state.set("high_fidelity_span_ids", json.dumps(span_id_overrides, sort_keys=True))
 
-        common_attrs = {"user.id": user_id} if user_id else {}
+        common_attrs = {
+            **({"user.id": user_id} if user_id else {}),
+            **({"user.login_id": login_id} if login_id else {}),
+        }
         # A task-notification continuation has no root of its own: its spans go straight
         # under the subagent (or Agent tool) span already sent in the originating trace.
         continuation = bool(state.get("continuation_agent_id"))
@@ -1369,6 +1379,8 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     status_code, status_message = turn_status(reason)
     span = build_span(
@@ -1404,8 +1416,11 @@ def _emit_abandoned_turn(state) -> None:
         "output.value": ABANDONED_OUTPUT,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     prompt_id = state.get("current_prompt_id") or ""
     if prompt_id:
         attrs[PROMPT_ID_ATTR] = prompt_id
@@ -1570,6 +1585,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         agent_event.ended_at_ms = max(int(e.ended_at_ms) for e in graph.events if isinstance(e.ended_at_ms, int))
     subagent_span_id = generate_span_id()
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     payload = render_event_graph(
         graph,
         trace_id=trace_id,
@@ -1577,7 +1593,10 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         scope_name=SCOPE_NAME,
         span_id_overrides={agent_event.event_id: subagent_span_id},
         extra_attributes={agent_event.event_id: {"subagent.background": "true"}},
-        common_attributes={"user.id": user_id} if user_id else {},
+        common_attributes={
+            **({"user.id": user_id} if user_id else {}),
+            **({"user.login_id": login_id} if login_id else {}),
+        },
         root_parent_span_id=tool_span_id,
     )
     _send_span_async(payload)
@@ -1667,8 +1686,11 @@ def _handle_subagent_stop(input_json: dict) -> None:
     if stored_prompt:
         attrs["input.value"] = redact_content(env.log_prompts, stored_prompt)
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         f"Subagent: {agent_type}",
@@ -1703,6 +1725,7 @@ def _handle_stop_failure(input_json: dict) -> None:
     user_prompt = state.get("current_trace_prompt") or ""
     trace_count = state.get("trace_count") or "0"
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     error_type = input_json.get("error", "") or ""
     error_details = input_json.get("error_details", "") or ""
@@ -1727,6 +1750,8 @@ def _handle_stop_failure(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     prompt_id = state.get("current_prompt_id") or ""
     if prompt_id:
         attrs[PROMPT_ID_ATTR] = prompt_id
@@ -1771,8 +1796,11 @@ def _handle_notification(input_json: dict) -> None:
         "input.value": message,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     now = str(get_timestamp_ms())
     span = build_span(
@@ -1813,8 +1841,11 @@ def _handle_permission_request(input_json: dict) -> None:
         "input.value": tool_input,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     now = str(get_timestamp_ms())
     span = build_span(
@@ -1854,8 +1885,11 @@ def _handle_permission_denied(input_json: dict) -> None:
         "input.value": tool_input,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     now = str(get_timestamp_ms())
     span = build_span(
@@ -1945,8 +1979,11 @@ def _handle_post_compact(input_json: dict) -> None:
         "compact.trigger": trigger,
     }
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         f"Compact ({trigger})",

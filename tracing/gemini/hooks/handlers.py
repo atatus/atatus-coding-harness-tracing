@@ -159,6 +159,7 @@ def _flush_pending_model_call(state) -> None:
     parent_span_id = state.get("current_trace_span_id") or ""
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     start_time = state.get(f"model_{model_call_id}_start") or str(get_timestamp_ms())
     end_time = str(get_timestamp_ms())
@@ -191,6 +192,8 @@ def _flush_pending_model_call(state) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     llm_span_id = generate_span_id()
     span = build_span(
@@ -235,6 +238,7 @@ def _close_pending_turn(state, reason: str) -> None:
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
 
@@ -246,6 +250,8 @@ def _close_pending_turn(state, reason: str) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Turn",
@@ -365,6 +371,7 @@ def _handle_after_agent(input_json: dict) -> None:
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     # Extract response: try prompt_response (CLI specific) then standard keys
     response_obj = _get_robust(input_json, "prompt_response", "llm_response", "response", "model_response")
@@ -378,6 +385,8 @@ def _handle_after_agent(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Turn",
@@ -516,6 +525,7 @@ def _handle_after_tool(input_json: dict) -> None:
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     state.increment("tool_count")
 
@@ -592,6 +602,8 @@ def _handle_after_tool(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:

@@ -205,6 +205,7 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by reconcile
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
     pending_uid = state.get("current_user_message_id") or ""
@@ -217,6 +218,8 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by reconcile
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Turn",
@@ -333,6 +336,7 @@ def _emit_llm_span(
 
     session_id = session_id_override or state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     model_id = _string_value(info.get("modelID"))
     provider_id = _string_value(info.get("providerID"))
@@ -390,6 +394,8 @@ def _emit_llm_span(
         attrs["llm.cost"] = cost
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     state.increment("llm_call_seq")
     _seq = state.get("llm_call_seq") or "1"
@@ -464,6 +470,7 @@ def _emit_tool_span(
 
     session_id = session_id_override or state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     tool_name = _string_value(tool_part.get("tool"), "unknown") or "unknown"
     tool_input = tstate.get("input") or {}
@@ -502,6 +509,8 @@ def _emit_tool_span(
         attrs[k] = redact_content(env.log_tool_details, v)
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     status_code = 2 if is_error else 1
     status_message = redact_content(env.log_tool_content, output_raw) if is_error else ""
@@ -646,8 +655,11 @@ def _emit_child_session(state: StateManager, child: dict, *, finalize_agent: boo
             "output.value": redact_content(env.log_prompts, final_output),
         }
         user_id = state.get("user_id") or ""
+        login_id = state.get("user_login_id") or ""
         if user_id:
             attrs["user.id"] = user_id
+        if login_id:
+            attrs["user.login_id"] = login_id
         span = build_span(
             f"Agent: {agent_name}",
             "AGENT",
@@ -794,6 +806,7 @@ def _handle_close(input_json: dict) -> None:
 
     session_id = state.get("session_id") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     prompt = state.get("current_trace_prompt") or ""
     final_output = _text_of(final["parts"]) if final else ""
@@ -806,6 +819,8 @@ def _handle_close(input_json: dict) -> None:
     }
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span = build_span(
         "Turn",

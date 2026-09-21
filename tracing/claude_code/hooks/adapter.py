@@ -170,6 +170,10 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
         user_id = input_json.get("user_id", "")
     state.set("user_id", user_id)
 
+    # Auto-detected login identity (usually an email) — no manual override,
+    # see core.common.get_user_login_id. Resolved once here, same as user_id.
+    state.set("user_login_id", env.get_user_login_id(SERVICE_NAME))
+
     log(f"Session initialized: {session_id}")
 
 

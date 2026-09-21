@@ -513,6 +513,7 @@ def _put_indexed_message(attrs: dict, prefix: str, role: str, content: str) -> N
 def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
     """Assemble the LLM + TOOL spans from an extracted turn and ship them."""
     user_id = env.get_user_id(SERVICE_NAME) or ""
+    login_id = env.get_user_login_id(SERVICE_NAME) or ""
 
     trace_id = generate_trace_id()
     parent_span_id = generate_span_id()
@@ -539,6 +540,8 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
         attrs["codex.turn_id"] = turn_id
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     if turn.get("model"):
         attrs["llm.model_name"] = turn["model"]
     if turn.get("permission_mode"):
@@ -693,8 +696,11 @@ def _send_legacy_single_span(thread_id: str, turn_id: str, input_json: dict) -> 
         "llm.system": "codex",
     }
     user_id = env.get_user_id(SERVICE_NAME)
+    login_id = env.get_user_login_id(SERVICE_NAME)
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
     _put_indexed_message(attrs, "llm.input_messages", "user", user_prompt)
     _put_indexed_message(attrs, "llm.output_messages", "assistant", assistant_output)
 

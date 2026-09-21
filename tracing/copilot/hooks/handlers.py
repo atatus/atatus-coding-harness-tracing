@@ -226,8 +226,11 @@ def _emit_tool_span(
     attrs["output.value"] = redact_content(env.log_tool_content, output)
 
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     if result_type:
         attrs["tool.result_type"] = str(result_type)
@@ -282,6 +285,7 @@ def _handle_stop(input_json: dict) -> None:
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
 
     transcript_path = payload_get(input_json, "transcript_path", default="")
     summary = parse_transcript(str(transcript_path)) if transcript_path else {}
@@ -301,6 +305,8 @@ def _handle_stop(input_json: dict) -> None:
     common = {"session.id": session_id}
     if user_id:
         common["user.id"] = user_id
+    if login_id:
+        common["user.login_id"] = login_id
     if model_name:
         common["llm.model_name"] = model_name
 
@@ -394,6 +400,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
     model_name = summary.get("model_name", "")
 
     user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
     end_time = str(get_timestamp_ms())
     start_time = state.get(f"subagent_{agent_id}_start") or end_time
 
@@ -409,6 +416,8 @@ def _handle_subagent_stop(input_json: dict) -> None:
         attrs["llm.model_name"] = model_name
     if user_id:
         attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
 
     span_name = f"Subagent: {agent_type or agent_id}" if (agent_type or agent_id) else "Subagent"
 

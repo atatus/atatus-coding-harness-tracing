@@ -186,6 +186,82 @@ class TestEnsureSessionInitialized:
         assert sm.get("tool_count") == "0"
 
 
+# ── login_id async probe tests ──────────────────────────────────────────────
+
+
+class TestResolveUserLoginId:
+    def _make_state(self, kiro_state_dir, key="test"):
+        sm = StateManager(
+            state_dir=kiro_state_dir,
+            state_file=kiro_state_dir / f"state_{key}.json",
+            lock_path=kiro_state_dir / f".lock_{key}",
+        )
+        sm.init_state()
+        return sm
+
+    def test_session_init_never_blocks_on_kiro_cli(self, kiro_state_dir, disable_env_vars, monkeypatch):
+        """Real kiro-cli takes ~1.9s; ensure_session_initialized must return
+        immediately regardless — it only ever starts the probe, never waits."""
+        started = {}
+
+        def fake_start_probe(dest_path):
+            started["dest_path"] = dest_path
+
+        monkeypatch.setattr(adapter, "start_kiro_login_probe", fake_start_probe)
+        sm = self._make_state(kiro_state_dir, "no-block")
+        adapter.ensure_session_initialized(sm, {"session_id": "sess-1"})
+        assert "dest_path" in started
+        assert sm.get("user_login_id_probe_path") == str(started["dest_path"])
+        # Not yet resolved — that only happens via resolve_user_login_id().
+        assert sm.get("user_login_id") is None
+
+    def test_returns_empty_while_probe_still_pending(self, kiro_state_dir, disable_env_vars, monkeypatch):
+        monkeypatch.setattr(adapter, "start_kiro_login_probe", lambda dest_path: None)
+        sm = self._make_state(kiro_state_dir, "pending")
+        adapter.ensure_session_initialized(sm, {"session_id": "sess-2"})
+        assert adapter.resolve_user_login_id(sm) == ""
+        # Still uncached — a later call should try reading the probe again.
+        assert sm.get("user_login_id") is None
+
+    def test_resolves_once_probe_file_appears(self, kiro_state_dir, disable_env_vars, monkeypatch):
+        monkeypatch.setattr(adapter, "start_kiro_login_probe", lambda dest_path: None)
+        sm = self._make_state(kiro_state_dir, "resolves")
+        adapter.ensure_session_initialized(sm, {"session_id": "sess-3"})
+        probe_path = sm.get("user_login_id_probe_path")
+        assert probe_path is not None
+
+        # First call before the probe file exists.
+        assert adapter.resolve_user_login_id(sm) == ""
+
+        # Background process "finishes".
+        from pathlib import Path
+
+        Path(probe_path).write_text("Logged in with Google\nEmail: alice@example.com\n")
+
+        assert adapter.resolve_user_login_id(sm) == "alice@example.com"
+        # Cached — a second call must not need the file anymore.
+        Path(probe_path).unlink()
+        assert adapter.resolve_user_login_id(sm) == "alice@example.com"
+
+    def test_gives_up_after_grace_window_and_caches_empty(self, kiro_state_dir, disable_env_vars, monkeypatch):
+        monkeypatch.setattr(adapter, "start_kiro_login_probe", lambda dest_path: None)
+        sm = self._make_state(kiro_state_dir, "gives-up")
+        adapter.ensure_session_initialized(sm, {"session_id": "sess-4"})
+        # Backdate the probe's start time past the grace window so the very
+        # next call gives up, without a real sleep in the test.
+        past = adapter.get_timestamp_ms() - adapter._LOGIN_PROBE_GRACE_MS - 1000
+        sm.set("user_login_id_probe_started_at", str(past))
+
+        assert adapter.resolve_user_login_id(sm) == ""
+        assert sm.get("user_login_id") == ""  # now permanently cached, not just returned
+
+    def test_no_probe_started_returns_empty(self, kiro_state_dir, disable_env_vars):
+        """Defensive: resolve_user_login_id on a session that never ran
+        ensure_session_initialized (or predates this feature) must not raise."""
+        sm = self._make_state(kiro_state_dir, "no-probe")
+        assert adapter.resolve_user_login_id(sm) == ""
+
+
 # ── gc_stale_state_files tests ──────────────────────────────────────────────
 
 

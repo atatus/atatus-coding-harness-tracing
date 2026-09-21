@@ -21,6 +21,30 @@ import urllib.request
 from pathlib import Path
 from typing import IO, Optional
 
+from core.identity import (
+    detect_claude_code_login_id,
+    detect_codex_login_id,
+    detect_copilot_login_id,
+    detect_gemini_login_id,
+    detect_omp_login_id,
+    detect_opencode_login_id,
+)
+
+# service_name -> detector. Two harnesses have no entry here:
+# - cursor reads user_email straight off its own hook payload
+#   (tracing/cursor/hooks/handlers.py), never through this dispatch table.
+# - kiro's only source is a ~1.9s CLI call, too slow to run inline; it uses
+#   the async probe in core.identity (start_kiro_login_probe /
+#   read_kiro_login_probe) from its own adapter instead of this dispatcher.
+_IDENTITY_DETECTORS = {
+    "claude-code": detect_claude_code_login_id,
+    "codex": detect_codex_login_id,
+    "copilot": detect_copilot_login_id,
+    "gemini": detect_gemini_login_id,
+    "opencode": detect_opencode_login_id,
+    "omp": detect_omp_login_id,
+}
+
 # ---------------------------------------------------------------------------
 # Content-capture defaults
 # ---------------------------------------------------------------------------
@@ -96,6 +120,22 @@ class _Env:
     @property
     def user_id(self) -> str:
         return self.get_user_id()
+
+    def get_user_login_id(self, service_name: str = "") -> str:
+        """Auto-detected login identity (usually an email) for a harness.
+
+        Unlike get_user_id, this has no env/config override tier — it's a
+        pure dispatch to that harness's detector in core.identity. If a
+        harness's own login state is wrong or unwanted, that's a detector bug
+        to fix, not a value to hand-edit.
+        """
+        detector = _IDENTITY_DETECTORS.get(service_name)
+        if not detector:
+            return ""
+        try:
+            return detector() or ""
+        except Exception:
+            return ""
 
     @property
     def verbose(self) -> bool:
