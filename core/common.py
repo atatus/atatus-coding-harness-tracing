@@ -880,6 +880,9 @@ def send_span_async(span_dict: dict, sender=None, on_success=None, on_success_re
     try:
         pid = os.fork()
     except OSError:
+        if sender is None and not (on_success is not None and on_success_ref is None):
+            if _spawn_detached_sender(span_dict, on_success_ref):
+                return
         _send_and_settle()
         return
 
@@ -995,15 +998,25 @@ class FileLock:
                     self._fd = None
                     if not self.break_on_timeout:
                         raise TimeoutError(f"timed out acquiring lock: {self.lock_path}")
-                    # Force-acquire: remove and reopen the lock inode.
                     try:
                         self.lock_path.unlink(missing_ok=True)
                     except OSError:
                         pass
-                    self._fd = open(self.lock_path, "w")
-                    fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    return
-                time.sleep(0.1)
+                    fd = None
+                    try:
+                        fd = open(self.lock_path, "w")
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        self._fd = fd
+                        return
+                    except (OSError, BlockingIOError):
+                        if fd is not None:
+                            try:
+                                fd.close()
+                            except OSError:
+                                pass
+                        self._fd = None
+                        return
+                time.sleep(0.015)
 
     def _release_fcntl(self) -> None:
         if self._fd is not None:

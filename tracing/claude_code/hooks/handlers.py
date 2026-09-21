@@ -87,12 +87,14 @@ def _read_stdin() -> dict:
 def _has_live_transcript(input_json: dict) -> bool:
     """Return whether this hook can participate in transcript correlation."""
     transcript_path = input_json.get("transcript_path")
-    if not isinstance(transcript_path, str) or not transcript_path:
-        return False
-    try:
-        return Path(transcript_path).is_file()
-    except OSError:
-        return False
+    if isinstance(transcript_path, str) and transcript_path:
+        try:
+            return Path(transcript_path).is_file()
+        except OSError:
+            pass
+    session_id = input_json.get("session_id") or ""
+    resolved = resolve_transcript_path(input_json, session_id)
+    return resolved is not None and resolved.is_file()
 
 
 def _handle_session_start(input_json: dict) -> None:
@@ -106,7 +108,7 @@ def _tool_state(input_json: dict):
     """A subagent's tool hooks carry agent_id; their observations belong to that
     agent's own state file, which is what its export reads."""
     agent_id = input_json.get("agent_id")
-    if isinstance(agent_id, str) and agent_id and _has_live_transcript(input_json):
+    if isinstance(agent_id, str) and agent_id:
         return resolve_agent_state(input_json, agent_id)
     return resolve_session(input_json)
 
@@ -117,7 +119,7 @@ def _handle_pre_tool_use(input_json: dict) -> None:
     tool_id = input_json.get("tool_use_id") or generate_trace_id()
     started_at_ms = get_timestamp_ms()
     state.set(f"tool_{tool_id}_start", str(started_at_ms))
-    if _has_live_transcript(input_json):
+    if _has_live_transcript(input_json) or input_json.get("agent_id"):
         ToolBuffer(state).record_start(
             tool_id,
             tool_name=input_json.get("tool_name"),
@@ -131,10 +133,11 @@ def _handle_post_tool_use(input_json: dict) -> None:
     """Handle post_tool_use: build and send a TOOL span."""
     state = _tool_state(input_json)
     session_id = state.get("session_id")
-    if not _has_live_transcript(input_json) and session_id is None:
+    is_subagent = bool(input_json.get("agent_id"))
+    if not (_has_live_transcript(input_json) or is_subagent) and session_id is None:
         return
 
-    if _has_live_transcript(input_json):
+    if _has_live_transcript(input_json) or is_subagent:
         tool_id = input_json.get("tool_use_id") or generate_trace_id()
         state.increment("tool_count")
         buffer = ToolBuffer(state)
@@ -266,10 +269,11 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     """Handle post_tool_use_failure: build and send a TOOL span with error attributes."""
     state = _tool_state(input_json)
     session_id = state.get("session_id")
-    if not _has_live_transcript(input_json) and session_id is None:
+    is_subagent = bool(input_json.get("agent_id"))
+    if not (_has_live_transcript(input_json) or is_subagent) and session_id is None:
         return
 
-    if _has_live_transcript(input_json):
+    if _has_live_transcript(input_json) or is_subagent:
         tool_id = input_json.get("tool_use_id") or generate_trace_id()
         state.increment("tool_count")
         buffer = ToolBuffer(state)
@@ -1545,10 +1549,26 @@ def _handle_subagent_start(input_json: dict) -> None:
     agent_id = input_json.get("agent_id", "")
     if not agent_id:
         return
-    state.set(f"subagent_{agent_id}_start_time", str(get_timestamp_ms()))
+    now_ms = str(get_timestamp_ms())
     prompt = input_json.get("prompt", "") or ""
+    if state.state_file is not None:
+        try:
+            with state._lock():
+                data = state._read_safe()
+                data[f"subagent_{agent_id}_start_time"] = now_ms
+                if prompt:
+                    data[f"subagent_{agent_id}_prompt"] = prompt
+                state._write(data)
+        except Exception as exc:
+            error(f"Failed to record subagent {agent_id} start: {exc}")
+    else:
+        state.set(f"subagent_{agent_id}_start_time", now_ms)
+        if prompt:
+            state.set(f"subagent_{agent_id}_prompt", prompt)
+    agent_state = resolve_agent_state(input_json, agent_id)
+    agent_state.set("start_time", now_ms)
     if prompt:
-        state.set(f"subagent_{agent_id}_prompt", prompt)
+        agent_state.set("prompt", prompt)
 
 
 def _export_background_subagent(state, input_json: dict, agent_id: str, descriptor: dict) -> bool:

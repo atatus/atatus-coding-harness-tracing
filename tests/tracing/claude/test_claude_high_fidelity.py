@@ -1291,3 +1291,26 @@ class TestSubagentHooksDoNotContendOnTheSessionFile:
         kept = buffer.all()
         assert len(kept) == MAX_OBSERVATIONS
         assert min(o.ended_at_ms for o in kept) == 50, "the oldest are the ones evicted"
+
+    def test_subagent_tool_hooks_without_transcript_path_still_use_agent_file(self, tmp_path, monkeypatch):
+        import tracing.claude_code.hooks.adapter as adapter
+
+        monkeypatch.setattr(adapter, "STATE_DIR", tmp_path)
+        session = StateManager(tmp_path, tmp_path / "state_s1.json", tmp_path / ".lock_s1")
+        session.init_state()
+        session.set("session_id", "s1")
+        payload = {
+            "session_id": "s1",
+            "agent_id": "agent-B",
+            "tool_use_id": "tu-parallel",
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo parallel"},
+        }
+        with mock.patch.object(handlers, "resolve_session", lambda *a, **k: session):
+            handlers._handle_pre_tool_use(payload)
+            handlers._handle_post_tool_use({**payload, "tool_response": "parallel done"})
+        assert session.get(ToolBuffer.STATE_KEY) in (None, "", "{}")
+        agent_file = tmp_path / "state_s1__agent_agent-B.json"
+        assert agent_file.is_file()
+        assert "tu-parallel" in agent_file.read_text(encoding="utf-8")
+
