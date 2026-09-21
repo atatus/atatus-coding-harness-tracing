@@ -81,7 +81,6 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-omp": "tracing.omp.hooks.handlers:main",
     "atatus-hook-devin": "tracing.devin.hooks.handlers:main",
     "atatus-hook-antigravity-pre-invocation": "tracing.antigravity.hooks.handlers:pre_invocation",
-    "atatus-hook-antigravity-post-invocation": "tracing.antigravity.hooks.handlers:post_invocation",
     "atatus-hook-antigravity-stop": "tracing.antigravity.hooks.handlers:stop",
 }
 

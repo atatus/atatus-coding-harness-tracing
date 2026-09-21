@@ -38,7 +38,6 @@ HOOK_NAME = "atatus-tracing"
 # wire-entry-points task. Order is preserved when writing hooks.json.
 EVENTS: dict[str, str] = {
     "PreInvocation": "atatus-hook-antigravity-pre-invocation",
-    "PostInvocation": "atatus-hook-antigravity-post-invocation",
     "Stop": "atatus-hook-antigravity-stop",
 }
 
