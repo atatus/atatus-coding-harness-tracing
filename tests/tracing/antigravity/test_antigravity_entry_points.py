@@ -19,6 +19,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
+INSTALL_BAT = REPO_ROOT / "install.bat"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 
@@ -204,6 +205,59 @@ class TestInstallShAntigravity:
         ]
         assert antigravity_lines, "usage() must contain a line describing antigravity"
 
+    def test_harness_dir_maps_agy_alias(self, install_sh_text: str) -> None:
+        """harness_dir() must map ``agy`` alias -> ``tracing/antigravity``."""
+        assert re.search(
+            r'agy\)\s*echo\s*"tracing/antigravity"',
+            install_sh_text,
+        ), 'harness_dir() must contain an `agy) echo "tracing/antigravity"` clause'
+
+    def test_main_dispatch_includes_agy(self, install_sh_text: str) -> None:
+        """The command-validation alternation must include ``agy``."""
+        match = re.search(
+            r"case\s+\"\$cmd\".*?\n\s*([a-zA-Z|]+)\)\s*\n\s*install_harness",
+            install_sh_text,
+            re.DOTALL,
+        )
+        assert match
+        alternation = match.group(1).split("|")
+        assert "agy" in alternation, f"main() dispatch alternation missing agy: {alternation}"
+
+    def test_usage_mentions_agy_alias(self, install_sh_text: str) -> None:
+        """usage() must mention agy alias."""
+        body = install_sh_text.split("Commands:", 1)[1].split("update", 1)[0]
+        assert "agy" in body, "usage() Commands block must mention agy alias"
+
+
+@pytest.fixture(scope="module")
+def install_bat_text() -> str:
+    return INSTALL_BAT.read_text()
+
+
+class TestInstallBatAntigravity:
+    """install.bat must route antigravity and agy alias to tracing\\antigravity."""
+
+    def test_parse_args_includes_antigravity_and_agy(self, install_bat_text: str) -> None:
+        lines = [line for line in install_bat_text.splitlines() if "for %%C in" in line and "COMMAND" in line]
+        assert lines, "parse_args harness loop not found"
+        assert "antigravity" in lines[0]
+        assert "agy" in lines[0]
+
+    def test_uninstall_loop_includes_antigravity_and_agy(self, install_bat_text: str) -> None:
+        lines = [line for line in install_bat_text.splitlines() if "for %%C in" in line and "UNINSTALL" in line]
+        assert lines, "uninstall harness loop not found"
+        assert "antigravity" in lines[0]
+        assert "agy" in lines[0]
+
+    def test_resolve_dir_maps_antigravity_and_agy(self, install_bat_text: str) -> None:
+        assert 'if /i "%~1"=="antigravity" set "HARNESS_DIR=tracing\\antigravity"' in install_bat_text
+        assert 'if /i "%~1"=="agy"         set "HARNESS_DIR=tracing\\antigravity"' in install_bat_text
+
+    def test_usage_mentions_antigravity_and_agy(self, install_bat_text: str) -> None:
+        usage_text = install_bat_text.split(":usage", 1)[1]
+        assert "antigravity" in usage_text
+        assert "agy" in usage_text
+
 
 @pytest.mark.skipif(os.name == "nt", reason="bash not available on Windows")
 def test_install_sh_help_output_lists_antigravity() -> None:
@@ -217,6 +271,7 @@ def test_install_sh_help_output_lists_antigravity() -> None:
     )
     assert result.returncode == 0, f"--help failed: {result.stderr}"
     assert "antigravity" in result.stdout, "--help output must mention antigravity"
+    assert "agy" in result.stdout, "--help output must mention agy alias"
 
 
 # NOTE: We deliberately do NOT execute ``./install.sh antigravity`` to prove the

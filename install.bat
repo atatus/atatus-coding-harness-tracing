@@ -44,12 +44,12 @@ if /i "%~1"=="--wheel-dir" (
     shift & shift & goto :parse_args
 )
 if /i "%~1"=="--branch" ( set "INSTALL_BRANCH=%~2" & set "TARBALL_URL=https://github.com/atatus/atatus-coding-harness-tracing/archive/refs/heads/%~2.tar.gz" & shift & shift & goto :parse_args )
-for %%C in (claude codex copilot cursor gemini kiro opencode omp devin antigravity) do if /i "%~1"=="%%C" ( set "COMMAND=%%C" & shift & goto :parse_args )
+for %%C in (claude codex copilot cursor gemini kiro opencode omp devin antigravity agy) do if /i "%~1"=="%%C" ( set "COMMAND=%%C" & shift & goto :parse_args )
 if /i "%~1"=="status" ( set "COMMAND=status" & shift & goto :parse_args )
 if /i "%~1"=="update" ( set "COMMAND=update" & shift & goto :parse_args )
 if /i "%~1"=="uninstall" (
     set "COMMAND=uninstall" & shift
-    for %%C in (claude codex copilot cursor gemini kiro opencode omp devin antigravity) do if /i "%~1"=="%%C" ( set "UNINSTALL_HARNESS=%%C" & shift )
+    for %%C in (claude codex copilot cursor gemini kiro opencode omp devin antigravity agy) do if /i "%~1"=="%%C" ( set "UNINSTALL_HARNESS=%%C" & shift )
     goto :parse_args
 )
 echo [atatus] Unknown argument: %~1 >&2
@@ -58,7 +58,7 @@ goto :usage
 if "%COMMAND%"=="" ( echo [atatus] No command specified >&2 & goto :usage )
 
 REM --- Harness name -> directory mapping ---
-REM claude->tracing\claude_code  codex->tracing\codex  copilot->tracing\copilot  cursor->tracing\cursor  gemini->tracing\gemini  kiro->tracing\kiro  opencode->tracing\opencode  omp->tracing\omp  devin->tracing\devin  antigravity->tracing\antigravity
+REM claude->tracing\claude_code  codex->tracing\codex  copilot->tracing\copilot  cursor->tracing\cursor  gemini->tracing\gemini  kiro->tracing\kiro  opencode->tracing\opencode  omp->tracing\omp  devin->tracing\devin  antigravity->tracing\antigravity  agy->tracing\antigravity
 
 REM --- Dispatch ---
 if "%COMMAND%"=="status"    goto :cmd_status
@@ -372,6 +372,7 @@ if /i "%~1"=="opencode"    set "HARNESS_DIR=tracing\opencode"
 if /i "%~1"=="omp"         set "HARNESS_DIR=tracing\omp"
 if /i "%~1"=="devin"       set "HARNESS_DIR=tracing\devin"
 if /i "%~1"=="antigravity" set "HARNESS_DIR=tracing\antigravity"
+if /i "%~1"=="agy"         set "HARNESS_DIR=tracing\antigravity"
 if "%HARNESS_DIR%"=="" ( echo [atatus] Unknown harness: %~1 >&2 & exit /b 1 )
 goto :eof
 
@@ -392,7 +393,7 @@ echo     kiro                Install tracing for Kiro CLI
 echo     opencode            Install tracing for opencode
 echo     omp                 Install tracing for Oh My Pi (omp)
 echo     devin               Install tracing for Devin CLI
-echo     antigravity         Install tracing for Google Antigravity
+echo     antigravity         Install tracing for Google Antigravity (alias: agy)
 echo     status              Report configured harnesses and hook wiring
 echo     update              Fetch the latest installer, update and reinstall all harnesses
 echo     uninstall [harness] Remove one harness or full wipe
