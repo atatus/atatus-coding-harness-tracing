@@ -191,7 +191,9 @@ class TestInstall:
         assert entry["project_name"] == "codex"
 
     def test_install_writes_notify_only_layout(self, fake_home, mock_prompts):
-        """Fresh install writes one `notify = [...]` entry; no lifecycle hooks, no otel."""
+        """Fresh install writes one `notify = [...]` entry plus our three
+        structured hooks (Interrupt, SessionStart, SessionEnd); no otel, and
+        none of the tool-lifecycle hooks the rollout JSONL already covers."""
         codex_install.install()
 
         toml_path = fake_home / ".codex" / "config.toml"
@@ -206,18 +208,17 @@ class TestInstall:
         # No otel block (we ship spans directly from notify, not via OTLP exporter).
         assert "otel" not in data
 
-        # No lifecycle hooks -- the rollout-driven notify path is the only signal.
-        assert "hooks" not in data or all(
-            not data["hooks"].get(e)
-            for e in (
-                "SessionStart",
-                "UserPromptSubmit",
-                "PreToolUse",
-                "PostToolUse",
-                "PermissionRequest",
-                "Stop",
-            )
+        # The tool-lifecycle hooks the rollout JSONL already covers with full
+        # fidelity are never (re-)written.
+        assert all(
+            not data.get("hooks", {}).get(e) for e in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest")
         )
+        # Our three structured hooks -- filling gaps the rollout JSONL can't --
+        # are written, each pointing at its own entry point.
+        from tracing.codex.constants import HOOK_EVENTS
+
+        for event, bin_name in HOOK_EVENTS.items():
+            assert data["hooks"][event][0]["hooks"][0]["command"].endswith(bin_name)
 
     def test_install_writes_env_file(self, fake_home, mock_prompts):
         codex_install.install()
@@ -310,10 +311,14 @@ class TestInstall:
         second = toml_path.read_text()
         assert first == second
 
-        # Notify entry stays single; the notify-only layout writes no hooks.
+        # Notify entry stays single; our structured hooks stay one entry each
+        # (no duplicates from the second install).
         data = codex_toml._toml_load(toml_path)
         assert len(data["notify"]) == 1
-        assert "hooks" not in data
+        from tracing.codex.constants import HOOK_EVENTS
+
+        for event in HOOK_EVENTS:
+            assert len(data["hooks"][event]) == 1
 
     def test_install_with_user_id(self, fake_home, monkeypatch):
         monkeypatch.setattr(_setup, "prompt_project_name", lambda default="": default or "codex")

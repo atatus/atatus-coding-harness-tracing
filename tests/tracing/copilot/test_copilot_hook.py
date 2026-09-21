@@ -24,11 +24,14 @@ from tracing.copilot.hooks.handlers import (
     _print_response,
     _read_stdin,
     _tool_key,
+    permission_request,
     post_tool_use,
     post_tool_use_failure,
     pre_tool_use,
+    session_end,
     session_start,
     stop,
+    subagent_start,
     subagent_stop,
     user_prompt_submitted,
 )
@@ -1067,6 +1070,9 @@ ENTRY_POINTS = [
     ("post_tool_use_failure", post_tool_use_failure, "_handle_post_tool_use_failure", "PostToolUseFailure"),
     ("stop", stop, "_handle_stop", "Stop"),
     ("subagent_stop", subagent_stop, "_handle_subagent_stop", "SubagentStop"),
+    ("subagent_start", subagent_start, "_handle_subagent_start", "SubagentStart"),
+    ("permission_request", permission_request, "_handle_permission_request", "PermissionRequest"),
+    ("session_end", session_end, "_handle_session_end", "SessionEnd"),
 ]
 
 

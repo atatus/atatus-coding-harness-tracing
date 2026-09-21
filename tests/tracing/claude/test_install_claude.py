@@ -135,7 +135,7 @@ class TestFreshInstall:
         assert settings["plugins"][0]["type"] == "local"
 
         hooks = settings.get("hooks", {})
-        assert len(hooks) == 16
+        assert len(hooks) == 19
 
         env = settings.get("env", {})
         assert env.get("ATATUS_TRACE_ENABLED") == "true"

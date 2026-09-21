@@ -43,8 +43,14 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-pre-compact": "tracing.claude_code.hooks.handlers:pre_compact",
     "atatus-hook-post-compact": "tracing.claude_code.hooks.handlers:post_compact",
     "atatus-hook-permission-denied": "tracing.claude_code.hooks.handlers:permission_denied",
+    "atatus-hook-elicitation": "tracing.claude_code.hooks.handlers:elicitation",
+    "atatus-hook-elicitation-result": "tracing.claude_code.hooks.handlers:elicitation_result",
+    "atatus-hook-post-tool-batch": "tracing.claude_code.hooks.handlers:post_tool_batch",
     # Codex hooks
     "atatus-hook-codex-notify": "tracing.codex.hooks.handlers:notify",
+    "atatus-hook-codex-interrupt": "tracing.codex.hooks.handlers:interrupt",
+    "atatus-hook-codex-session-start": "tracing.codex.hooks.handlers:session_start",
+    "atatus-hook-codex-session-end": "tracing.codex.hooks.handlers:session_end",
     # Copilot hooks
     "atatus-hook-copilot-session-start": "tracing.copilot.hooks.handlers:session_start",
     "atatus-hook-copilot-user-prompt": "tracing.copilot.hooks.handlers:user_prompt_submitted",
@@ -53,6 +59,9 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-copilot-post-tool-failure": "tracing.copilot.hooks.handlers:post_tool_use_failure",
     "atatus-hook-copilot-stop": "tracing.copilot.hooks.handlers:stop",
     "atatus-hook-copilot-subagent-stop": "tracing.copilot.hooks.handlers:subagent_stop",
+    "atatus-hook-copilot-subagent-start": "tracing.copilot.hooks.handlers:subagent_start",
+    "atatus-hook-copilot-permission-request": "tracing.copilot.hooks.handlers:permission_request",
+    "atatus-hook-copilot-session-end": "tracing.copilot.hooks.handlers:session_end",
     # Gemini hooks
     "atatus-hook-gemini-session-start": "tracing.gemini.hooks.handlers:session_start",
     "atatus-hook-gemini-session-end": "tracing.gemini.hooks.handlers:session_end",
@@ -72,6 +81,7 @@ EXPECTED_HARNESS_ENTRY_POINTS = {
     "atatus-hook-omp": "tracing.omp.hooks.handlers:main",
     "atatus-hook-devin": "tracing.devin.hooks.handlers:main",
     "atatus-hook-antigravity-pre-invocation": "tracing.antigravity.hooks.handlers:pre_invocation",
+    "atatus-hook-antigravity-post-invocation": "tracing.antigravity.hooks.handlers:post_invocation",
     "atatus-hook-antigravity-stop": "tracing.antigravity.hooks.handlers:stop",
 }
 

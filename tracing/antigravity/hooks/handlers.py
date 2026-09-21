@@ -561,6 +561,25 @@ def _handle_pre_invocation(input_json: dict) -> None:
     _emit_completed_turns(state, turns, False, input_json.get("conversationId", "") or "")
 
 
+def _handle_post_invocation(input_json: dict) -> None:
+    """Backstop: same as PreInvocation, run right after a model call instead of
+    right before the next one.
+
+    This does not fix transcript timestamp granularity (spans are still
+    stamped from the transcript's whole-second ISO-8601 fields, per this
+    module's docstring) — it only gives completed-but-not-yet-emitted turns
+    one more, earlier chance to flush if a ``Stop`` is delayed or missed.
+    """
+    debug_dump("antigravity_post_invocation", input_json)
+    state = resolve_session(input_json)
+    if state is None:
+        log("antigravity post_invocation: no conversationId or transcriptPath; skipping")
+        return
+    ensure_session_initialized(state, input_json)
+    turns = parse_transcript(input_json.get("transcriptPath", "") or "")
+    _emit_completed_turns(state, turns, False, input_json.get("conversationId", "") or "")
+
+
 def _handle_stop(input_json: dict) -> None:
     """Emit spans for the just-finished turn (and any earlier missed turns)."""
     debug_dump("antigravity_stop", input_json)
@@ -594,6 +613,18 @@ def pre_invocation() -> None:
         _print_response()
 
 
+def post_invocation() -> None:
+    """Entry point for atatus-hook-antigravity-post-invocation."""
+    try:
+        input_json = _read_stdin()
+        if check_requirements():
+            _handle_post_invocation(input_json)
+    except Exception as e:
+        error(f"antigravity post_invocation hook failed: {e}")
+    finally:
+        _print_response()
+
+
 def stop() -> None:
     """Entry point for atatus-hook-antigravity-stop."""
     try:
@@ -615,6 +646,7 @@ def main() -> None:
     handler_name = sys.argv[1]
     handlers = {
         "pre_invocation": pre_invocation,
+        "post_invocation": post_invocation,
         "stop": stop,
     }
 

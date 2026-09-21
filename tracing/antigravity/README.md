@@ -85,13 +85,13 @@ install.bat uninstall antigravity
 | Project name | `antigravity` |
 | Atatus endpoint | set by the installer |
 | Hook config file | `~/.gemini/config/hooks.json` |
-| Hook events registered | `PreInvocation`, `Stop` |
+| Hook events registered | `PreInvocation`, `PostInvocation`, `Stop` |
 | State directory | `~/.atatus/harness/state/antigravity/` |
 | Log file | `~/.atatus/harness/logs/antigravity.log` |
 
 ## Verifying tracing
 
-Run any Antigravity CLI/IDE session as you normally would. The installed hooks fire on `PreInvocation` (before each model invocation) and `Stop` (after the user turn completes).
+Run any Antigravity CLI/IDE session as you normally would. The installed hooks fire on `PreInvocation` (before each model invocation), `PostInvocation` (right after), and `Stop` (after the user turn completes). `PreInvocation`/`PostInvocation` are both backstops that flush any earlier turn whose `Stop` was missed — `PostInvocation` doesn't change how span timestamps are derived (still the transcript's whole-second fields, see Limitations), it just gives a turn one more, earlier chance to be emitted.
 
 - Errors land in `~/.atatus/harness/logs/antigravity.log` always; set `export ATATUS_VERBOSE=true` before launching Antigravity to also see routine hook activity.
 - Confirm spans appear in your configured project in Atatus.

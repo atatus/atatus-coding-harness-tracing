@@ -156,7 +156,7 @@ every span in a range, so a copy on the turn would count the same usage twice.
 | Project name | `claude-code` |
 | Atatus endpoint | set by the installer |
 | Hook config file | `~/.claude/settings.json` |
-| Hook events registered | `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`, `PermissionDenied`, `PreCompact`, `PostCompact` |
+| Hook events registered | `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`, `PermissionDenied`, `PreCompact`, `PostCompact`, `Elicitation`, `ElicitationResult` |
 | State directory | `~/.atatus/harness/state/claude-code/` |
 | Log file | `~/.atatus/harness/logs/claude-code.log` |
 

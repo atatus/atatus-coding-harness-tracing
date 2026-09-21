@@ -57,15 +57,15 @@ class TestCopilotEntryPoints:
         assert 'atatus-setup-copilot = "core.setup.copilot:main"' in self.text
 
     def test_exactly_7_hook_entry_points(self):
-        """There should be exactly 7 copilot hook entry points."""
+        """There should be exactly 10 copilot hook entry points."""
         count = self.text.count("atatus-hook-copilot-")
-        assert count == 7, f"Expected 7 copilot hook entries, got {count}"
+        assert count == 10, f"Expected 10 copilot hook entries, got {count}"
 
     def test_entry_points_match_hook_events(self):
         """Every event in HOOK_EVENTS has an entry point declared in pyproject.toml."""
         from tracing.copilot.constants import HOOK_EVENTS
 
-        assert len(HOOK_EVENTS) == 7
+        assert len(HOOK_EVENTS) == 10
         for entry_point in HOOK_EVENTS.values():
             assert f"{entry_point} = " in self.text
 

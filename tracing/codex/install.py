@@ -24,6 +24,7 @@ from tracing.codex.constants import (
     HARNESS_BIN,
     HARNESS_HOME,
     HARNESS_NAME,
+    HOOK_EVENTS,
     NOTIFY_BIN_NAME,
     get_codex_home,
 )
@@ -112,6 +113,71 @@ def _codex_toml_apply(path: Path, notify_cmd: str) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     _toml_write(data, path)
+
+
+def _codex_hooks_apply(path: Path, hook_events: dict[str, str]) -> None:
+    """Write ``[[hooks.<Event>]]`` entries for each event -> entry-point bin. Idempotent.
+
+    These are separate from the notify-only mechanism above: Interrupt,
+    SessionStart and SessionEnd fill gaps the rollout JSONL structurally
+    cannot -- a cancelled turn never reaches ``notify``, and there is no
+    session-scoped entity at all without these.
+    """
+    if dry_run():
+        info(f"would add hook entries to {path}: {', '.join(hook_events)}")
+        return
+
+    data = _toml_load_strict(path)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+
+    for event, bin_name in hook_events.items():
+        cmd = str(venv_bin(bin_name))
+        existing = hooks.get(event)
+        if not isinstance(existing, list):
+            existing = []
+        if not any(_entry_is_atatus_managed(e) for e in existing):
+            existing.append({"hooks": [{"type": "command", "command": cmd}]})
+        hooks[event] = existing
+
+    data["hooks"] = hooks
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _toml_write(data, path)
+
+
+def _codex_hooks_remove(path: Path, hook_events: dict[str, str]) -> None:
+    """Remove our ``[[hooks.<Event>]]`` entries for *hook_events*. Idempotent."""
+    if not path.is_file():
+        return
+
+    if dry_run():
+        info(f"would remove hook entries from {path}: {', '.join(hook_events)}")
+        return
+
+    data = _toml_load_strict(path)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+
+    changed = False
+    for event in hook_events:
+        existing = hooks.get(event)
+        if not isinstance(existing, list):
+            continue
+        kept = [e for e in existing if not _entry_is_atatus_managed(e)]
+        if len(kept) != len(existing):
+            changed = True
+            if kept:
+                hooks[event] = kept
+            else:
+                del hooks[event]
+
+    if not hooks:
+        data.pop("hooks", None)
+        changed = True
+    if changed:
+        _toml_write(data, path)
 
 
 def _codex_toml_remove(path: Path, notify_cmd: str) -> None:
@@ -226,6 +292,12 @@ def install(with_skills: bool = False) -> None:
     _codex_toml_apply(codex_config_file, notify_cmd)
     info(f"Updated TOML config: {codex_config_file}")
 
+    # 4b. Register the structured hooks (Interrupt, SessionStart, SessionEnd).
+    #     Codex prompts for `/hooks` trust approval on first use of these,
+    #     unlike the notify entry above.
+    _codex_hooks_apply(codex_config_file, HOOK_EVENTS)
+    info(f"Registered hooks: {', '.join(HOOK_EVENTS)} (approve via Codex's /hooks trust prompt)")
+
     # 5. Skills.
     if with_skills:
         symlink_skills(HARNESS_NAME)
@@ -247,9 +319,11 @@ def uninstall() -> None:
     # 1. Clean up any lingering v1 artifacts first (no-op if absent).
     cleanup_legacy_install(codex_config_file)
 
-    # 2. Revert TOML — remove our notify entry and any legacy hook entries.
+    # 2. Revert TOML — remove our notify entry, our structured hooks, and any
+    #    legacy hook entries.
     notify_cmd = str(venv_bin(NOTIFY_BIN_NAME))
     _codex_toml_remove(codex_config_file, notify_cmd)
+    _codex_hooks_remove(codex_config_file, HOOK_EVENTS)
     info(f"Reverted TOML config: {codex_config_file}")
 
     # 3. Remove env file if ours.

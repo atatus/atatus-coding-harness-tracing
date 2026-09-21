@@ -175,6 +175,39 @@
           }
         ]
       }
+    ],
+    "Elicitation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-elicitation",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-elicitation-result",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook\" atatus-hook-post-tool-batch",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

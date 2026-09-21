@@ -27,6 +27,9 @@ HOOK_EVENTS = {
     "PreCompact": "atatus-hook-pre-compact",
     "PostCompact": "atatus-hook-post-compact",
     "PermissionDenied": "atatus-hook-permission-denied",
+    "Elicitation": "atatus-hook-elicitation",
+    "ElicitationResult": "atatus-hook-elicitation-result",
+    "PostToolBatch": "atatus-hook-post-tool-batch",
 }
 
 # Claude Code kills a hook that runs past this and carries on without it

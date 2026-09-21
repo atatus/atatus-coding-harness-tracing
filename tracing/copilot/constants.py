@@ -48,4 +48,7 @@ HOOK_EVENTS: dict[str, str] = {
     "PostToolUseFailure": "atatus-hook-copilot-post-tool-failure",
     "Stop": "atatus-hook-copilot-stop",
     "SubagentStop": "atatus-hook-copilot-subagent-stop",
+    "SubagentStart": "atatus-hook-copilot-subagent-start",
+    "PermissionRequest": "atatus-hook-copilot-permission-request",
+    "SessionEnd": "atatus-hook-copilot-session-end",
 }

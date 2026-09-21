@@ -1818,6 +1818,138 @@ def _handle_notification(input_json: dict) -> None:
     _send_span_async(span)
 
 
+def _handle_elicitation(input_json: dict) -> None:
+    """Handle Elicitation: send a CHAIN span for an MCP server's request for user input."""
+    state = resolve_session(input_json)
+    trace_id = state.get("current_trace_id")
+    if trace_id is None:
+        return
+
+    session_id = state.get("session_id")
+    mcp_server = input_json.get("server_name") or input_json.get("mcp_server") or ""
+    message = redact_content(
+        env.log_prompts, input_json.get("message") or input_json.get("question") or ""
+    )
+
+    attrs = {
+        "session.id": session_id,
+        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
+        "openinference.span.kind": "CHAIN",
+        "elicitation.server": mcp_server,
+        "elicitation.message": message,
+        "input.value": message,
+    }
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    if user_id:
+        attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
+
+    now = str(get_timestamp_ms())
+    span = build_span(
+        "Elicitation",
+        "CHAIN",
+        generate_span_id(),
+        trace_id,
+        state.get("current_trace_span_id") or "",
+        now,
+        now,
+        attrs,
+        SERVICE_NAME,
+        SCOPE_NAME,
+    )
+    _send_span_async(span)
+
+
+def _handle_elicitation_result(input_json: dict) -> None:
+    """Handle ElicitationResult: send a CHAIN span for the user's response to an elicitation."""
+    state = resolve_session(input_json)
+    trace_id = state.get("current_trace_id")
+    if trace_id is None:
+        return
+
+    session_id = state.get("session_id")
+    mcp_server = input_json.get("server_name") or input_json.get("mcp_server") or ""
+    action = input_json.get("action") or input_json.get("status") or ""
+    response = redact_content(
+        env.log_prompts, json.dumps(input_json.get("response") or input_json.get("content") or {})
+    )
+
+    attrs = {
+        "session.id": session_id,
+        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
+        "openinference.span.kind": "CHAIN",
+        "elicitation.server": mcp_server,
+        "elicitation.action": action,
+        "output.value": response,
+    }
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    if user_id:
+        attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
+
+    now = str(get_timestamp_ms())
+    span = build_span(
+        f"Elicitation Result: {action}" if action else "Elicitation Result",
+        "CHAIN",
+        generate_span_id(),
+        trace_id,
+        state.get("current_trace_span_id") or "",
+        now,
+        now,
+        attrs,
+        SERVICE_NAME,
+        SCOPE_NAME,
+    )
+    _send_span_async(span)
+
+
+def _handle_post_tool_batch(input_json: dict) -> None:
+    """Handle PostToolBatch: send a CHAIN span summarizing a resolved parallel tool-call batch."""
+    state = resolve_session(input_json)
+    trace_id = state.get("current_trace_id")
+    if trace_id is None:
+        return
+
+    session_id = state.get("session_id")
+    tool_calls = input_json.get("tool_calls") or input_json.get("tools") or []
+    batch_size = len(tool_calls) if isinstance(tool_calls, list) else input_json.get("batch_size", 0)
+    duration_ms = input_json.get("duration_ms") or input_json.get("total_duration_ms")
+
+    attrs = {
+        "session.id": session_id,
+        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
+        "openinference.span.kind": "CHAIN",
+        "tool.batch_size": batch_size,
+    }
+    if duration_ms is not None:
+        attrs["tool.batch_duration_ms"] = duration_ms
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    if user_id:
+        attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
+
+    now = str(get_timestamp_ms())
+    span = build_span(
+        f"Tool Batch ({batch_size})",
+        "CHAIN",
+        generate_span_id(),
+        trace_id,
+        state.get("current_trace_span_id") or "",
+        now,
+        now,
+        attrs,
+        SERVICE_NAME,
+        SCOPE_NAME,
+    )
+    _send_span_async(span)
+
+
 def _handle_permission_request(input_json: dict) -> None:
     """Handle permission_request: send a CHAIN span for the permission event."""
     state = resolve_session(input_json)
@@ -2182,3 +2314,36 @@ def permission_denied():
         _handle_permission_denied(input_json)
     except Exception as e:
         error(f"permission_denied hook failed: {e}")
+
+
+def elicitation():
+    """Entry point for atatus-hook-elicitation."""
+    try:
+        if not check_requirements():
+            return
+        input_json = _read_stdin()
+        _handle_elicitation(input_json)
+    except Exception as e:
+        error(f"elicitation hook failed: {e}")
+
+
+def elicitation_result():
+    """Entry point for atatus-hook-elicitation-result."""
+    try:
+        if not check_requirements():
+            return
+        input_json = _read_stdin()
+        _handle_elicitation_result(input_json)
+    except Exception as e:
+        error(f"elicitation_result hook failed: {e}")
+
+
+def post_tool_batch():
+    """Entry point for atatus-hook-post-tool-batch."""
+    try:
+        if not check_requirements():
+            return
+        input_json = _read_stdin()
+        _handle_post_tool_batch(input_json)
+    except Exception as e:
+        error(f"post_tool_batch hook failed: {e}")

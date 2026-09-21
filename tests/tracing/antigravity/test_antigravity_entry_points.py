@@ -105,10 +105,10 @@ class TestEventsMatchScripts:
         assert not missing, f"EVENTS values missing from pyproject [project.scripts]: {sorted(missing)}"
 
     def test_events_keys_match_spec_event_names(self) -> None:
-        """EVENTS must declare exactly the two Antigravity events we hook."""
+        """EVENTS must declare exactly the three Antigravity events we hook."""
         from tracing.antigravity import constants as c
 
-        assert set(c.EVENTS) == {"PreInvocation", "Stop"}
+        assert set(c.EVENTS) == {"PreInvocation", "PostInvocation", "Stop"}
 
     def test_pre_invocation_event_maps_to_pre_invocation_script(self) -> None:
         from tracing.antigravity import constants as c

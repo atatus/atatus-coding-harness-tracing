@@ -163,12 +163,15 @@ class TestInstallFreshWritesFlatHarnessEntry:
         data = json.loads((hooks_dir / HOOKS_FILE_NAME).read_text())
         assert set(data["hooks"].keys()) == {
             "SessionStart",
+            "SessionEnd",
             "UserPromptSubmit",
             "PreToolUse",
             "PostToolUse",
             "PostToolUseFailure",
             "Stop",
+            "SubagentStart",
             "SubagentStop",
+            "PermissionRequest",
         }
         for event, entries in data["hooks"].items():
             assert len(entries) == 1

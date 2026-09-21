@@ -548,7 +548,7 @@ class TestClaudeSetup:
         result = json.loads(settings_file.read_text())
         assert result["env"]["ATATUS_TRACE_ENABLED"] == "true"
         assert result["env"]["ATATUS_PROJECT_NAME"] == "my-project"
-        assert len(result.get("hooks", {})) == 16
+        assert len(result.get("hooks", {})) == 19
 
 
 # ---------------------------------------------------------------------------

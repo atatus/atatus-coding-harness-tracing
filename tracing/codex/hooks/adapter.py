@@ -11,16 +11,28 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from core.common import env, redirect_stderr_to_log_file
-from core.constants import HARNESSES
+from core.common import StateManager, env, redirect_stderr_to_log_file
+from core.constants import HARNESSES, STATE_BASE_DIR
 
 _HARNESS = HARNESSES["codex"]
 SERVICE_NAME = _HARNESS["service_name"]  # "codex"
 SCOPE_NAME = _HARNESS["scope_name"]  # "atatus-codex-tracing"
+STATE_DIR = STATE_BASE_DIR / _HARNESS["state_subdir"]  # ~/.atatus/harness/state/codex
 
 # Route hook stderr to a per-harness log file unless the user already set one.
 os.environ.setdefault("ATATUS_LOG_FILE", str(_HARNESS["default_log_file"]))
 redirect_stderr_to_log_file()
+
+
+def resolve_session(session_key: str) -> StateManager:
+    """Resolve the per-session state file used only to bridge SessionStart's
+    start time to SessionEnd -- tool/turn data still comes from the rollout."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_file = STATE_DIR / f"state_{session_key}.json"
+    lock_path = STATE_DIR / f".lock_{session_key}"
+    sm = StateManager(state_dir=STATE_DIR, state_file=state_file, lock_path=lock_path)
+    sm.init_state()
+    return sm
 
 
 def load_env_file(path: Path) -> None:

@@ -82,7 +82,7 @@ install.bat uninstall codex
 | Project name | `codex` |
 | Atatus endpoint | set by the installer |
 | Hook config file | `~/.codex/config.toml` |
-| Hook events handled | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop` (via real Codex hooks); `agent-turn-complete` (via `notify`) for token usage |
+| Hook events handled | `agent-turn-complete` (via `notify`) — full turn + tool-call capture from the rollout JSONL; `Interrupt`, `SessionStart`, `SessionEnd` (via real Codex hooks) — a cancelled turn and session boundaries, which the rollout JSONL alone can't give us |
 | Env override file | `~/.codex/atatus-env.sh` |
 | State directory | `~/.atatus/harness/state/codex/` (state files + tool span JSONLs) |
 | Log file | `~/.atatus/harness/logs/codex.log` |

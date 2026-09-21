@@ -26,6 +26,9 @@ atatus-hook-user-prompt-expansion = "tracing.claude_code.hooks.handlers:user_pro
 atatus-hook-pre-compact = "tracing.claude_code.hooks.handlers:pre_compact"
 atatus-hook-post-compact = "tracing.claude_code.hooks.handlers:post_compact"
 atatus-hook-permission-denied = "tracing.claude_code.hooks.handlers:permission_denied"
+atatus-hook-elicitation = "tracing.claude_code.hooks.handlers:elicitation"
+atatus-hook-elicitation-result = "tracing.claude_code.hooks.handlers:elicitation_result"
+atatus-hook-post-tool-batch = "tracing.claude_code.hooks.handlers:post_tool_batch"
 
 [build-system]
 requires = ["setuptools>=64"]

@@ -39,13 +39,16 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    read_stdin_text,
     redact_content,
 )
 from core.common import send_span as send_span_to_backend
 from core.common import send_span_async
 from core.constants import MODEL_FAMILY_SYSTEMS
+from core.event_model import TurnEndReason
+from core.turn_lifecycle import turn_end_attributes, turn_status
 from tracing.codex.constants import ENV_FILE_NAME, get_codex_home
-from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file
+from tracing.codex.hooks.adapter import SCOPE_NAME, SERVICE_NAME, check_requirements, load_env_file, resolve_session
 
 
 def _send_span_async(span_dict: dict, on_success=None) -> None:
@@ -510,8 +513,14 @@ def _put_indexed_message(attrs: dict, prefix: str, role: str, content: str) -> N
     attrs[f"{prefix}.0.message.content"] = content
 
 
-def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
-    """Assemble the LLM + TOOL spans from an extracted turn and ship them."""
+def _build_and_send_spans(
+    thread_id: str, turn_id: str, turn: dict, reason: TurnEndReason = TurnEndReason.COMPLETED
+) -> None:
+    """Assemble the LLM + TOOL spans from an extracted turn and ship them.
+
+    ``reason`` defaults to COMPLETED for a normal notify-driven turn; the
+    Interrupt hook passes INTERRUPTED for a turn the user cancelled.
+    """
     user_id = env.get_user_id(SERVICE_NAME) or ""
     login_id = env.get_user_login_id(SERVICE_NAME) or ""
 
@@ -614,6 +623,8 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
         )
         child_spans.append(child)
 
+    attrs.update(turn_end_attributes(reason))
+    status_code, status_message = turn_status(reason)
     parent_span = build_span(
         f"Turn {turn.get('trace_count') or 1}",
         "LLM",
@@ -625,6 +636,8 @@ def _build_and_send_spans(thread_id: str, turn_id: str, turn: dict) -> None:
         attrs,
         SERVICE_NAME,
         SCOPE_NAME,
+        status_code,
+        status_message,
     )
 
     debug_dump(f"notify_{thread_id}_parent_span", parent_span)
@@ -755,8 +768,80 @@ def _handle_notify(input_json: dict) -> None:
     _build_and_send_spans(thread_id, turn_id, turn)
 
 
+def _handle_interrupt(input_json: dict) -> None:
+    """Handle Interrupt: close a cancelled turn that would otherwise never be seen.
+
+    Codex's rollout JSONL never gets an ``agent-turn-complete`` notify for a
+    turn the user cancels, so without this hook the turn silently vanishes --
+    no span, no record it ever happened.
+    """
+    thread_id = _flex_get(input_json, "thread-id", "thread_id", "threadId", "session_id")
+    turn_id = _flex_get(input_json, "turn-id", "turn_id", "turnId")
+
+    debug_dump(f"interrupt_{thread_id or 'unknown'}_{turn_id or 'unknown'}_raw", input_json)
+
+    rollout_path = _find_rollout_file(thread_id)
+    if rollout_path is None:
+        log(f"interrupt: no rollout file for session {thread_id}")
+        return
+
+    turn = _extract_turn_from_rollout(rollout_path, turn_id)
+    if turn is None:
+        log(f"interrupt: turn {turn_id} not found in {rollout_path}")
+        return
+
+    debug_dump(f"interrupt_{thread_id}_{turn_id}_extracted", turn)
+    _build_and_send_spans(thread_id, turn_id, turn, reason=TurnEndReason.INTERRUPTED)
+
+
+def _handle_session_start(input_json: dict) -> None:
+    """Handle SessionStart: record the session's start time for SessionEnd to use.
+
+    Codex has no session-scoped entity today -- every span the notify handler
+    emits is turn-scoped -- so this only bridges a start timestamp forward.
+    """
+    thread_id = _flex_get(input_json, "thread-id", "thread_id", "threadId", "session_id")
+    if not thread_id:
+        return
+    state = resolve_session(thread_id)
+    if state.get("session_start_time") is None:
+        state.set("session_start_time", str(get_timestamp_ms()))
+
+
+def _handle_session_end(input_json: dict) -> None:
+    """Handle SessionEnd: emit a CHAIN span summarizing the whole session."""
+    thread_id = _flex_get(input_json, "thread-id", "thread_id", "threadId", "session_id")
+    if not thread_id:
+        return
+    state = resolve_session(thread_id)
+    start_time = state.get("session_start_time") or str(get_timestamp_ms())
+    end_time = str(get_timestamp_ms())
+
+    span = build_span(
+        "Session",
+        "CHAIN",
+        generate_span_id(),
+        generate_trace_id(),
+        "",
+        start_time,
+        end_time,
+        {"session.id": thread_id, "openinference.span.kind": "CHAIN"},
+        SERVICE_NAME,
+        SCOPE_NAME,
+    )
+    _send_span_async(span)
+
+    if state.state_file is not None:
+        state.state_file.unlink(missing_ok=True)
+    if state._lock_path is not None and state._lock_path.is_dir():
+        try:
+            state._lock_path.rmdir()
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI entry points
 # ---------------------------------------------------------------------------
 
 
@@ -780,6 +865,40 @@ def notify() -> None:
         _handle_notify(input_json)
     except Exception as e:
         error(f"codex notify hook failed: {e}")
+
+
+def _run_stdin_hook(event: str, handler) -> None:
+    """Shared entry-point body for the stdin-JSON structured hooks
+    (Interrupt, SessionStart, SessionEnd) -- distinct from ``notify``,
+    which Codex invokes with the payload on argv instead."""
+    try:
+        try:
+            codex_home = get_codex_home()
+        except ValueError as exc:
+            log(f"ignoring CODEX_HOME: {exc}")
+            codex_home = Path.home() / ".codex"
+        load_env_file(codex_home / ENV_FILE_NAME)
+        if not check_requirements():
+            return
+        input_json = json.loads(read_stdin_text() or "{}")
+        handler(input_json)
+    except Exception as e:
+        error(f"codex {event} hook failed: {e}")
+
+
+def interrupt() -> None:
+    """Entry point for ``atatus-hook-codex-interrupt``."""
+    _run_stdin_hook("interrupt", _handle_interrupt)
+
+
+def session_start() -> None:
+    """Entry point for ``atatus-hook-codex-session-start``."""
+    _run_stdin_hook("session_start", _handle_session_start)
+
+
+def session_end() -> None:
+    """Entry point for ``atatus-hook-codex-session-end``."""
+    _run_stdin_hook("session_end", _handle_session_end)
 
 
 if __name__ == "__main__":

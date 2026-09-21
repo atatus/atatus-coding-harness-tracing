@@ -20,6 +20,8 @@ from core.common import (
     send_span,
     send_span_async,
 )
+from core.event_model import TurnEndReason
+from core.turn_lifecycle import turn_end_attributes, turn_status
 from tracing.copilot.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
@@ -274,8 +276,12 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     _emit_tool_span(input_json, output=message, status_code=2, status_message=message[:200])
 
 
-def _handle_stop(input_json: dict) -> None:
-    """Handle stop: close the turn with a CHAIN root and an LLM child."""
+def _handle_stop(input_json: dict, reason: TurnEndReason = TurnEndReason.COMPLETED) -> None:
+    """Handle stop: close the turn with a CHAIN root and an LLM child.
+
+    ``reason`` defaults to COMPLETED for a normal Stop hook; SessionEnd passes
+    INTERRUPTED when it finds a turn still open at process exit.
+    """
     state = resolve_session(input_json)
     session_id = state.get("session_id")
     if session_id is None:
@@ -322,8 +328,10 @@ def _handle_stop(input_json: dict) -> None:
                     "tool_count": int(tool_count or 0),
                 }
             ),
+            **turn_end_attributes(reason),
         }
     )
+    status_code, status_message = turn_status(reason)
 
     # Root before child: a strict backend wants the parent to exist first.
     _send_span_async(
@@ -338,6 +346,8 @@ def _handle_stop(input_json: dict) -> None:
             root_attrs,
             SERVICE_NAME,
             SCOPE_NAME,
+            status_code,
+            status_message,
         )
     )
 
@@ -436,6 +446,95 @@ def _handle_subagent_stop(input_json: dict) -> None:
     _send_span_async(span)
 
 
+def _handle_subagent_start(input_json: dict) -> None:
+    """Handle subagent_start: record the subagent's start time.
+
+    Without this, subagent_stop's ``state.get(f"subagent_{agent_id}_start")``
+    always misses and falls back to its own end time, so every subagent span
+    reports zero duration.
+    """
+    state = resolve_session(input_json)
+    agent_id = str(payload_get(input_json, "agent_id", default=""))
+    if not agent_id:
+        return
+    state.set(f"subagent_{agent_id}_start", str(get_timestamp_ms()))
+
+
+def _handle_permission_request(input_json: dict) -> None:
+    """Handle permission_request: send a CHAIN span for the permission event."""
+    state = resolve_session(input_json)
+    session_id = state.get("session_id")
+    if session_id is None:
+        return
+
+    trace_id, parent_span_id = _ensure_turn(state)
+
+    tool_name = str(payload_get(input_json, "tool_name", default=""))
+    tool_input_raw = payload_get(input_json, "tool_args", "tool_input", default=None) or {}
+    tool_input = json.dumps(tool_input_raw) if isinstance(tool_input_raw, dict) else str(tool_input_raw)
+    permission = str(payload_get(input_json, "permission", "permission_mode", default=""))
+
+    attrs = {
+        "session.id": session_id,
+        "openinference.span.kind": "CHAIN",
+        "permission.type": permission,
+        "permission.tool": tool_name,
+        "input.value": redact_content(env.log_tool_details, tool_input),
+    }
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    if user_id:
+        attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
+
+    now = str(get_timestamp_ms())
+    span = build_span(
+        "Permission Request",
+        "CHAIN",
+        generate_span_id(),
+        trace_id,
+        parent_span_id,
+        now,
+        now,
+        attrs,
+        SERVICE_NAME,
+        SCOPE_NAME,
+    )
+    _send_span_async(span)
+
+
+def _handle_session_end(input_json: dict) -> None:
+    """Handle session_end: close any turn left open, then clean up state.
+
+    Copilot's Stop hook only clears the current-turn keys — it never touches
+    session-level state, so an abrupt exit (no Stop) previously left a session
+    both untraced-as-interrupted and, for VS Code's string session ids, never
+    garbage-collected (gc_stale_state_files only recognizes PID-based files).
+    """
+    state = resolve_session(input_json)
+    session_id = state.get("session_id")
+    if session_id is None:
+        return
+
+    if state.get("current_trace_id"):
+        _handle_stop(input_json, reason=TurnEndReason.INTERRUPTED)
+
+    trace_count = state.get("trace_count") or "0"
+    tool_count = state.get("tool_count") or "0"
+    log(f"copilot session complete: {trace_count} traces, {tool_count} tools")
+
+    if state.state_file is not None:
+        state.state_file.unlink(missing_ok=True)
+    if state._lock_path is not None and state._lock_path.is_dir():
+        try:
+            state._lock_path.rmdir()
+        except OSError:
+            pass
+
+    gc_stale_state_files()
+
+
 # ---------------------------------------------------------------------------
 # CLI entry points
 # ---------------------------------------------------------------------------
@@ -486,3 +585,18 @@ def stop():
 def subagent_stop():
     """Entry point for atatus-hook-copilot-subagent-stop."""
     _run("subagent_stop", _handle_subagent_stop)
+
+
+def subagent_start():
+    """Entry point for atatus-hook-copilot-subagent-start."""
+    _run("subagent_start", _handle_subagent_start)
+
+
+def permission_request():
+    """Entry point for atatus-hook-copilot-permission-request."""
+    _run("permission_request", _handle_permission_request)
+
+
+def session_end():
+    """Entry point for atatus-hook-copilot-session-end."""
+    _run("session_end", _handle_session_end)

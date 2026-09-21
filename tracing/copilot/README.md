@@ -82,7 +82,7 @@ install.bat uninstall copilot
 | Project name | `copilot` |
 | Atatus endpoint | set by the installer |
 | Hook config file | `.github/hooks/hooks.json` |
-| Hook events registered | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop` |
+| Hook events registered | `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStart`, `SubagentStop`, `PermissionRequest` |
 | State directory | `~/.atatus/harness/state/copilot/` |
 | Log file | `~/.atatus/harness/logs/copilot.log` |
 

@@ -13,6 +13,16 @@ HARNESS_BIN = "codex"  # binary name for shutil.which() fallback
 ENV_FILE_NAME = "atatus-env.sh"
 NOTIFY_BIN_NAME = "atatus-hook-codex-notify"
 
+# Structured `[[hooks.<Event>]]` entries, distinct from the notify-only
+# mechanism above -- these fill the gaps rollout-JSONL parsing structurally
+# cannot: a cancelled turn never reaches `notify`, and there is no
+# session-scoped entity at all without SessionStart/SessionEnd.
+HOOK_EVENTS: dict[str, str] = {
+    "Interrupt": "atatus-hook-codex-interrupt",
+    "SessionStart": "atatus-hook-codex-session-start",
+    "SessionEnd": "atatus-hook-codex-session-end",
+}
+
 
 def get_codex_home() -> Path:
     """Return the active Codex home, matching Codex's own ``CODEX_HOME`` rules.
