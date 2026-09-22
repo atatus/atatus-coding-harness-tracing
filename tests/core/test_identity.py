@@ -242,7 +242,28 @@ class TestKiroAsyncProbe:
 
 
 class TestAntigravityDetector:
-    def test_reads_active_account(self, tmp_path, monkeypatch):
+    def test_reads_email_from_cli_log(self, tmp_path, monkeypatch):
+        app_data = tmp_path / "antigravity-cli"
+        app_data.mkdir(parents=True)
+        (app_data / "cli.log").write_text(
+            "I0922 13:49:40 server_oauth.go:201] OAuth: authenticated successfully as loguser@example.com\n"
+        )
+        monkeypatch.setenv("ANTIGRAVITY_APP_DATA_DIR", str(app_data))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert detect_antigravity_login_id() == "loguser@example.com"
+
+    def test_reads_email_from_log_dir(self, tmp_path, monkeypatch):
+        app_data = tmp_path / "antigravity-cli"
+        log_dir = app_data / "log"
+        log_dir.mkdir(parents=True)
+        (log_dir / "cli-20260922_120000.log").write_text(
+            "I0922 13:49:40 server_oauth.go:196] applyAuthResult: email=diruser@example.com, authMethod=consumer\n"
+        )
+        monkeypatch.setenv("ANTIGRAVITY_APP_DATA_DIR", str(app_data))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert detect_antigravity_login_id() == "diruser@example.com"
+
+    def test_reads_active_account_fallback(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ANTIGRAVITY_APP_DATA_DIR", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         gemini_dir = tmp_path / ".gemini"

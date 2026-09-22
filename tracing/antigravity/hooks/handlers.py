@@ -514,10 +514,7 @@ def _emit_completed_turns(state, turns: list[dict], include_last: bool, conversa
     user_id = state.get("user_id") or ""
     if user_id:
         common["user.id"] = user_id
-    user_login_id = state.get("user_login_id")
-    if user_login_id is None:
-        user_login_id = env.get_user_login_id(SERVICE_NAME)
-        state.set("user_login_id", user_login_id)
+    user_login_id = state.get("user_login_id") or ""
     if user_login_id:
         common["user.login_id"] = user_login_id
 

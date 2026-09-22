@@ -206,23 +206,48 @@ def detect_omp_login_id() -> str:
     return ""
 
 
+def _extract_antigravity_email_from_log(path: Path) -> str:
+    try:
+        with open(path, "r", errors="ignore") as f:
+            head = f.read(65536)
+        match = re.search(r"authenticated successfully as ([^\s]+)", head)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"applyAuthResult:\s*email=([^\s,]+)", head)
+        if match:
+            return match.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
 def detect_antigravity_login_id() -> str:
-    """Active account email from ~/.gemini/google_accounts.json or oauth_creds.json."""
-    gemini_dirs = []
-    app_data = os.environ.get("ANTIGRAVITY_APP_DATA_DIR")
-    if app_data:
-        gemini_dirs.append(Path(app_data).parent)
-    gemini_dirs.append(Path.home() / ".gemini")
+    """Active account email from Antigravity CLI log or Google account files."""
+    data_dir_env = os.environ.get("ANTIGRAVITY_APP_DATA_DIR")
+    candidates = []
+    if data_dir_env:
+        candidates.append(Path(data_dir_env))
+    candidates.append(Path.home() / ".gemini" / "antigravity-cli")
 
-    for g_dir in gemini_dirs:
-        try:
-            data = _read_json(g_dir / "google_accounts.json")
-            email = data.get("active")
+    for d in candidates:
+        cli_log = d / "cli.log"
+        if cli_log.exists():
+            email = _extract_antigravity_email_from_log(cli_log)
             if email:
-                return str(email)
-        except Exception:
-            pass
+                return email
 
+        log_dir = d / "log"
+        if log_dir.is_dir():
+            try:
+                for p in sorted(log_dir.glob("cli-*.log"), key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
+                    email = _extract_antigravity_email_from_log(p)
+                    if email:
+                        return email
+            except OSError:
+                pass
+
+    gemini_dirs = [d.parent for d in candidates] + [Path.home() / ".gemini"]
+    for g_dir in gemini_dirs:
         try:
             creds = _read_json(g_dir / "oauth_creds.json")
             id_token = creds.get("id_token", "")
@@ -231,6 +256,14 @@ def detect_antigravity_login_id() -> str:
                 email = claims.get("email")
                 if email:
                     return str(email)
+        except Exception:
+            pass
+
+        try:
+            data = _read_json(g_dir / "google_accounts.json")
+            email = data.get("active")
+            if email:
+                return str(email)
         except Exception:
             pass
     return ""
