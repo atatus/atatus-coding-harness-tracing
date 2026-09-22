@@ -571,6 +571,66 @@ class TestTurnWatermark:
 
 
 # ---------------------------------------------------------------------------
+# user.login_id propagation
+# ---------------------------------------------------------------------------
+
+
+class TestLoginIdPropagation:
+    def test_spans_carry_user_login_id_when_present(self, tmp_path, trace_enabled, captured_spans):
+        sf = tmp_path / "state_login.json"
+        lp = tmp_path / ".lock_login"
+        sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
+        sm.init_state()
+        sm.set("session_id", "login-session")
+        sm.set("user_id", "test-user")
+        sm.set("user_login_id", "alice@example.com")
+
+        stdin_payload = {
+            "conversationId": "c1",
+            "transcriptPath": str(FIXTURE_DIR / "transcript_full.jsonl"),
+            "workspacePaths": ["/home/user/proj"],
+        }
+        with (
+            mock.patch("tracing.antigravity.hooks.handlers.resolve_session", return_value=sm),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))),
+        ):
+            stop()
+
+        assert captured_spans
+        for payload in captured_spans:
+            attrs = _get_span_attrs(payload)
+            assert "user.login_id" in attrs
+            assert attrs["user.login_id"]["stringValue"] == "alice@example.com"
+            assert attrs["user.id"]["stringValue"] == "test-user"
+
+    def test_spans_omit_user_login_id_when_empty(self, tmp_path, trace_enabled, captured_spans, monkeypatch):
+        monkeypatch.setattr("core.common.env.get_user_login_id", lambda svc: "")
+        sf = tmp_path / "state_no_login.json"
+        lp = tmp_path / ".lock_no_login"
+        sm = StateManager(state_dir=tmp_path, state_file=sf, lock_path=lp)
+        sm.init_state()
+        sm.set("session_id", "no-login-session")
+        sm.set("user_id", "test-user")
+        sm.set("user_login_id", "")
+
+        stdin_payload = {
+            "conversationId": "c1",
+            "transcriptPath": str(FIXTURE_DIR / "transcript_full.jsonl"),
+            "workspacePaths": ["/home/user/proj"],
+        }
+        with (
+            mock.patch("tracing.antigravity.hooks.handlers.resolve_session", return_value=sm),
+            mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))),
+        ):
+            stop()
+
+        assert captured_spans
+        for payload in captured_spans:
+            attrs = _get_span_attrs(payload)
+            assert "user.login_id" not in attrs
+
+
+# ---------------------------------------------------------------------------
 # PreInvocation excludes the final turn
 # ---------------------------------------------------------------------------
 

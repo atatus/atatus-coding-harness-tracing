@@ -204,3 +204,33 @@ def detect_omp_login_id() -> str:
     except Exception:
         pass
     return ""
+
+
+def detect_antigravity_login_id() -> str:
+    """Active account email from ~/.gemini/google_accounts.json or oauth_creds.json."""
+    gemini_dirs = []
+    app_data = os.environ.get("ANTIGRAVITY_APP_DATA_DIR")
+    if app_data:
+        gemini_dirs.append(Path(app_data).parent)
+    gemini_dirs.append(Path.home() / ".gemini")
+
+    for g_dir in gemini_dirs:
+        try:
+            data = _read_json(g_dir / "google_accounts.json")
+            email = data.get("active")
+            if email:
+                return str(email)
+        except Exception:
+            pass
+
+        try:
+            creds = _read_json(g_dir / "oauth_creds.json")
+            id_token = creds.get("id_token", "")
+            if id_token:
+                claims = _decode_jwt_payload(id_token)
+                email = claims.get("email")
+                if email:
+                    return str(email)
+        except Exception:
+            pass
+    return ""

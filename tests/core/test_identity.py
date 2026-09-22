@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from core.identity import (
+    detect_antigravity_login_id,
     detect_claude_code_login_id,
     detect_codex_login_id,
     detect_copilot_login_id,
@@ -238,3 +239,49 @@ class TestKiroAsyncProbe:
         )
         proc.wait(timeout=5)
         assert read_kiro_login_probe(dest) == "probe@example.com"
+
+
+class TestAntigravityDetector:
+    def test_reads_active_account(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ANTIGRAVITY_APP_DATA_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        (gemini_dir / "google_accounts.json").write_text(
+            json.dumps({"active": "alice@example.com", "old": ["bob@example.com"]})
+        )
+        assert detect_antigravity_login_id() == "alice@example.com"
+
+    def test_falls_back_to_oauth_creds_id_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ANTIGRAVITY_APP_DATA_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        token = _jwt_with_claims({"email": "oauth@example.com"})
+        (gemini_dir / "oauth_creds.json").write_text(json.dumps({"id_token": token}))
+        assert detect_antigravity_login_id() == "oauth@example.com"
+
+    def test_reads_from_antigravity_app_data_dir(self, tmp_path, monkeypatch):
+        app_data = tmp_path / "custom" / "antigravity-cli"
+        app_data.mkdir(parents=True)
+        gemini_dir = app_data.parent
+        (gemini_dir / "google_accounts.json").write_text(
+            json.dumps({"active": "custom@example.com"})
+        )
+        monkeypatch.setenv("ANTIGRAVITY_APP_DATA_DIR", str(app_data))
+        monkeypatch.setenv("HOME", str(tmp_path / "other"))
+        assert detect_antigravity_login_id() == "custom@example.com"
+
+    def test_missing_file_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ANTIGRAVITY_APP_DATA_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert detect_antigravity_login_id() == ""
+
+    def test_malformed_json_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ANTIGRAVITY_APP_DATA_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        (gemini_dir / "google_accounts.json").write_text("not json")
+        (gemini_dir / "oauth_creds.json").write_text("not json either")
+        assert detect_antigravity_login_id() == ""

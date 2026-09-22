@@ -146,7 +146,21 @@ class TestEnsureSessionInitialized:
         adapter.ensure_session_initialized(sm, {"conversationId": "abc"})
         assert sm.get("session_id") == "abc"
         assert sm.get("user_id") is not None
+        assert sm.get("user_login_id") is not None
         assert sm.get("last_emitted_turn") == "-1"
+
+    def test_user_login_id_detected(self, antigravity_state_dir, monkeypatch):
+        monkeypatch.setattr("core.common.env.get_user_login_id", lambda svc: "alice@example.com")
+        sm = self._make_state(antigravity_state_dir, "login-id")
+        adapter.ensure_session_initialized(sm, {"conversationId": "c"})
+        assert sm.get("user_login_id") == "alice@example.com"
+
+    def test_user_login_id_migrated_for_existing_session(self, antigravity_state_dir, monkeypatch):
+        monkeypatch.setattr("core.common.env.get_user_login_id", lambda svc: "migrated@example.com")
+        sm = self._make_state(antigravity_state_dir, "existing-migrated")
+        sm.set("session_id", "existing-id")
+        adapter.ensure_session_initialized(sm, {"conversationId": "c"})
+        assert sm.get("user_login_id") == "migrated@example.com"
 
     def test_idempotent(self, antigravity_state_dir, disable_env_vars):
         """Second call is a no-op — values unchanged."""

@@ -2265,6 +2265,10 @@ class TestGetUserLoginId:
         monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"claude-code": lambda: "alice@example.com"})
         assert env.get_user_login_id("claude-code") == "alice@example.com"
 
+    def test_dispatches_to_antigravity_detector(self, monkeypatch):
+        monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"antigravity": lambda: "ashif@example.com"})
+        assert env.get_user_login_id("antigravity") == "ashif@example.com"
+
     def test_detector_returning_empty_string_is_passed_through(self, monkeypatch):
         monkeypatch.setattr("core.common._IDENTITY_DETECTORS", {"gemini": lambda: ""})
         assert env.get_user_login_id("gemini") == ""

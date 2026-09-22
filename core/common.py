@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import IO, Optional
 
 from core.identity import (
+    detect_antigravity_login_id,
     detect_claude_code_login_id,
     detect_codex_login_id,
     detect_copilot_login_id,
@@ -37,6 +38,7 @@ from core.identity import (
 #   the async probe in core.identity (start_kiro_login_probe /
 #   read_kiro_login_probe) from its own adapter instead of this dispatcher.
 _IDENTITY_DETECTORS = {
+    "antigravity": detect_antigravity_login_id,
     "claude-code": detect_claude_code_login_id,
     "codex": detect_codex_login_id,
     "copilot": detect_copilot_login_id,

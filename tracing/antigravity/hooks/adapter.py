@@ -67,12 +67,15 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     """Idempotent session initialization."""
     existing = state.get("session_id")
     if existing is not None:
+        if state.get("user_login_id") is None:
+            state.set("user_login_id", env.get_user_login_id(SERVICE_NAME))
         return
 
     session_id = input_json.get("conversationId") or generate_trace_id()
 
     state.set("session_id", session_id)
     state.set("user_id", env.user_id)
+    state.set("user_login_id", env.get_user_login_id(SERVICE_NAME))
     state.set("last_emitted_turn", "-1")
     state.set("trace_count", "0")
 

@@ -111,8 +111,9 @@ omitted from that span.
 | Kiro | `kiro-cli user whoami` | resolved in the background — the CLI takes ~2s, so the first span or two in a session may not have it yet; later spans do |
 | GitHub Copilot | local config file | **a GitHub username, not an email** — Copilot has no local email surface |
 | opencode | local credential file | only populated when signed in via an OAuth provider; an API-key provider carries no email |
+| Antigravity | local Google-account and credentials files | |
 | omp | unverified | no confirmed install to test the detection against yet |
-| Devin, Antigravity | not implemented | out of scope for now |
+| Devin | not implemented | out of scope for now |
 
 #### 4. Content logging
 
