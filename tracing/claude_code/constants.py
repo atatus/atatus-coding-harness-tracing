@@ -29,7 +29,6 @@ HOOK_EVENTS = {
     "PermissionDenied": "atatus-hook-permission-denied",
     "Elicitation": "atatus-hook-elicitation",
     "ElicitationResult": "atatus-hook-elicitation-result",
-    "PostToolBatch": "atatus-hook-post-tool-batch",
 }
 
 # Claude Code kills a hook that runs past this and carries on without it

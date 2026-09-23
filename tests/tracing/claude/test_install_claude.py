@@ -134,8 +134,10 @@ class TestFreshInstall:
         assert len(settings.get("plugins", [])) == 1
         assert settings["plugins"][0]["type"] == "local"
 
+        from tracing.claude_code.constants import HOOK_EVENTS
+
         hooks = settings.get("hooks", {})
-        assert len(hooks) == 19
+        assert set(hooks) == set(HOOK_EVENTS)
 
         env = settings.get("env", {})
         assert env.get("ATATUS_TRACE_ENABLED") == "true"

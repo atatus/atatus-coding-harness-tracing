@@ -1956,49 +1956,6 @@ def _handle_elicitation_result(input_json: dict) -> None:
     _send_span_async(span)
 
 
-def _handle_post_tool_batch(input_json: dict) -> None:
-    """Handle PostToolBatch: send a CHAIN span summarizing a resolved parallel tool-call batch."""
-    state = resolve_session(input_json)
-    trace_id = state.get("current_trace_id")
-    if trace_id is None:
-        return
-
-    session_id = state.get("session_id")
-    tool_calls = input_json.get("tool_calls") or input_json.get("tools") or []
-    batch_size = len(tool_calls) if isinstance(tool_calls, list) else input_json.get("batch_size", 0)
-    duration_ms = input_json.get("duration_ms") or input_json.get("total_duration_ms")
-
-    attrs = {
-        "session.id": session_id,
-        **({"turn.id": state.get("trace_count")} if state.get("trace_count") else {}),
-        "openinference.span.kind": "CHAIN",
-        "tool.batch_size": batch_size,
-    }
-    if duration_ms is not None:
-        attrs["tool.batch_duration_ms"] = duration_ms
-    user_id = state.get("user_id") or ""
-    login_id = state.get("user_login_id") or ""
-    if user_id:
-        attrs["user.id"] = user_id
-    if login_id:
-        attrs["user.login_id"] = login_id
-
-    now = str(get_timestamp_ms())
-    span = build_span(
-        f"Tool Batch ({batch_size})",
-        "CHAIN",
-        generate_span_id(),
-        trace_id,
-        state.get("current_trace_span_id") or "",
-        now,
-        now,
-        attrs,
-        SERVICE_NAME,
-        SCOPE_NAME,
-    )
-    _send_span_async(span)
-
-
 def _handle_permission_request(input_json: dict) -> None:
     """Handle permission_request: send a CHAIN span for the permission event."""
     state = resolve_session(input_json)
@@ -2388,11 +2345,10 @@ def elicitation_result():
 
 
 def post_tool_batch():
-    """Entry point for atatus-hook-post-tool-batch."""
+    """Entry point for atatus-hook-post-tool-batch. Deregistered; drains stdin and exits."""
+    # No longer in HOOK_EVENTS or hooks.json, but the installer never prunes settings.json,
+    # so every existing install still invokes this binary and it has to keep existing.
     try:
-        if not check_requirements():
-            return
-        input_json = _read_stdin()
-        _handle_post_tool_batch(input_json)
+        _read_stdin()
     except Exception as e:
         error(f"post_tool_batch hook failed: {e}")
