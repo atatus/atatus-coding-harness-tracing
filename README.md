@@ -115,6 +115,29 @@ omitted from that span.
 | omp | unverified | no confirmed install to test the detection against yet |
 | Devin | not implemented | out of scope for now |
 
+#### `llm.reasoning_effort` — auto-detected, no setup
+
+Harnesses that let you choose how hard the model thinks (`/effort`, `--reasoning-effort`,
+a thinking level, a model variant) report that choice on their spans as
+`llm.reasoning_effort` — `low`, `medium`, `high`, `xhigh`, `max` and whatever else a
+harness adds. Where a harness only says that extended thinking is *on*, with no level
+attached, the span carries `llm.thinking_enabled` instead, so a filter on effort levels
+stays a filter on levels. Both are omitted when the model does not support effort, or when
+the harness never exposes the setting.
+
+| Harness | Source | Granularity |
+|---|---|---|
+| Claude Code | the transcript record's own `effort`/`perTurnEffort`, hook payload as fallback | per model call |
+| Codex | the rollout's `turn_context` for that turn | per turn |
+| Cursor | the hook payload's structured model params | per turn |
+| opencode | the assistant message's model variant | per model call |
+| GitHub Copilot | the session's latest model-change event | per turn |
+| Antigravity | the model label's qualifier — `(High)`, `(Low)`; Claude's `(Thinking)` becomes `llm.thinking_enabled` | per turn |
+| omp | the thinking level read from the extension API | per turn |
+| Kiro | not available — the level lives server-side and reaches neither the hooks nor the session file | |
+| Gemini CLI | not available — the thinking config is stripped before hooks see it | |
+| Devin | not implemented — the tier is only encoded in the model id | |
+
 #### 4. Content logging
 
 Three questions that apply to **all** harnesses. Press Enter to accept each default:

@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from core.common import (
     FileLock,
+    LLM_EFFORT_ATTR,
     StateManager,
     build_span,
     debug_dump,
@@ -32,6 +33,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    normalize_effort,
     read_stdin_text,
     redact_content,
     send_span,
@@ -340,6 +342,7 @@ def _emit_llm_span(
 
     model_id = _string_value(info.get("modelID"))
     provider_id = _string_value(info.get("providerID"))
+    effort = normalize_effort(info.get("variant"))
     tokens = info.get("tokens") or {}
     cache = tokens.get("cache") or {}
     input_tokens = _integer_value(tokens.get("input"))
@@ -384,6 +387,8 @@ def _emit_llm_span(
         "input.value": redact_content(env.log_prompts, prompt),
         "output.value": redact_content(env.log_prompts, output_text),
     }
+    if effort:
+        attrs[LLM_EFFORT_ATTR] = effort
     if reasoning_tokens:
         attrs["llm.token_count.completion_details.reasoning"] = reasoning_tokens
     if cache_read:

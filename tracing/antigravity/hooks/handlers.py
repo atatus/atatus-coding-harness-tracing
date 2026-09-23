@@ -43,6 +43,8 @@ import json
 import sys
 
 from core.common import (
+    LLM_EFFORT_ATTR,
+    LLM_THINKING_ATTR,
     build_multi_span,
     build_span,
     debug_dump,
@@ -63,7 +65,12 @@ from tracing.antigravity.hooks.adapter import (
     gc_stale_state_files,
     resolve_session,
 )
-from tracing.antigravity.hooks.model import label_to_id, model_id_from_store, model_label_from_settings
+from tracing.antigravity.hooks.model import (
+    effort_from_label,
+    label_to_id,
+    model_id_from_store,
+    model_label_from_settings,
+)
 from tracing.antigravity.hooks.transcript import parse_transcript, turn_is_waiting
 from tracing.antigravity.hooks.usage import CallUsage, usage_by_call
 
@@ -361,6 +368,11 @@ def _build_turn_spans(
         )
     if model_label and model_label != model_id:
         root_attrs["antigravity.model_label"] = model_label
+    effort, thinking = effort_from_label(model_label)
+    if effort:
+        root_attrs[LLM_EFFORT_ATTR] = effort
+    if thinking:
+        root_attrs[LLM_THINKING_ATTR] = "true"
 
     steps = [
         step
@@ -422,6 +434,10 @@ def _build_turn_spans(
         )
         if model_id:
             attrs["llm.model_name"] = model_id
+        if effort:
+            attrs[LLM_EFFORT_ATTR] = effort
+        if thinking:
+            attrs[LLM_THINKING_ATTR] = "true"
         # Per call, not summed onto the turn: the whole point of the model-call layer is
         # that cost is attributable to the step that spent it. The turn carries none, so
         # a range sum over the trace still totals each turn exactly once.

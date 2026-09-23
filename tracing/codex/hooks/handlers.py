@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.common import (
+    LLM_EFFORT_ATTR,
     build_multi_span,
     build_span,
     debug_dump,
@@ -39,6 +40,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    normalize_effort,
     read_stdin_text,
     redact_content,
 )
@@ -189,6 +191,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     user_messages: list = []
     assistant_output = ""
     model = ""
+    effort = ""
     model_provider: "str | None" = None
     cwd = ""
     permission_mode = ""
@@ -227,6 +230,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 if outer == "turn_context" and isinstance(payload, dict):
                     if payload.get("turn_id") == turn_id:
                         model = payload.get("model") or model
+                        effort = normalize_effort(payload.get("effort")) or effort
                         cwd = payload.get("cwd") or cwd
                         permission_mode = payload.get("approval_policy") or permission_mode
                         sandbox_mode = (payload.get("sandbox_policy") or {}).get("type") or sandbox_mode
@@ -266,6 +270,14 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     d = payload.get("duration_ms")
                     if isinstance(d, int):
                         duration_ms = d
+                    continue
+
+                # A turn that only changed settings (right after /model) gets no
+                # turn_context record, so this is the sole effort source there.
+                if outer == "event_msg" and ptype == "thread_settings_applied":
+                    settings = payload.get("thread_settings")
+                    if isinstance(settings, dict):
+                        effort = normalize_effort(settings.get("reasoning_effort")) or effort
                     continue
 
                 # User prompt
@@ -449,6 +461,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
         "user_prompt": user_prompt,
         "assistant_output": assistant_output,
         "model": model,
+        "effort": effort,
         "model_provider": model_provider,
         "cwd": cwd,
         "permission_mode": permission_mode,
@@ -553,6 +566,8 @@ def _build_and_send_spans(
         attrs["user.login_id"] = login_id
     if turn.get("model"):
         attrs["llm.model_name"] = turn["model"]
+    if turn.get("effort"):
+        attrs[LLM_EFFORT_ATTR] = turn["effort"]
     if turn.get("permission_mode"):
         attrs["codex.approval_mode"] = turn["permission_mode"]
     if turn.get("sandbox_mode"):

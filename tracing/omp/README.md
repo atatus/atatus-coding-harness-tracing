@@ -9,7 +9,7 @@ One trace per **agent run** — one user prompt → the agent's internal turn/to
 | Span | Kind | Notes |
 |------|------|-------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt (from `before_agent_start`); `output.value` is the final assistant message's text. One per agent run. |
-| `LLM: <model>` | LLM | Child of `Turn`. One per `turn_end` (one per model call in the loop). Carries `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. |
+| `LLM: <model>` | LLM | Child of `Turn`. One per `turn_end` (one per model call in the loop). Carries `llm.model_name`, `llm.reasoning_effort` (the session's thinking level, when the extension API reports one), `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. |
 | `<tool>` | TOOL | Child of `Turn`. One per `ToolResultMessage` in a `turn_end`, paired with its originating `ToolCall` by id. Records `tool.name`, redacted input args + output, and tool-specific attributes. Errors are recorded with span status. |
 
 Token usage **is** captured — omp surfaces cumulative `usage` (input/output/reasoning tokens, cache read/write, and cost) inline on each assistant message, unlike vendors that withhold it from local surfaces.

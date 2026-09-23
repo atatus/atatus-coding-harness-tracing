@@ -11,6 +11,7 @@ import pytest
 from tracing.antigravity import constants as _c
 from tracing.antigravity.hooks.model import (
     conversation_db_path,
+    effort_from_label,
     label_to_id,
     model_id_from_store,
     model_label_from_settings,
@@ -58,6 +59,26 @@ class TestLabelToId:
     )
     def test_derives_an_id(self, label, expected):
         assert label_to_id(label) == expected
+
+
+class TestEffortFromLabel:
+    """Gemini labels qualify the level; Claude labels only say thinking is on."""
+
+    @pytest.mark.parametrize(
+        "label,expected",
+        [
+            ("Gemini 3.7 Flash (High)", ("high", False)),
+            ("Gemini 3.5 Flash (Low)", ("low", False)),
+            ("Gemini 3.1 Pro (Medium)", ("medium", False)),
+            ("Gemini 3.5 Flash (Extra Low)", ("extra-low", False)),
+            ("Claude Sonnet 4.6 (Thinking)", ("", True)),
+            ("Claude Opus 4.6 (thinking)", ("", True)),
+            ("Gemini 3.6 Flash", ("", False)),
+            ("", ("", False)),
+        ],
+    )
+    def test_splits_level_from_thinking(self, label, expected):
+        assert effort_from_label(label) == expected
 
 
 class TestSettingsLabel:

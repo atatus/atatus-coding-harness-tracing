@@ -2240,3 +2240,90 @@ class TestPostToolUseDeduplication:
             _attrs(captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0])["tool.name"]["stringValue"]
             == tool_name
         )
+
+
+class TestModelParams:
+    """Cursor's ``model`` is a variant slug with the settings baked in
+    (``claude-opus-5-thinking-high``); ``model_params`` is where they are values."""
+
+    def test_effort_and_thinking_reach_every_span_of_an_ide_turn(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        params = [{"id": "thinking", "value": "true"}, {"id": "effort", "value": "high"}]
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000):
+            _dispatch(
+                "beforeSubmitPrompt",
+                {
+                    "hook_event_name": "beforeSubmitPrompt",
+                    "conversation_id": "conv-1",
+                    "generation_id": "gen-1",
+                    "prompt": "fix the bug",
+                    "model": "claude-opus-5-thinking-high",
+                    "model_id": "claude-opus-5",
+                    "model_params": params,
+                },
+            )
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=7000):
+            _dispatch(
+                "afterAgentResponse",
+                {
+                    "hook_event_name": "afterAgentResponse",
+                    "conversation_id": "conv-1",
+                    "generation_id": "gen-1",
+                    "response": "fixed",
+                    "model": "claude-opus-5-thinking-high",
+                    "model_params": params,
+                },
+            )
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=9000):
+            _dispatch(
+                "stop",
+                {
+                    "hook_event_name": "stop",
+                    "conversation_id": "conv-1",
+                    "generation_id": "gen-1",
+                    "status": "completed",
+                    "model": "claude-opus-5-thinking-high",
+                    "model_params": params,
+                },
+            )
+
+        spans = _spans_by_name(captured_spans)
+        for name in ("User Prompt", "Agent Response"):
+            attrs = _attrs(spans[name][0])
+            assert attrs["llm.reasoning_effort"]["stringValue"] == "high"
+            assert attrs["llm.thinking_enabled"]["stringValue"] == "true"
+
+    def test_openai_models_report_the_level_as_reasoning(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000):
+            _dispatch(
+                "beforeSubmitPrompt",
+                {
+                    "hookEventName": "beforeSubmitPrompt",
+                    "conversation_id": "conv-2",
+                    "generation_id": "gen-2",
+                    "prompt": "go",
+                    "model": "gpt-5.6-sol-max",
+                    "modelParams": [{"id": "reasoning", "value": "max"}],
+                },
+            )
+        attrs = _attrs(_spans_by_name(captured_spans)["User Prompt"][0])
+        assert attrs["llm.reasoning_effort"]["stringValue"] == "max"
+        assert "llm.thinking_enabled" not in attrs
+
+    def test_a_payload_without_params_emits_neither(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=5000):
+            _dispatch(
+                "beforeSubmitPrompt",
+                {
+                    "hookEventName": "beforeSubmitPrompt",
+                    "conversation_id": "conv-3",
+                    "generation_id": "gen-3",
+                    "prompt": "go",
+                    "model": "claude-sonnet-4.5",
+                },
+            )
+        attrs = _attrs(_spans_by_name(captured_spans)["User Prompt"][0])
+        assert "llm.reasoning_effort" not in attrs
+        assert "llm.thinking_enabled" not in attrs

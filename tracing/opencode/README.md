@@ -9,7 +9,7 @@ One trace per **turn** (one user prompt → the assistant's response → `sessio
 | Span | Kind | Notes |
 |------|------|-------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt; `output.value` is the assistant's final text. |
-| `LLM: <model>` | LLM | Child of `Turn` (or of a child subagent's `AGENT`). Carries `llm.message_id`, `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. One per assistant message. |
+| `LLM: <model>` | LLM | Child of `Turn` (or of a child subagent's `AGENT`). Carries `llm.message_id`, `llm.model_name`, `llm.reasoning_effort` (the message's model variant, when set), `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. One per assistant message. |
 | `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. One per completed `callID`. Records `tool.name`, redacted input/output, and tool-specific attributes (`tool.command`, `tool.file_path`, `tool.query`, `tool.url`). |
 | `Agent: <name>` | AGENT | Child of a `task` TOOL when the SDK child session reports a matching `Session.parentID`; that child session's LLM and TOOL spans nest beneath it. |
 

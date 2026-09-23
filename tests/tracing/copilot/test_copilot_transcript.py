@@ -59,6 +59,36 @@ class TestParseTranscriptHappyPath:
         s = parse_transcript(f)
         assert s["model_name"] == "claude-sonnet-4.5"
 
+    def test_model_change_carries_the_reasoning_effort(self, tmp_path):
+        f = tmp_path / "events.jsonl"
+        _write_jsonl(
+            f,
+            [{"type": "session.model_change", "data": {"newModel": "gpt-5.6-luna", "reasoningEffort": "high"}}],
+        )
+        assert parse_transcript(f)["effort"] == "high"
+
+    def test_the_latest_model_change_wins(self, tmp_path):
+        f = tmp_path / "events.jsonl"
+        _write_jsonl(
+            f,
+            [
+                {"type": "session.model_change", "data": {"newModel": "gpt-5.6-luna", "reasoningEffort": "low"}},
+                {"type": "session.model_change", "data": {"newModel": "gpt-5.6-luna", "reasoningEffort": "xhigh"}},
+            ],
+        )
+        assert parse_transcript(f)["effort"] == "xhigh"
+
+    def test_a_resumed_session_reports_its_effort(self, tmp_path):
+        f = tmp_path / "events.jsonl"
+        _write_jsonl(f, [{"type": "session.resume", "data": {"reasoningEffort": "medium"}}])
+        assert parse_transcript(f)["effort"] == "medium"
+
+    def test_auto_model_reports_no_effort(self, tmp_path):
+        """With the model on auto, Copilot writes a null effort, not a level."""
+        f = tmp_path / "events.jsonl"
+        _write_jsonl(f, [{"type": "session.model_change", "data": {"newModel": "auto", "reasoningEffort": None}}])
+        assert parse_transcript(f)["effort"] == ""
+
     def test_extracts_user_prompt_from_user_message(self, tmp_path):
         f = tmp_path / "events.jsonl"
         _write_jsonl(f, [{"type": "user.message", "data": {"content": "do the thing"}}])
@@ -292,6 +322,7 @@ class TestParseTranscriptReturnShape:
         s = parse_transcript(f)
         assert set(s.keys()) == {
             "model_name",
+            "effort",
             "copilot_version",
             "input_text",
             "output_text",

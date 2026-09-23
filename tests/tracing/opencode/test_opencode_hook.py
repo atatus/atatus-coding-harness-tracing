@@ -221,6 +221,18 @@ class TestReconcileBasic:
         assert attrs["input.value"]["stringValue"] == "list files and edit main.py"
         assert attrs["output.value"]["stringValue"] == "I'll list files then edit."
 
+    def test_variant_is_the_reasoning_effort(self, mock_resolve, mock_ensure, state, captured_spans):
+        """OpenCode calls it a variant; it is the provider's reasoning effort."""
+        payload = _load_fixture("reconcile_basic.json")
+        payload["messages"][1]["info"]["variant"] = "high"
+        _handle_reconcile(payload)
+        attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["llm.reasoning_effort"]["stringValue"] == "high"
+
+    def test_no_variant_emits_no_effort(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_reconcile(_load_fixture("reconcile_basic.json"))
+        assert "llm.reasoning_effort" not in _get_attrs(_by_kind(captured_spans, "LLM")[0])
+
     def test_llm_span_name_includes_model(self, mock_resolve, mock_ensure, state, captured_spans):
         _handle_reconcile(_load_fixture("reconcile_basic.json"))
         llm = _by_kind(captured_spans, "LLM")[0]

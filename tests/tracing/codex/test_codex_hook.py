@@ -216,6 +216,44 @@ class TestExtractTurnFromRollout:
         assert turn["permission_mode"] == "on-request"
         assert turn["sandbox_mode"] == "workspace-write"
 
+    def test_turn_context_supplies_effort(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            {
+                "timestamp": "2026-05-20T00:00:00Z",
+                "type": "turn_context",
+                "payload": {"turn_id": "t1", "model": "gpt-5.5", "effort": "xhigh"},
+            },
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        assert _extract_turn_from_rollout(path, "t1")["effort"] == "xhigh"
+
+    def test_another_turns_effort_is_not_borrowed(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            {
+                "timestamp": "2026-05-20T00:00:00Z",
+                "type": "turn_context",
+                "payload": {"turn_id": "t0", "model": "gpt-5.5", "effort": "low"},
+            },
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        assert _extract_turn_from_rollout(path, "t1")["effort"] == ""
+
+    def test_thread_settings_cover_a_turn_with_no_turn_context(self, tmp_path):
+        path = _write_rollout(
+            tmp_path,
+            "s1",
+            _evt({"type": "task_started", "turn_id": "t1"}),
+            _evt({"type": "thread_settings_applied", "thread_settings": {"reasoning_effort": "medium"}}),
+            _evt({"type": "task_complete", "turn_id": "t1"}),
+        )
+        assert _extract_turn_from_rollout(path, "t1")["effort"] == "medium"
+
     def test_token_count_summed(self, tmp_path):
         path = _write_rollout(
             tmp_path,
@@ -522,6 +560,7 @@ class TestBuildAndSendSpans:
             "user_prompt": "hi",
             "assistant_output": "hello",
             "model": "gpt-5.5",
+            "effort": "high",
             "cwd": "/x/workspace",
             "permission_mode": "on-request",
             "sandbox_mode": "workspace-write",
@@ -560,6 +599,7 @@ class TestBuildAndSendSpans:
         assert parent_attrs["input.value"]["stringValue"] == "hi"
         assert parent_attrs["output.value"]["stringValue"] == "hello"
         assert parent_attrs["llm.model_name"]["stringValue"] == "gpt-5.5"
+        assert parent_attrs["llm.reasoning_effort"]["stringValue"] == "high"
         assert parent_attrs["codex.approval_mode"]["stringValue"] == "on-request"
         assert parent_attrs["codex.sandbox_mode"]["stringValue"] == "workspace-write"
         assert parent_attrs["codex.cwd"]["stringValue"] == "/x/workspace"

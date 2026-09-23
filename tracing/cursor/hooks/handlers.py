@@ -12,12 +12,15 @@ import re
 import sys
 
 from core.common import (
+    LLM_EFFORT_ATTR,
+    LLM_THINKING_ATTR,
     build_span,
     env,
     error,
     generate_trace_id,
     get_timestamp_ms,
     log,
+    normalize_effort,
     read_stdin_text,
     redact_content,
     send_span,
@@ -76,6 +79,36 @@ def _jq_str(input_json: dict, *keys, default: str = "") -> str:
         if val is not None and val != "":
             return str(val)
     return default
+
+
+#: Anthropic and Grok models report the level under ``effort``, OpenAI ones
+#: under ``reasoning``. Only one is ever present for a given model.
+_EFFORT_PARAM_IDS = ("effort", "reasoning")
+
+
+def _model_settings(input_json: dict) -> tuple[str, bool]:
+    """Return (effort, thinking) from the payload's structured model params.
+
+    The payload's ``model`` is a variant slug that already has both baked into
+    it (``claude-opus-5-thinking-high``), so the parsed params are the only
+    place they can be read as values rather than pattern-matched out of a name.
+    """
+    params = input_json.get("model_params")
+    if not isinstance(params, list):
+        params = input_json.get("modelParams")
+    if not isinstance(params, list):
+        return "", False
+    values = {
+        item["id"]: item.get("value")
+        for item in params
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    effort = ""
+    for key in _EFFORT_PARAM_IDS:
+        effort = normalize_effort(values.get(key))
+        if effort:
+            break
+    return effort, str(values.get("thinking", "")).strip().lower() == "true"
 
 
 def _resolve_user_id(input_json: dict) -> str:
@@ -212,6 +245,7 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
 
     prompt = _jq_str(input_json, "prompt", "input", "text")
     model = _jq_str(input_json, "model", "model_name")
+    effort, thinking = _model_settings(input_json)
     deferred_root = _is_cursor_ide_hook_payload(input_json)
 
     state_push(
@@ -223,6 +257,8 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
             "start_ms": now_ms,
             "prompt": prompt,
             "model": model,
+            "effort": effort,
+            "thinking": thinking,
             "deferred_root": deferred_root,
         },
     )
@@ -247,6 +283,10 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
         root_attrs["user.login_id"] = login_id
     if model:
         root_attrs["llm.model_name"] = model
+    if effort:
+        root_attrs[LLM_EFFORT_ATTR] = effort
+    if thinking:
+        root_attrs[LLM_THINKING_ATTR] = "true"
 
     root_span = build_span(
         "User Prompt",
@@ -273,6 +313,7 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
     response = _jq_str(input_json, "text", "response", "output")
     # "model" is a base field on all hook events
     model = _jq_str(input_json, "model", "model_name")
+    effort, thinking = _model_settings(input_json)
 
     safe_gen = sanitize(gen_id) if gen_id else ""
     root_state = state_pop(f"root_{safe_gen}") if safe_gen else None
@@ -293,6 +334,8 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
     if root_state and deferred_root:
         root_state["response"] = response
         root_state["model"] = model or root_state.get("model", "")
+        root_state["effort"] = effort or root_state.get("effort", "")
+        root_state["thinking"] = thinking or root_state.get("thinking", False)
         root_state["user_id"] = user_id
         root_state["login_id"] = login_id
         state_push(f"root_{safe_gen}", root_state)
@@ -305,6 +348,8 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         "input": prompt,
         "output": response,
         "model": model,
+        "effort": effort,
+        "thinking": thinking,
         "conversation_id": conversation_id,
         "user_id": user_id,
         "login_id": login_id,
@@ -332,6 +377,10 @@ def _handle_after_agent_response(input_json, conversation_id, gen_id, trace_id, 
         attrs["user.login_id"] = login_id
     if model:
         attrs["llm.model_name"] = model
+    if effort:
+        attrs[LLM_EFFORT_ATTR] = effort
+    if thinking:
+        attrs[LLM_THINKING_ATTR] = "true"
 
     span = build_span(
         "Agent Response",
@@ -776,6 +825,7 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
     _cw_tok = input_json.get("cache_write_tokens")
     cache_write = _to_int(_cw_tok if _cw_tok is not None else input_json.get("cacheWriteTokens"))
     model = _jq_str(input_json, "model")
+    effort, thinking = _model_settings(input_json)
     _dur = input_json.get("duration_ms")
     duration_ms = _to_int(_dur if _dur is not None else input_json.get("durationMs"))
 
@@ -823,6 +873,11 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         root_model = root_state.get("model") or model
         if root_model:
             root_attrs["llm.model_name"] = root_model
+        root_effort = root_state.get("effort") or effort
+        if root_effort:
+            root_attrs[LLM_EFFORT_ATTR] = root_effort
+        if root_state.get("thinking") or thinking:
+            root_attrs[LLM_THINKING_ATTR] = "true"
 
         _send_span_async(
             build_span(
@@ -870,6 +925,11 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         entry_model = entry.get("model", "")
         if entry_model:
             llm_attrs["llm.model_name"] = entry_model
+        entry_effort = entry.get("effort") or effort
+        if entry_effort:
+            llm_attrs[LLM_EFFORT_ATTR] = entry_effort
+        if entry.get("thinking") or thinking:
+            llm_attrs[LLM_THINKING_ATTR] = "true"
         # Tokens are cumulative per turn — attribute only to the most recent LLM span.
         if idx == 0:
             llm_attrs.update(token_attrs)
@@ -907,6 +967,11 @@ def _handle_stop(input_json, conversation_id, gen_id, trace_id, now_ms):
         attrs["cursor.stop.duration_ms"] = duration_ms
     if model and not llm_entries:
         attrs["llm.model_name"] = model
+    if not llm_entries:
+        if effort:
+            attrs[LLM_EFFORT_ATTR] = effort
+        if thinking:
+            attrs[LLM_THINKING_ATTR] = "true"
 
     # Fallback (no afterAgentResponse, e.g. CLI): keep token attrs on Agent Stop.
     if not llm_entries:

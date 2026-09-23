@@ -1314,3 +1314,73 @@ class TestSubagentHooksDoNotContendOnTheSessionFile:
         assert agent_file.is_file()
         assert "tu-parallel" in agent_file.read_text(encoding="utf-8")
 
+
+
+class TestReasoningEffort:
+    """The level a call ran at sits on the record, not inside ``message``."""
+
+    def test_effort_lands_on_the_model_call(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [{**_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "effort": "xhigh"}],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert [e.effort for e in graph.events if isinstance(e, ModelCallEvent)] == ["xhigh"]
+
+    def test_per_turn_override_wins(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                {
+                    **_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]),
+                    "effort": "medium",
+                    "perTurnEffort": "max",
+                }
+            ],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert [e.effort for e in graph.events if isinstance(e, ModelCallEvent)] == ["max"]
+
+    def test_null_per_turn_effort_falls_back(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [{**_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "effort": "high", "perTurnEffort": None}],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert [e.effort for e in graph.events if isinstance(e, ModelCallEvent)] == ["high"]
+
+    def test_a_continuation_record_supplies_the_level(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant("u1", "msg_A", [{"type": "thinking", "thinking": "hmm"}]),
+                {**_assistant("u2", "msg_A", [{"type": "text", "text": "a"}]), "effort": "low"},
+            ],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        calls = [e for e in graph.events if isinstance(e, ModelCallEvent)]
+        assert len(calls) == 1
+        assert calls[0].effort == "low"
+
+    def test_a_model_without_effort_support_gets_no_attribute(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", [_assistant("u1", "msg_A", [{"type": "text", "text": "a"}])])
+        graph = parse_claude_transcript(transcript, _root())
+        calls = [e for e in graph.events if isinstance(e, ModelCallEvent)]
+        assert calls[0].effort is None
+
+    def test_rendered_llm_span_carries_the_level(self, tmp_path):
+        from tracing.claude_code.hooks.span_renderer import render_event_graph
+
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [{**_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "effort": "xhigh"}],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        payload = render_event_graph(graph, trace_id="t" * 32)
+        llm = next(s for s in _spans(payload) if _attrs(s).get("openinference.span.kind") == "LLM")
+        assert _attrs(llm)["llm.reasoning_effort"] == "xhigh"
+
+    def test_turn_falls_back_to_the_hook_payload(self):
+        assert handlers._payload_effort({"effort": {"level": "medium"}}) == "medium"
+        assert handlers._payload_effort({"effort": "medium"}) == ""
+        assert handlers._payload_effort({}) == ""

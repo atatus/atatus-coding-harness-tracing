@@ -349,6 +349,19 @@ class TestTurnEndLLMSpan:
         assert attrs["llm.model_name"]["stringValue"] == "claude-sonnet-4"
         assert attrs["llm.provider"]["stringValue"] == "anthropic"
 
+    def test_thinking_level_is_the_reasoning_effort(self, mock_resolve, mock_ensure, state, captured_spans):
+        """The level is session state the shim stamps onto the forwarded event."""
+        _handle_before_agent_start(_load_fixture("before_agent_start.json"))
+        payload = _load_fixture("turn_end_basic.json")
+        payload["thinkingLevel"] = "xhigh"
+        _handle_turn_end(payload)
+        attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["llm.reasoning_effort"]["stringValue"] == "xhigh"
+
+    def test_an_older_shim_sends_no_level(self, mock_resolve, mock_ensure, state, captured_spans):
+        _run_basic_turn(state)
+        assert "llm.reasoning_effort" not in _get_attrs(_by_kind(captured_spans, "LLM")[0])
+
     def test_llm_cost(self, mock_resolve, mock_ensure, state, captured_spans):
         _run_basic_turn(state)
         attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])

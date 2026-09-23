@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from core.common import (
+    LLM_EFFORT_ATTR,
     StateManager,
     build_span,
     debug_dump,
@@ -21,6 +22,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    normalize_effort,
     read_stdin_text,
     redact_content,
     send_span,
@@ -213,7 +215,7 @@ def _close_pending_turn(state: StateManager, reason: str = "(closed by fail-safe
     _emit_turn_root(state, output_value)
 
 
-def _emit_llm_span(state: StateManager, message: Any) -> str:
+def _emit_llm_span(state: StateManager, message: Any, effort: str = "") -> str:
     """Emit the model-call span and return its id, so its tools can parent to it."""
     if not isinstance(message, dict):
         return ""
@@ -257,6 +259,8 @@ def _emit_llm_span(state: StateManager, message: Any) -> str:
         "input.value": redact_content(env.log_prompts, state.get("current_trace_prompt") or ""),
         "output.value": redact_content(env.log_prompts, output_text),
     }
+    if effort:
+        attrs[LLM_EFFORT_ATTR] = effort
     if reasoning_tokens:
         attrs["llm.token_count.completion_details.reasoning"] = reasoning_tokens
     if cache_read:
@@ -368,7 +372,7 @@ def _handle_turn_end(input_json: dict) -> None:
     message = input_json.get("message")
     if not isinstance(message, dict):
         message = {}
-    llm_span_id = _emit_llm_span(state, message)
+    llm_span_id = _emit_llm_span(state, message, normalize_effort(input_json.get("thinkingLevel")))
 
     calls = _tool_calls(message)
     for tool_result in input_json.get("toolResults") or []:

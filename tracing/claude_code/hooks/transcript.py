@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.common import normalize_effort
 from core.event_model import (
     AgentEvent,
     BaseEvent,
@@ -189,6 +190,7 @@ def parse_claude_transcript(
                     agent_id=agent_id,
                     source_id=message_id or event_id,
                     model=_string(message.get("model")) or None,
+                    effort=_effort(entry) or None,
                     usage=_usage(message.get("usage")),
                 )
                 graph.events.append(model_event)
@@ -207,6 +209,8 @@ def parse_claude_transcript(
                     model_event.ended_at_ms = timestamp_ms
                 if not model_event.model:
                     model_event.model = _string(message.get("model")) or None
+                if not model_event.effort:
+                    model_event.effort = _effort(entry) or None
                 record_usage = _usage(message.get("usage"))
                 existing_total = model_event.usage.total_tokens if model_event.usage else -1
                 if record_usage.total_tokens > existing_total:
@@ -415,6 +419,16 @@ def _usage(raw: Any) -> Usage:
         cache_write_1h_tokens=_nonnegative_int(cache_creation.get("ephemeral_1h_input_tokens")),
         reported_total_tokens=_optional_nonnegative_int(data.get("total_tokens")),
     )
+
+
+def _effort(entry: dict[str, Any]) -> str:
+    """Return the effort level the record's request actually ran at.
+
+    Both keys sit on the record, beside ``requestId`` -- not inside ``message``.
+    ``perTurnEffort`` is a per-request override of the session level and wins
+    when set, which mirrors how the harness itself resolves the pair.
+    """
+    return normalize_effort(entry.get("perTurnEffort")) or normalize_effort(entry.get("effort"))
 
 
 def _nonnegative_int(value: Any) -> int:

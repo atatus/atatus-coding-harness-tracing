@@ -151,6 +151,10 @@ no public schema, so a value that does not look like a model id is discarded and
 instead — a schema change degrades this to sources 2/3 rather than putting an arbitrary string in the model
 field.
 
+The label also carries the reasoning setting in parentheses. `(High)`, `(Medium)` and `(Low)` become
+`llm.reasoning_effort`; Claude models' `(Thinking)` is extended thinking being on rather than a level, so it
+becomes `llm.thinking_enabled` instead and no effort is reported.
+
 ## Limitations
 
 - **Token counts come from the conversation store, not the transcript.** Neither the hook payload nor the

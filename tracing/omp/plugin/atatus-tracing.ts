@@ -61,6 +61,19 @@ function sessionIdOf(ctx: HookContext): string {
   }
 }
 
+// The thinking level is session state the turn_end event does not carry, and
+// the persisted assistant message records only whether reasoning ran, not at
+// what level. Probed rather than called outright: older omp builds have no
+// such method and the shim must load on all of them.
+function thinkingLevelOf(pi: HookAPI): string | undefined {
+  try {
+    const probe = pi as unknown as { getThinkingLevel?: () => string };
+    return typeof probe.getThinkingLevel === "function" ? probe.getThinkingLevel() || undefined : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function (pi: HookAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     try {
@@ -78,6 +91,7 @@ export default function (pi: HookAPI): void {
         turnIndex: event.turnIndex,
         message: event.message,
         toolResults: event.toolResults,
+        thinkingLevel: thinkingLevelOf(pi),
       });
     } catch {
       /* fail-soft */

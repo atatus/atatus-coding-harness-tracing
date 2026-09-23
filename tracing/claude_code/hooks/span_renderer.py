@@ -7,7 +7,14 @@ import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from core.common import build_multi_span, build_span, env, generate_span_id, redact_content
+from core.common import (
+    LLM_EFFORT_ATTR,
+    build_multi_span,
+    build_span,
+    env,
+    generate_span_id,
+    redact_content,
+)
 from core.event_model import (
     AgentEvent,
     BaseEvent,
@@ -152,6 +159,8 @@ def _span_fields(event: BaseEvent, model_call_number: int, prompt_number: int) -
         attrs["openinference.span.kind"] = "LLM"
         if event.model:
             attrs["llm.model_name"] = event.model
+        if event.effort:
+            attrs[LLM_EFFORT_ATTR] = event.effort
         if event.source_id:
             attrs["llm.message.id"] = event.source_id
         if event.agent_id:

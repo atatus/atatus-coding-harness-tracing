@@ -11,6 +11,7 @@ import atexit
 import functools
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1349,6 +1350,28 @@ def normalize_model_name(model: str) -> str:
     if idx >= 0:
         model = model[:idx].strip()
     return model
+
+
+#: The reasoning effort a harness ran a call at (``low``, ``high``, ``xhigh`` ...),
+#: and, separately, extended thinking being on with no level attached.
+LLM_EFFORT_ATTR = "llm.reasoning_effort"
+LLM_THINKING_ATTR = "llm.thinking_enabled"
+
+_EFFORT_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+
+
+def normalize_effort(value: object) -> str:
+    """Return *value* as a reasoning-effort token, or "" if it is not one.
+
+    Shaped rather than enumerated: harnesses keep adding levels (``xhigh``,
+    ``max``, ``ultra``, ``extra-high``) and an allowlist would silently drop the
+    next one, which is indistinguishable downstream from the model not
+    supporting effort at all.
+    """
+    if not isinstance(value, str):
+        return ""
+    token = value.strip().lower().replace("_", "-").replace(" ", "-")
+    return token if _EFFORT_RE.match(token) else ""
 
 
 def strip_system_reminders(text: str) -> str:

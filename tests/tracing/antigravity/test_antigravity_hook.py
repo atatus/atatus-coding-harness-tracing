@@ -366,6 +366,14 @@ class TestStopSingleTurnFixture:
         turn_attrs = _get_span_attrs(_by_kind(stop_with_fixture, "CHAIN")[0])
         assert turn_attrs["antigravity.model_label"]["stringValue"] == "Gemini 3.5 Flash (Medium)"
 
+    def test_the_label_qualifier_becomes_the_effort(self, stop_with_fixture):
+        """"Gemini 3.5 Flash (Medium)" ran at medium; the turn and every call say so."""
+        turn_attrs = _get_span_attrs(_by_kind(stop_with_fixture, "CHAIN")[0])
+        assert turn_attrs["llm.reasoning_effort"]["stringValue"] == "medium"
+        assert "llm.thinking_enabled" not in turn_attrs
+        for payload in _by_kind(stop_with_fixture, "LLM"):
+            assert _get_span_attrs(payload)["llm.reasoning_effort"]["stringValue"] == "medium"
+
     def test_no_token_count_attributes(self, stop_with_fixture):
         """Antigravity withholds tokens — we must not invent them."""
         for payload in stop_with_fixture:
@@ -919,6 +927,12 @@ class TestMessyTranscript:
         assert _get_span_attrs(_by_kind(spans, "LLM")[0])["llm.model_name"]["stringValue"] == "claude-sonnet-4.6"
         turn = _get_span_attrs(_by_kind(spans, "CHAIN")[0])
         assert turn["antigravity.model_label"]["stringValue"] == "Claude Sonnet 4.6 (Thinking)"
+
+    def test_a_thinking_label_is_a_flag_not_a_level(self, spans):
+        """"(Thinking)" is extended thinking being on, not an effort level."""
+        turn = _get_span_attrs(_by_kind(spans, "CHAIN")[0])
+        assert turn["llm.thinking_enabled"]["stringValue"] == "true"
+        assert "llm.reasoning_effort" not in turn
 
     def test_thinking_is_captured(self, spans):
         payload = next(p for p in _by_kind(spans, "LLM") if "llm.reasoning" in _get_span_attrs(p))

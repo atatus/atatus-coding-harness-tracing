@@ -897,6 +897,40 @@ class TestNormalizeModelName:
         assert "llm.model_name" not in keys
 
 
+class TestNormalizeEffort:
+    """A harness's effort level reaches spans as a filterable token, and junk
+    from an unexpected payload shape never becomes one."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("high", "high"),
+            ("xhigh", "xhigh"),
+            ("  MAX  ", "max"),
+            ("extra high", "extra-high"),
+            ("extra_low", "extra-low"),
+            ("ultra", "ultra"),
+            ("none", "none"),
+            ("", ""),
+            ("-high", ""),
+            ("a level with spaces that is far too long", ""),
+            ("{'level': 'high'}", ""),
+            (None, ""),
+            (3, ""),
+            (True, ""),
+        ],
+    )
+    def test_shape(self, raw, expected):
+        from core.common import normalize_effort
+
+        assert normalize_effort(raw) == expected
+
+    def test_unknown_future_level_survives(self):
+        from core.common import normalize_effort
+
+        assert normalize_effort("hyper") == "hyper"
+
+
 class TestStripSystemReminders:
     def test_removes_block(self):
         from core.common import strip_system_reminders

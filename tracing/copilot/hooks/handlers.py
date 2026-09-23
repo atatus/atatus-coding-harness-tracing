@@ -7,6 +7,7 @@ corresponding _handle_* implementation.
 import json
 
 from core.common import (
+    LLM_EFFORT_ATTR,
     build_span,
     debug_dump,
     env,
@@ -297,6 +298,7 @@ def _handle_stop(input_json: dict, reason: TurnEndReason = TurnEndReason.COMPLET
     summary = parse_transcript(str(transcript_path)) if transcript_path else {}
 
     model_name = summary.get("model_name", "")
+    effort = summary.get("effort", "")
     output_text = summary.get("output_text", "")
     output_tokens = summary.get("output_tokens", 0)
     if not user_prompt:
@@ -315,6 +317,8 @@ def _handle_stop(input_json: dict, reason: TurnEndReason = TurnEndReason.COMPLET
         common["user.login_id"] = login_id
     if model_name:
         common["llm.model_name"] = model_name
+    if effort:
+        common[LLM_EFFORT_ATTR] = effort
 
     root_attrs = dict(common)
     root_attrs.update(
@@ -408,6 +412,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
 
     summary = parse_transcript(str(transcript_path)) if transcript_path else {}
     model_name = summary.get("model_name", "")
+    effort = summary.get("effort", "")
 
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
@@ -424,6 +429,8 @@ def _handle_subagent_stop(input_json: dict) -> None:
         attrs["output.value"] = redact_content(env.log_prompts, str(response))
     if model_name:
         attrs["llm.model_name"] = model_name
+    if effort:
+        attrs[LLM_EFFORT_ATTR] = effort
     if user_id:
         attrs["user.id"] = user_id
     if login_id:

@@ -26,6 +26,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from core.common import normalize_effort
 from tracing.antigravity import constants as _c
 
 #: Field 19, length-delimited, inside a ``gen_metadata`` blob. Empirically the
@@ -133,6 +134,24 @@ def model_label_from_settings() -> str:
         return ""
     model = data.get("model")
     return model.strip() if isinstance(model, str) else ""
+
+
+def effort_from_label(label: str) -> tuple[str, bool]:
+    """Return (effort, thinking) from a display label's parenthesised qualifier.
+
+    "Gemini 3.8 Flash (High)" is an effort level; "Claude Opus 4.6 (Thinking)"
+    is extended thinking being on, with no level attached. Reporting the second
+    as an effort would put a mode into an enum of levels.
+    """
+    if not label:
+        return "", False
+    match = _LABEL_QUALIFIER_RE.search(label)
+    if not match:
+        return "", False
+    qualifier = match.group(0).strip().strip("()").strip()
+    if qualifier.lower() == "thinking":
+        return "", True
+    return normalize_effort(qualifier), False
 
 
 def label_to_id(label: str) -> str:

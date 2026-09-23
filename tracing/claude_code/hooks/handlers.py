@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.common import (
+    LLM_EFFORT_ATTR,
     StateManager,
     build_multi_span,
     build_span,
@@ -22,6 +23,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    normalize_effort,
     read_stdin_text,
     redact_content,
     send_span,
@@ -675,6 +677,27 @@ def _scan_transcript_for_usage(
     return output, usage_totals, model
 
 
+def _payload_effort(input_json: dict) -> str:
+    """Return the effort level from a hook payload.
+
+    Only tool-context hooks carry it (Stop, SubagentStop, Pre/PostToolUse); the
+    session-lifecycle ones never do. It is recomputed from live harness state,
+    so it is the fallback for what the transcript recorded on the wire.
+    """
+    effort = input_json.get("effort")
+    return normalize_effort(effort.get("level")) if isinstance(effort, dict) else ""
+
+
+def _graph_effort(graph) -> str:
+    """Return the effort of the turn's last model call."""
+    if graph is None:
+        return ""
+    for event in reversed(graph.events):
+        if isinstance(event, ModelCallEvent) and event.effort:
+            return event.effort
+    return ""
+
+
 def _has_stable_model_ids(graph) -> bool:
     """Gate high-fidelity rendering on Claude v2 assistant UUIDs."""
     models = [event for event in graph.events if isinstance(event, ModelCallEvent)]
@@ -1282,6 +1305,9 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         root_attrs["command.args"] = redact_content(env.log_prompts, command_args)
     if command_source:
         root_attrs["command.source"] = command_source
+    turn_effort = _graph_effort(graph) or _payload_effort(input_json)
+    if turn_effort:
+        root_attrs[LLM_EFFORT_ATTR] = turn_effort
 
     if graph is not None and _has_stable_model_ids(graph):
         buffer = ToolBuffer(state)
@@ -1688,6 +1714,8 @@ def _handle_subagent_stop(input_json: dict) -> None:
     if not output:
         output = "(No response)"
 
+    subagent_effort = _payload_effort(input_json)
+
     # Subagent output is a tool-like result — redact unless opted in.
     output = redact_content(env.log_tool_content, output)
 
@@ -1699,6 +1727,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
         "subagent.id": agent_id,
         "subagent.type": agent_type,
         **({"llm.model_name": model} if model else {}),
+        **({LLM_EFFORT_ATTR: subagent_effort} if subagent_effort else {}),
         **usage.token_count_attrs(),
         "output.value": output,
     }

@@ -151,6 +151,7 @@ class ModelCallEvent(BaseEvent):
     agent_id: Optional[str] = None
     source_id: Optional[str] = None
     model: Optional[str] = None
+    effort: Optional[str] = None
     usage: Optional[Usage] = None
 
     event_type: ClassVar[str] = "model_call"

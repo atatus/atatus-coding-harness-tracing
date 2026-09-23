@@ -17,6 +17,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.common import normalize_effort
+
 #: `session.model_change` reports the user's *selection*, which is frequently
 #: this placeholder rather than a model. The served model only ever appears on
 #: `assistant.message`, so a name from that event always wins.
@@ -34,6 +36,7 @@ def parse_transcript(path: str | Path) -> dict[str, Any]:
     the transcript did not provide that info):
 
       model_name        -- str: the model that actually served the turn.
+      effort            -- str: the reasoning effort in force for that turn.
       copilot_version   -- str: from `session.start`.
       input_text        -- str: the most recent user prompt.
       output_text       -- str: the assistant's answer for the latest turn.
@@ -53,6 +56,7 @@ def parse_transcript(path: str | Path) -> dict[str, Any]:
 
     summary: dict[str, Any] = {
         "model_name": "",
+        "effort": "",
         "copilot_version": "",
         "input_text": "",
         "events_seen": 0,
@@ -84,6 +88,10 @@ def parse_transcript(path: str | Path) -> dict[str, Any]:
                     new_model = str(data.get("newModel", "") or "")
                     if new_model.lower() not in _MODEL_PLACEHOLDERS:
                         selected_model = new_model
+                    summary["effort"] = normalize_effort(data.get("reasoningEffort")) or summary["effort"]
+
+                elif kind == "session.resume":
+                    summary["effort"] = normalize_effort(data.get("reasoningEffort")) or summary["effort"]
 
                 elif kind == "user.message":
                     content = data.get("content", "")
