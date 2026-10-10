@@ -163,6 +163,8 @@ def _span_fields(event: BaseEvent, model_call_number: int, prompt_number: int) -
             attrs[LLM_EFFORT_ATTR] = event.effort
         if event.source_id:
             attrs["llm.message.id"] = event.source_id
+        if event.reasoning:
+            _put_content(attrs, "llm.reasoning", event.reasoning, env.log_prompts)
         if event.agent_id:
             attrs["subagent.id"] = event.agent_id
         if event.usage is not None and not event.usage.is_empty():

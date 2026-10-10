@@ -88,6 +88,16 @@ def _text_of(parts: list) -> str:
     return "".join(chunks)
 
 
+def _reasoning_of(parts: list) -> str:
+    chunks = []
+    for p in parts or []:
+        if isinstance(p, dict) and p.get("type") == "reasoning":
+            text = p.get("text")
+            if isinstance(text, str) and text:
+                chunks.append(text)
+    return "\n".join(chunks)
+
+
 def _string_value(value: Any, default: str = "") -> str:
     """Return a safe string representation for an untrusted SDK leaf value."""
     if isinstance(value, str):
@@ -389,6 +399,9 @@ def _emit_llm_span(
     }
     if effort:
         attrs[LLM_EFFORT_ATTR] = effort
+    reasoning_text = _reasoning_of(parts)
+    if reasoning_text:
+        attrs["llm.reasoning"] = redact_content(env.log_prompts, reasoning_text)
     if reasoning_tokens:
         attrs["llm.token_count.completion_details.reasoning"] = reasoning_tokens
     if cache_read:

@@ -1316,6 +1316,28 @@ class TestSubagentHooksDoNotContendOnTheSessionFile:
 
 
 
+class TestReasoningText:
+    def test_thinking_records_of_one_response_fold_into_the_model_call(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant("u1", "msg_A", [{"type": "thinking", "thinking": "first"}]),
+                _assistant("u2", "msg_A", [{"type": "thinking", "thinking": "second"}]),
+                _assistant("u3", "msg_A", [{"type": "text", "text": "answer"}]),
+            ],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert [e.reasoning for e in graph.events if isinstance(e, ModelCallEvent)] == ["first\nsecond"]
+
+    def test_empty_thinking_block_leaves_no_reasoning(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [_assistant("u1", "msg_A", [{"type": "thinking", "thinking": "", "signature": "x"}])],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert [e.reasoning for e in graph.events if isinstance(e, ModelCallEvent)] == [None]
+
+
 class TestReasoningEffort:
     """The level a call ran at sits on the record, not inside ``message``."""
 

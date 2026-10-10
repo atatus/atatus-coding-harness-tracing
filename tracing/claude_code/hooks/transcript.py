@@ -191,6 +191,7 @@ def parse_claude_transcript(
                     source_id=message_id or event_id,
                     model=_string(message.get("model")) or None,
                     effort=_effort(entry) or None,
+                    reasoning=_assistant_reasoning(content) or None,
                     usage=_usage(message.get("usage")),
                 )
                 graph.events.append(model_event)
@@ -203,6 +204,11 @@ def parse_claude_transcript(
                 extra_text = _assistant_text(content)
                 if extra_text:
                     model_event.output = f"{model_event.output}\n{extra_text}" if model_event.output else extra_text
+                extra_reasoning = _assistant_reasoning(content)
+                if extra_reasoning:
+                    model_event.reasoning = (
+                        f"{model_event.reasoning}\n{extra_reasoning}" if model_event.reasoning else extra_reasoning
+                    )
                 if timestamp_ms is not None:
                     if model_event.started_at_ms is None:
                         model_event.started_at_ms = timestamp_ms
@@ -374,6 +380,14 @@ def _assistant_text(content: Any) -> str:
         _string(block.get("text"))
         for block in _content_blocks(content)
         if block.get("type") == "text" and _string(block.get("text"))
+    )
+
+
+def _assistant_reasoning(content: Any) -> str:
+    return "\n".join(
+        _string(block.get("thinking"))
+        for block in _content_blocks(content)
+        if block.get("type") == "thinking" and _string(block.get("thinking"))
     )
 
 

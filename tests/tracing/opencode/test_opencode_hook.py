@@ -229,6 +229,20 @@ class TestReconcileBasic:
         attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])
         assert attrs["llm.reasoning_effort"]["stringValue"] == "high"
 
+    def test_reasoning_parts_become_llm_reasoning(self, mock_resolve, mock_ensure, state, captured_spans):
+        payload = _load_fixture("reconcile_basic.json")
+        payload["messages"][1]["parts"].insert(
+            0, {"id": "prt_r_1", "sessionID": "ses_basic", "type": "reasoning", "text": "weighing options"}
+        )
+        _handle_reconcile(payload)
+        attrs = _get_attrs(_by_kind(captured_spans, "LLM")[0])
+        assert attrs["llm.reasoning"]["stringValue"] == "weighing options"
+        assert attrs["output.value"]["stringValue"] == "I'll list files then edit."
+
+    def test_no_reasoning_part_emits_no_reasoning(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_reconcile(_load_fixture("reconcile_basic.json"))
+        assert "llm.reasoning" not in _get_attrs(_by_kind(captured_spans, "LLM")[0])
+
     def test_no_variant_emits_no_effort(self, mock_resolve, mock_ensure, state, captured_spans):
         _handle_reconcile(_load_fixture("reconcile_basic.json"))
         assert "llm.reasoning_effort" not in _get_attrs(_by_kind(captured_spans, "LLM")[0])
