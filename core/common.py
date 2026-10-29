@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -662,6 +663,14 @@ def _set_resource_attr(resource: dict, key: str, value: str) -> None:
     attrs.append({"key": key, "value": {"stringValue": value}})
 
 
+@functools.lru_cache(maxsize=1)
+def get_hostname() -> str:
+    try:
+        return socket.gethostname() or ""
+    except Exception:
+        return ""
+
+
 def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
     """Stamp Atatus project identity onto a payload's resource attributes.
 
@@ -675,6 +684,7 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
       atatus.project.type  = "llm"                (route to /llm, not /apm)
       atatus.agent.harness = <harness slug>       (subType, e.g. "claude-code")
       telemetry.sdk.name   = "atatus-coding-harness"
+      host.name            = <machine hostname>
 
     Project identity travels *in the payload*, not only in config. Kept at the
     resource level rather than duplicated onto every span — Atatus reads it from
@@ -700,6 +710,9 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
             _set_resource_attr(resource, "atatus.agent.harness", harness)
         _set_resource_attr(resource, "atatus.project.type", "llm")
         _set_resource_attr(resource, "telemetry.sdk.name", "atatus-coding-harness")
+        hostname = get_hostname()
+        if hostname:
+            _set_resource_attr(resource, "host.name", hostname)
 
     return payload
 

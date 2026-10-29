@@ -25,6 +25,7 @@ from core.common import (
     debug_dump,
     env,
     error,
+    get_hostname,
     get_target,
     log,
     redirect_stderr_to_log_file,
@@ -2388,6 +2389,23 @@ class TestStampAtatusIdentity:
             attrs = {a["key"]: a["value"]["stringValue"] for a in rs["resource"]["attributes"]}
             assert attrs["service.name"] == "proj"
             assert attrs["atatus.project.type"] == "llm"
+
+    def test_hostname_stamped(self):
+        attrs = self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
+        assert attrs.get("host.name") == get_hostname()
+
+
+def test_get_hostname():
+    hostname = get_hostname()
+    assert isinstance(hostname, str)
+    assert len(hostname) > 0
+
+
+def test_get_hostname_fail_soft(monkeypatch):
+    get_hostname.cache_clear()
+    monkeypatch.setattr(common.socket, "gethostname", mock.Mock(side_effect=OSError("network failure")))
+    assert get_hostname() == ""
+    get_hostname.cache_clear()
 
 
 # ── Hook stdin is UTF-8, whatever the host locale says ────────────────────
