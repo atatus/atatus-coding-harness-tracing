@@ -26,6 +26,7 @@ from core.common import (
     env,
     error,
     get_hostname,
+    get_machine_id,
     get_target,
     log,
     redirect_stderr_to_log_file,
@@ -2394,6 +2395,12 @@ class TestStampAtatusIdentity:
         attrs = self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
         assert attrs.get("host.name") == get_hostname()
 
+    def test_machine_id_stamped(self):
+        attrs = self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
+        machine_id = get_machine_id()
+        if machine_id:
+            assert attrs.get("host.id") == machine_id
+
 
 def test_get_hostname():
     hostname = get_hostname()
@@ -2406,6 +2413,32 @@ def test_get_hostname_fail_soft(monkeypatch):
     monkeypatch.setattr(common.socket, "gethostname", mock.Mock(side_effect=OSError("network failure")))
     assert get_hostname() == ""
     get_hostname.cache_clear()
+
+
+def test_get_machine_id():
+    machine_id = get_machine_id()
+    assert isinstance(machine_id, str)
+    if common.sys.platform.startswith("linux") and os.path.exists("/etc/machine-id"):
+        assert len(machine_id) > 0
+
+
+def test_get_machine_id_darwin(monkeypatch):
+    get_machine_id.cache_clear()
+    monkeypatch.setattr(common.sys, "platform", "darwin")
+    fake_run = mock.Mock(
+        return_value=mock.Mock(stdout='    |   "IOPlatformUUID" = "12345678-ABCD-EF01-2345-6789ABCDEF01"\n')
+    )
+    monkeypatch.setattr(common.subprocess, "run", fake_run)
+    assert get_machine_id() == "12345678-ABCD-EF01-2345-6789ABCDEF01"
+    get_machine_id.cache_clear()
+
+
+def test_get_machine_id_fail_soft(monkeypatch):
+    get_machine_id.cache_clear()
+    monkeypatch.setattr(common.sys, "platform", "linux")
+    monkeypatch.setattr("builtins.open", mock.Mock(side_effect=OSError("no permission")))
+    assert get_machine_id() == ""
+    get_machine_id.cache_clear()
 
 
 # ── Hook stdin is UTF-8, whatever the host locale says ────────────────────

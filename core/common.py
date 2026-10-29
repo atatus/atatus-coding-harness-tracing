@@ -671,6 +671,48 @@ def get_hostname() -> str:
         return ""
 
 
+@functools.lru_cache(maxsize=1)
+def get_machine_id() -> str:
+    try:
+        if sys.platform.startswith("linux"):
+            for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        val = f.read().strip()
+                        if val:
+                            return val
+                except OSError:
+                    pass
+        elif sys.platform == "darwin":
+            try:
+                res = subprocess.run(
+                    ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                )
+                for line in res.stdout.splitlines():
+                    if "IOPlatformUUID" in line:
+                        parts = line.split('" = "')
+                        if len(parts) == 2:
+                            return parts[1].rstrip('"\n ')
+            except Exception:
+                pass
+        elif sys.platform == "win32":
+            try:
+                import winreg
+
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+                    val, _ = winreg.QueryValueEx(key, "MachineGuid")
+                    if val:
+                        return str(val).strip()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return ""
+
+
 def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
     """Stamp Atatus project identity onto a payload's resource attributes.
 
@@ -685,6 +727,7 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
       atatus.agent.harness = <harness slug>       (subType, e.g. "claude-code")
       telemetry.sdk.name   = "atatus-coding-harness"
       host.name            = <machine hostname>
+      host.id              = <machine id>
 
     Project identity travels *in the payload*, not only in config. Kept at the
     resource level rather than duplicated onto every span — Atatus reads it from
@@ -713,6 +756,9 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
         hostname = get_hostname()
         if hostname:
             _set_resource_attr(resource, "host.name", hostname)
+        machine_id = get_machine_id()
+        if machine_id:
+            _set_resource_attr(resource, "host.id", machine_id)
 
     return payload
 
