@@ -278,7 +278,7 @@ def install(with_skills: bool = False) -> None:
     # 2. Migrate any v1 artifacts (idempotent; no-op on fresh installs). Only
     #    touches Codex-side artifacts, never our config.json, so it is safe
     #    either side of the harness entry being written.
-    cleanup_legacy_install(codex_config_file)
+    cleanup_legacy_install()
 
     # 3. Codex config dir + env file.
     if not dry_run():
@@ -317,7 +317,7 @@ def uninstall() -> None:
     _toml_load_strict(codex_config_file)
 
     # 1. Clean up any lingering v1 artifacts first (no-op if absent).
-    cleanup_legacy_install(codex_config_file)
+    cleanup_legacy_install()
 
     # 2. Revert TOML — remove our notify entry, our structured hooks, and any
     #    legacy hook entries.

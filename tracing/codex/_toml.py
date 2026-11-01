@@ -320,6 +320,8 @@ def _inline_table(table: dict) -> str:
             parts.append(f"{kk} = {'true' if v else 'false'}")
         elif isinstance(v, int):
             parts.append(f"{kk} = {v}")
+        elif isinstance(v, float):
+            parts.append(f"{kk} = {v!r}")
         elif isinstance(v, list):
             if _is_table_array(v):
                 items = ", ".join(_inline_table(d) for d in v)
@@ -341,6 +343,8 @@ def _toml_write_value(key: str, val: object, lines: list[str]) -> None:
         lines.append(f"{k} = {'true' if val else 'false'}")
     elif isinstance(val, int):
         lines.append(f"{k} = {val}")
+    elif isinstance(val, float):
+        lines.append(f"{k} = {val!r}")
     else:
         lines.append(f"{k} = {_toml_string_literal(val)}")
 

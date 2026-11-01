@@ -391,6 +391,25 @@ class TestUninstall:
 
         assert not (fake_home / ".codex" / "atatus-env.sh").is_file()
 
+    def test_install_and_uninstall_keep_a_users_local_otlp_exporter(self, fake_home, mock_prompts):
+        toml_path = fake_home / ".codex" / "config.toml"
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+        toml_path.write_text(
+            textwrap.dedent(
+                """\
+                [otel.exporter.otlp-http]
+                endpoint = "http://127.0.0.1:4318/v1/logs"
+                protocol = "json"
+                """
+            )
+        )
+
+        codex_install.install()
+        codex_install.uninstall()
+
+        exporter = codex_toml._toml_load(toml_path)["otel"]["exporter"]["otlp-http"]
+        assert exporter["endpoint"] == "http://127.0.0.1:4318/v1/logs"
+
     def test_uninstall_preserves_foreign_notify(self, fake_home, mock_prompts):
         codex_install.install()
 
@@ -623,6 +642,13 @@ class TestTomlEdgeCases:
         codex_toml._toml_write({"port": 4318}, p)
         data = codex_toml._toml_line_parse(p.read_text())
         assert data["port"] == 4318
+
+    def test_float_roundtrip_stays_a_number(self, tmp_path):
+        p = tmp_path / "test.toml"
+        codex_toml._toml_write({"temperature": 0.5, "nested": {"top_p": 0.9}}, p)
+        data = codex_toml._toml_load_strict(p)
+        assert data["temperature"] == 0.5
+        assert data["nested"]["top_p"] == 0.9
 
     def test_empty_array(self, tmp_path):
         p = tmp_path / "test.toml"
