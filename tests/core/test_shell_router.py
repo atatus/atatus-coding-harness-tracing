@@ -732,7 +732,7 @@ class TestReinstallIsFastAndNeverHangs:
         assert "GIT_TERMINAL_PROMPT=0" in self.sh and "GIT_TERMINAL_PROMPT=0" in self.bat
         assert "core.askPass=true" in self.sh and "core.askPass=true" in self.bat
         assert "http.lowSpeedTime=10" in self.sh and "http.lowSpeedTime=10" in self.bat
-        assert "timeout_cmd 20 git" in self.sh
+        assert 'timeout_cmd 20 "${NO_CA_ENV[@]}" git' in self.sh
         assert self.bat.count("core.askPass=true") == 2, "install sync and update pull"
 
     def test_one_fetch_then_the_tarball(self):

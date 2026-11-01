@@ -51,10 +51,22 @@ class TestFixMacOSSslCertsDefined:
     def test_calls_venv_python(self):
         assert "venv_python" in self.text
 
-    def test_installs_certifi(self):
-        # The offline array expands to nothing in repo mode, so this is still a
-        # plain `pip install certifi` there.
-        assert 'install --quiet "${offline[@]+"${offline[@]}"}" certifi' in self.text
+    def test_installs_certifi_at_the_floor(self):
+        assert 'certifi>=2026.10.23"' in self.text
+        assert '"$@" "${offline[@]+"${offline[@]}"}" "$CERTIFI_REQUIREMENT"' in self.text
+
+    def test_certifi_install_ignores_ca_overrides(self):
+        assert '"${NO_CA_ENV[@]}" "$pip" install --quiet "$@"' in self.text
+
+    def test_ca_override_variables_are_all_stripped(self):
+        line = next(ln for ln in self.text.splitlines() if ln.startswith("NO_CA_ENV="))
+        for name in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "PIP_CERT", "GIT_SSL_CAINFO"):
+            assert f"-u {name}" in line
+
+    def test_every_network_call_ignores_ca_overrides(self):
+        for call in ("curl -sSfL", "wget -q", '"$pip" install --quiet "$@" --no-index', '"$pip" install --quiet "$@" "$INSTALL_DIR"'):
+            line = next(ln for ln in self.text.splitlines() if call in ln)
+            assert "NO_CA_ENV" in line, call
 
     def test_certifi_resolves_from_wheel_dir_offline(self):
         """An offline install must not reach the network for certifi.
@@ -221,6 +233,17 @@ class TestDarwinGuardInSetupVenv:
         ssl_idx = self.body.rfind("_fix_macos_ssl_certs")
         ready_idx = self.body.find("Venv ready")
         assert ssl_idx < ready_idx, "_fix_macos_ssl_certs must be called before 'Venv ready' message"
+
+    def test_ssl_fix_runs_even_when_the_venv_is_current(self):
+        assert self.body.index("_fix_macos_ssl_certs") < self.body.index("venv_is_current")
+
+
+class TestUpdateRefreshesCertifi:
+    def test_update_upgrades_certifi_on_darwin(self):
+        text = _read_install_sh()
+        assert '[[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip" --upgrade' in text
+        update = text[text.index('pip_install_harness "$pip" -U') :]
+        assert update.index("_fix_macos_ssl_certs") < update.index("list_installed_harnesses")
 
 
 # ---------------------------------------------------------------------------

@@ -117,7 +117,11 @@ venv_pip() {
 # -- Repository download ----------------------------------------------------
 timeout_cmd() { local secs="$1"; shift; if command_exists timeout; then timeout "$secs" "$@"; else "$@"; fi; }
 
-git_q() { GIT_TERMINAL_PROMPT=0 timeout_cmd 20 git -c core.askPass=true -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@" 2>/dev/null; }
+# Every download trusts the OS store, never a CA bundle named by the environment: a
+# stale SSL_CERT_FILE from an older install would keep revoked CAs trusted.
+NO_CA_ENV=(env -u SSL_CERT_FILE -u REQUESTS_CA_BUNDLE -u CURL_CA_BUNDLE -u PIP_CERT -u GIT_SSL_CAINFO)
+
+git_q() { GIT_TERMINAL_PROMPT=0 timeout_cmd 20 "${NO_CA_ENV[@]}" git -c core.askPass=true -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@" 2>/dev/null; }
 
 git_sync_harness_repo() {
     local branch="$1"
@@ -143,9 +147,9 @@ running_from_install_dir() {
 download_file() {
     local url="$1" dest="$2" max_time="${3:-120}" retries="${4:-2}"
     if command_exists curl; then
-        curl -sSfL --connect-timeout 15 --max-time "$max_time" --retry "$retries" --retry-delay 2 "$url" -o "$dest"
+        "${NO_CA_ENV[@]}" curl -sSfL --connect-timeout 15 --max-time "$max_time" --retry "$retries" --retry-delay 2 "$url" -o "$dest"
     elif command_exists wget; then
-        wget -q --tries=$((retries + 1)) --waitretry=2 --timeout="$max_time" -O "$dest" "$url"
+        "${NO_CA_ENV[@]}" wget -q --tries=$((retries + 1)) --waitretry=2 --timeout="$max_time" -O "$dest" "$url"
     else err "Neither curl nor wget found — cannot download"; return 1; fi
 }
 
@@ -196,6 +200,9 @@ run_harness_py() {
 
 # -- Venv setup --------------------------------------------------------------
 
+# Floor for the certifi bundle: releases before this still trust CAs that have been distrusted.
+CERTIFI_REQUIREMENT="certifi>=2026.10.23"
+
 # Fix SSL certificate verification on macOS.
 #
 # Python.org installers ship their own OpenSSL that doesn't trust the macOS
@@ -205,13 +212,13 @@ run_harness_py() {
 # Fix: install certifi into the venv and write a sitecustomize.py that sets
 # SSL_CERT_FILE before any hook code runs. Idempotent — safe to call repeatedly.
 _fix_macos_ssl_certs() {
-    local pip="$1"
+    local pip="$1"; shift
     local vp
     vp=$(venv_python 2>/dev/null) || return 0
 
     local offline=()
     [[ -n "$WHEEL_DIR" ]] && offline=(--no-index --find-links "$WHEEL_DIR")
-    if ! "$pip" install --quiet "${offline[@]+"${offline[@]}"}" certifi 2>/dev/null; then
+    if ! "${NO_CA_ENV[@]}" "$pip" install --quiet "$@" "${offline[@]+"${offline[@]}"}" "$CERTIFI_REQUIREMENT" 2>/dev/null; then
         warn "Could not install certifi — SSL verification may fail on macOS"
         [[ -n "$WHEEL_DIR" ]] && warn "Bundle a certifi wheel in ${WHEEL_DIR} to fix this offline."
         return 0
@@ -247,10 +254,10 @@ pip_install_harness() {
     if [[ -n "$WHEEL_DIR" ]]; then
         # --no-index so a missing wheel fails loudly instead of quietly reaching
         # PyPI, which would defeat the point of installing offline.
-        "$pip" install --quiet "$@" --no-index --find-links "$WHEEL_DIR" atatus-coding-harness-tracing \
+        "${NO_CA_ENV[@]}" "$pip" install --quiet "$@" --no-index --find-links "$WHEEL_DIR" atatus-coding-harness-tracing \
             || { err "Failed to install atatus-coding-harness-tracing from ${WHEEL_DIR}"; return 1; }
     else
-        "$pip" install --quiet "$@" "$INSTALL_DIR" 2>/dev/null \
+        "${NO_CA_ENV[@]}" "$pip" install --quiet "$@" "$INSTALL_DIR" 2>/dev/null \
             || { err "Failed to install atatus-coding-harness-tracing package"; return 1; }
     fi
 }
@@ -285,6 +292,8 @@ setup_venv() {
         }
     fi
     local pip; pip=$(venv_pip) || { err "pip not found in venv at ${VENV_DIR}"; return 1; }
+    # Before the current-venv shortcut: an up-to-date venv can still hold an old certifi.
+    [[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip"
     if venv_is_current; then
         info "Venv already current at ${VENV_DIR}"
         return 0
@@ -292,8 +301,6 @@ setup_venv() {
     info "Installing atatus-coding-harness-tracing into venv..."
     pip_install_harness "$pip" || return 1
     record_venv_source
-
-    [[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip"
 
     info "Venv ready at ${VENV_DIR}"
 }
@@ -521,6 +528,7 @@ main() {
             info "Reinstalling atatus-coding-harness-tracing..."
             pip_install_harness "$pip" -U || exit 1
             record_venv_source
+            [[ "$(uname)" == "Darwin" ]] && _fix_macos_ssl_certs "$pip" --upgrade
             local vp; vp=$(venv_python) || { err "venv python not found"; exit 1; }
             local harnesses
             harnesses=$("$vp" -c 'from core.setup import list_installed_harnesses as L; print("\n".join(L()))' 2>/dev/null) || true
