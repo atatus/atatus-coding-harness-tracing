@@ -517,6 +517,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
         agent_id, descriptor = continuation
         parent_span_id = descriptor.get("tool_span_id")
         state.set("current_trace_id", str(descriptor["trace_id"]))
+        state.set("current_turn_key", generate_span_id())
         state.set("current_trace_span_id", str(parent_span_id))
         state.set("current_trace_start_time", str(get_timestamp_ms()))
         state.set("current_trace_prompt", "")
@@ -539,6 +540,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     # Set up new trace
     state.increment("trace_count")
     state.set("current_trace_id", generate_trace_id())
+    state.set("current_turn_key", generate_span_id())
     state.set("current_trace_span_id", generate_span_id())
     state.set("current_trace_start_time", str(get_timestamp_ms()))
     state.delete("continuation_agent_id")
@@ -1119,6 +1121,7 @@ def _acknowledge_exported_turn(
     expected_trace_id: str,
     observations: list[ToolObservation],
     subagents: dict[str, dict],
+    turn_key: "str | None" = None,
 ) -> bool:
     """Atomically acknowledge one exported turn without touching a newer turn."""
     if state.state_file is None:
@@ -1128,6 +1131,9 @@ def _acknowledge_exported_turn(
             data = state._read_safe()
             if data.get("current_trace_id") != expected_trace_id:
                 return False
+            # A reaction turn continues the same trace, so only the turn key tells a late
+            # acknowledgement of the previous turn apart from the turn now running.
+            newer_turn = bool(turn_key) and data.get("current_turn_key") not in (None, turn_key)
 
             current_observations = ToolBuffer._decode(data.get(ToolBuffer.STATE_KEY, ""))
             for observation in observations:
@@ -1170,8 +1176,10 @@ def _acknowledge_exported_turn(
                 "pending_command_args",
                 "pending_command_source",
                 "high_fidelity_span_ids",
+                "current_turn_key",
             ):
-                data.pop(key, None)
+                if not newer_turn:
+                    data.pop(key, None)
             state._write(data)
         return True
     except Exception as exc:
@@ -1904,8 +1912,10 @@ def _export_stopped_turn(state, input_json: dict) -> None:
     # coming back out, so the hook exits without waiting for the POST. Safe to run
     # late: _acknowledge_exported_turn re-checks current_trace_id under the state
     # lock and bails if a newer turn has started.
+    turn_key = state.get("current_turn_key")
+
     def _settle() -> None:
-        _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents)
+        _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents, turn_key)
         _periodic_gc(trace_count)
 
     if not export.payload:
@@ -1915,11 +1925,13 @@ def _export_stopped_turn(state, input_json: dict) -> None:
     _send_span_async(
         export.payload,
         on_success=_settle,
-        on_success_ref=_settle_ref(state, trace_id, trace_count, export.observations, export.subagents),
+        on_success_ref=_settle_ref(state, trace_id, trace_count, export.observations, export.subagents, turn_key),
     )
 
 
-def _settle_ref(state, trace_id: str, trace_count: str, observations: list, subagents: dict):
+def _settle_ref(
+    state, trace_id: str, trace_count: str, observations: list, subagents: dict, turn_key: "str | None" = None
+):
     """``_settle`` as an importable reference, for the no-fork sender that cannot
     carry the closure. None when the state is in-memory only (tests)."""
     if state.state_file is None:
@@ -1934,6 +1946,7 @@ def _settle_ref(state, trace_id: str, trace_count: str, observations: list, suba
             "trace_count": trace_count,
             "observations": ToolBuffer._encode({o.tool_use_id: o for o in observations}),
             "subagents": subagents,
+            "turn_key": turn_key,
         },
     )
 
@@ -1947,12 +1960,13 @@ def settle_exported_turn(
     trace_count: str,
     observations: str,
     subagents: dict,
+    turn_key: "str | None" = None,
 ) -> None:
     """Acknowledge an exported turn from a detached sender process."""
     state = StateManager(
         state_dir=Path(state_dir), state_file=Path(state_file), lock_path=Path(lock_path) if lock_path else None
     )
-    _acknowledge_exported_turn(state, trace_id, list(ToolBuffer._decode(observations).values()), subagents)
+    _acknowledge_exported_turn(state, trace_id, list(ToolBuffer._decode(observations).values()), subagents, turn_key)
     _periodic_gc(trace_count)
 
 

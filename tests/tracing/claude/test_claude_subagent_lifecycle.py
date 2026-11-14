@@ -872,3 +872,53 @@ class TestASessionLikeTheDebugRun:
 
 def TRACE_OF(session) -> str:
     return next(s["traceId"] for s in session.spans() if s["name"].startswith("Turn ") and not s.get("parentSpanId"))
+
+
+class TestALateAcknowledgementDoesNotEndTheNextTurn:
+    """A turn's export is acknowledged by the detached sender once the POST returns. A reaction
+    turn that continues the same trace can start before that; the late acknowledgement must
+    not end it."""
+
+    def test_the_reaction_turn_is_still_exported(self, session):
+        main = session.dir / "proj" / "s1.jsonl"
+        _write(main, [])
+        session.hook(
+            handlers.user_prompt_submit,
+            {"hook_event_name": "UserPromptSubmit", "prompt": "go", "prompt_id": "p-1", "transcript_path": str(main)},
+        )
+        turn = [
+            _human("h1", "go", 0),
+            *_agent_call("toolu_a1", "a1", "async_launched", "general-purpose", ts=_ts(2), done=_ts(3)),
+        ]
+        turn.append(_assistant("m2", "msg-main-2", [{"type": "text", "text": "launched"}], ts=_ts(4)))
+        _write(main, turn)
+
+        deferred = []
+        with mock.patch.object(
+            handlers,
+            "_send_span_async",
+            lambda payload, on_success=None, on_success_ref=None: deferred.append(on_success),
+        ):
+            _main_stop(session, main, background_tasks=[{"id": "a1", "type": "subagent", "status": "running"}])
+
+        notified = turn + [_human("h2", "<task-notification><task-id>a1</task-id></task-notification>", 10)]
+        _write(main, notified)
+        session.hook(
+            handlers.user_prompt_submit,
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>",
+                "prompt_id": "p-2",
+                "transcript_path": str(main),
+            },
+        )
+        for settle in deferred:
+            if settle is not None:
+                settle()
+
+        assert session.state.get("current_trace_id"), "the late acknowledgement ended the reaction turn"
+        _write(main, notified + [_assistant("m3", "msg-reply", [{"type": "text", "text": "A1 finished"}], ts=_ts(12))])
+        _main_stop(session, main, background_tasks=[])
+
+        llm = {_attrs(s).get("llm.message.id") for s in session.spans()}
+        assert "msg-reply" in llm
