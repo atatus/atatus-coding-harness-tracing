@@ -4,9 +4,12 @@
 import io
 import json
 import os
+import platform
+import sys
 import threading
 import time
 import urllib.error
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -2372,6 +2375,20 @@ class TestStampAtatusIdentity:
         attrs = self._attrs(_stamp_atatus_identity(self._payload(), ""))
         assert attrs["service.name"] == "claude-code"
         assert attrs["atatus.project.type"] == "llm"
+
+    def test_agent_version_and_system_stamped(self):
+        attrs = self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
+        assert attrs["service.agent.version"] == common.AGENT_VERSION
+        assert attrs["system.architecture"] == platform.machine()
+        assert attrs["system.platform"] == sys.platform
+
+    def test_agent_version_is_the_released_version(self):
+        pyproject = (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+        assert f'\nversion = "{common.AGENT_VERSION}"\n' in pyproject
+
+    def test_unknown_architecture_is_left_out(self, monkeypatch):
+        monkeypatch.setattr(common.platform, "machine", lambda: "")
+        assert "system.architecture" not in self._attrs(_stamp_atatus_identity(self._payload(), "proj"))
 
     def test_upsert_not_duplicate(self):
         """Stamping twice must not append duplicate keys."""

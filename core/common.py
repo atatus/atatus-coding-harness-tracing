@@ -11,6 +11,7 @@ import atexit
 import functools
 import json
 import os
+import platform
 import re
 import shutil
 import socket
@@ -480,6 +481,8 @@ def debug_dump(label: str, data: object) -> None:
 #: or an ``endpoint`` key in ``~/.atatus/harness/config.json``.
 DEFAULT_OTLP_ENDPOINT = "https://otel-rx.atatus.com"
 
+AGENT_VERSION = "1.0.0"
+
 
 def _env_float(name: str, default: float, minimum: float) -> float:
     try:
@@ -685,6 +688,9 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
       atatus.agent.harness = <harness slug>       (subType, e.g. "claude-code")
       telemetry.sdk.name   = "atatus-coding-harness"
       host.name            = <machine hostname>
+      service.agent.version = <installed package version>
+      system.architecture  = <platform.machine(), e.g. "x86_64", "arm64">
+      system.platform      = <sys.platform, e.g. "linux", "darwin", "win32">
 
     Project identity travels *in the payload*, not only in config. Kept at the
     resource level rather than duplicated onto every span — Atatus reads it from
@@ -713,6 +719,11 @@ def _stamp_atatus_identity(span_dict: dict, project_name: str) -> dict:
         hostname = get_hostname()
         if hostname:
             _set_resource_attr(resource, "host.name", hostname)
+        _set_resource_attr(resource, "service.agent.version", AGENT_VERSION)
+        architecture = platform.machine()
+        if architecture:
+            _set_resource_attr(resource, "system.architecture", architecture)
+        _set_resource_attr(resource, "system.platform", sys.platform)
 
     return payload
 
@@ -775,7 +786,7 @@ def send_span(span_dict: dict) -> bool:
         headers = {
             "Content-Type": "application/json",
             "api-key": api_key,
-            "User-Agent": "atatus-coding-harness-tracing/1.0.0",
+            "User-Agent": f"atatus-coding-harness-tracing/{AGENT_VERSION}",
         }
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:

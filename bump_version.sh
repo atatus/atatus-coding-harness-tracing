@@ -18,7 +18,7 @@ TARGET_FILES=(
     tracing/cursor/pyproject.toml
     tracing/cursor/.cursor-plugin/plugin.json
 )
-TARGET_KINDS=(pyproject uvlock useragent manifest manifest pyproject manifest pyproject manifest)
+TARGET_KINDS=(pyproject uvlock constant manifest manifest pyproject manifest pyproject manifest)
 
 SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 
@@ -32,7 +32,7 @@ version_lines() {
     case "$kind" in
         pyproject) grep -n '^version = "' "$file" | cut -d: -f1 || true ;;
         manifest) grep -n '"version": "' "$file" | cut -d: -f1 || true ;;
-        useragent) grep -n '"atatus-coding-harness-tracing/' "$file" | cut -d: -f1 || true ;;
+        constant) grep -n '^AGENT_VERSION = "' "$file" | cut -d: -f1 || true ;;
         uvlock) awk 'prev == "name = \"atatus-coding-harness-tracing\"" && /^version = "/ { print NR } { prev = $0 }' "$file" ;;
     esac
 }
@@ -42,7 +42,7 @@ version_on_line() {
     case "$kind" in
         pyproject | uvlock) sed -n "${line}s/^version = \"\([^\"]*\)\".*/\1/p" "$file" ;;
         manifest) sed -n "${line}s/.*\"version\": \"\([^\"]*\)\".*/\1/p" "$file" ;;
-        useragent) sed -n "${line}s/.*\"atatus-coding-harness-tracing\/\([^\"]*\)\".*/\1/p" "$file" ;;
+        constant) sed -n "${line}s/^AGENT_VERSION = \"\([^\"]*\)\".*/\1/p" "$file" ;;
     esac
 }
 
