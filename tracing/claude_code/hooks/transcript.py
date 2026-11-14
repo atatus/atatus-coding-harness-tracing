@@ -139,13 +139,15 @@ def parse_claude_transcript(
                 )
                 sequence += 1
             continue
+        if not is_conversation_record(entry):
+            continue
         last_timestamp_ms = record_timestamp_ms or last_timestamp_ms
         role = message.get("role")
 
         if role == "assistant":
             event_id = _string(entry.get("uuid"))
             if not event_id:
-                event_id = f"assistant-line-{line_index + 1}"
+                event_id = f"{_UNIDENTIFIED_PREFIX}{line_index + 1}"
                 parser_diagnostics.append(
                     GraphDiagnostic(
                         code="missing_source_id",
@@ -339,6 +341,22 @@ def _is_interrupt_marker(entry: dict[str, Any], message: dict[str, Any]) -> bool
     )
 
 
+# An allowlist: newer versions add record types that carry copies of messages (api-request-blob).
+_CONVERSATION_RECORD_TYPES = frozenset({"user", "assistant"})
+
+
+def is_conversation_record(entry: dict[str, Any]) -> bool:
+    record_type = entry.get("type")
+    return record_type is None or record_type in _CONVERSATION_RECORD_TYPES
+
+
+_UNIDENTIFIED_PREFIX = "assistant-line-"
+
+
+def is_unidentified_model_call(event: BaseEvent) -> bool:
+    return isinstance(event, ModelCallEvent) and event.event_id.startswith(_UNIDENTIFIED_PREFIX)
+
+
 def _is_absorb_marker(entry: dict[str, Any]) -> bool:
     return (
         entry.get("type") == "queue-operation"
@@ -471,4 +489,4 @@ def _string(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-__all__ = ["parse_claude_transcript", "transcript_window"]
+__all__ = ["is_conversation_record", "is_unidentified_model_call", "parse_claude_transcript", "transcript_window"]

@@ -59,7 +59,12 @@ from tracing.claude_code.hooks.adapter import (
 )
 from tracing.claude_code.hooks.span_renderer import render_event_graph
 from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
-from tracing.claude_code.hooks.transcript import parse_claude_transcript, transcript_window
+from tracing.claude_code.hooks.transcript import (
+    is_conversation_record,
+    is_unidentified_model_call,
+    parse_claude_transcript,
+    transcript_window,
+)
 
 # ---------------------------------------------------------------------------
 # Shared helper
@@ -626,6 +631,8 @@ def _scan_transcript_for_usage(
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not is_conversation_record(entry):
+            continue
         msg = entry.get("message")
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
@@ -700,8 +707,26 @@ def _graph_effort(graph) -> str:
 
 def _has_stable_model_ids(graph) -> bool:
     """Gate high-fidelity rendering on Claude v2 assistant UUIDs."""
-    models = [event for event in graph.events if isinstance(event, ModelCallEvent)]
-    return bool(models) and all(not event.event_id.startswith("assistant-line-") for event in models)
+    return any(isinstance(event, ModelCallEvent) and not is_unidentified_model_call(event) for event in graph.events)
+
+
+def _drop_unidentified_model_calls(graph) -> None:
+    """Among uuid'd responses a uuid-less record is a copy: drop it rather than flatten the turn."""
+    if not _has_stable_model_ids(graph):
+        return
+    dropped = {event.event_id for event in graph.events if is_unidentified_model_call(event)}
+    if dropped:
+        graph.events = [
+            event for event in graph.events if event.event_id not in dropped and event.parent_event_id not in dropped
+        ]
+
+
+def _flatten_reason(transcript, graph) -> str:
+    if transcript is None:
+        return "no_transcript"
+    if graph is None or not any(isinstance(event, ModelCallEvent) for event in graph.events):
+        return "no_model_calls"
+    return "no_stable_ids"
 
 
 def _merge_tool_observations(graph, observations) -> list:
@@ -915,6 +940,7 @@ def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, d
         )
         transcript_path = Path(str(descriptor.get("transcript_path") or ""))
         subgraph = parse_claude_transcript(transcript_path, agent_event)
+        _drop_unidentified_model_calls(subgraph)
         _overlay_agent_observations(subgraph, descriptor)
         insertion_index = graph.events.index(parent_tool) + 1 if parent_tool is not None else len(graph.events)
         graph.events[insertion_index:insertion_index] = subgraph.events
@@ -1310,6 +1336,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         root_attrs[LLM_EFFORT_ATTR] = turn_effort
 
     if graph is not None and _has_stable_model_ids(graph):
+        _drop_unidentified_model_calls(graph)
         buffer = ToolBuffer(state)
         observations = buffer.all()
         pending_subagents = _pending_subagents(state)
@@ -1392,6 +1419,8 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
     # model calls, so the turn stays one flat LLM span.
     # Redact at emit time, not at state-write time.
+    flatten_reason = _flatten_reason(transcript, graph)
+    error(f"Turn {trace_count} exported flat as one span ({flatten_reason}); transcript: {transcript}")
     redacted_prompt = redact_content(env.log_prompts, user_prompt)
     redacted_output = redact_content(env.log_prompts, output)
     output_messages = [{"message.role": "assistant", "message.content": redacted_output}]
@@ -1406,6 +1435,8 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         "llm.output_messages": json.dumps(output_messages),
         **root_attrs,
         **turn_end_attributes(reason),
+        "turn.flattened": "true",
+        "turn.flatten_reason": flatten_reason,
     }
     if user_id:
         attrs["user.id"] = user_id

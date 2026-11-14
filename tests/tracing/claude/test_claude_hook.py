@@ -745,6 +745,21 @@ class TestScanTranscriptForUsage:
         assert output == "assistant msg"
         assert usage.completion == 3
 
+    def test_skips_replayed_request_records(self, tmp_path):
+        tf = tmp_path / "replay.jsonl"
+        lines = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": "real", "model": "m", "usage": {"output_tokens": 3}},
+                }
+            ),
+            json.dumps({"type": "api-request-blob", "message": {"role": "assistant", "content": "replayed"}}),
+        ]
+        tf.write_text("\n".join(lines) + "\n")
+        output, _, _ = _scan_transcript_for_usage(tf, 0)
+        assert output == "real"
+
     def test_concatenates_multiple_assistant_messages(self, tmp_path):
         """Multiple assistant messages are concatenated with newlines."""
         tf = tmp_path / "multi.jsonl"

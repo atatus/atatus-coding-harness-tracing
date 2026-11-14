@@ -1406,3 +1406,163 @@ class TestReasoningEffort:
         assert handlers._payload_effort({"effort": {"level": "medium"}}) == "medium"
         assert handlers._payload_effort({"effort": "medium"}) == ""
         assert handlers._payload_effort({}) == ""
+
+
+def _request_replay(role, blocks):
+    return {"type": "api-request-blob", "hash": "h", "sessionId": "s1", "message": {"role": role, "content": blocks}}
+
+
+_EDIT = {"type": "tool_use", "id": "toolu_edit", "name": "Edit", "input": {"file_path": "/x"}}
+_BASH = {"type": "tool_use", "id": "toolu_bash", "name": "Bash", "input": {"command": "ls"}}
+
+
+def _request_bookkeeping_turn():
+    """One turn as Claude Code 2.1.3xx writes it, with request records replaying earlier blocks."""
+    return [
+        {"type": "api-request-shape", "sessionId": "s1", "shapeHash": "x", "timestamp": "2026-11-13T13:03:10.000Z"},
+        _request_replay("user", [{"type": "text", "text": "do it"}]),
+        {"type": "api-request", "id": "r1", "sessionId": "s1", "timestamp": "2026-11-13T13:03:10.000Z"},
+        {"type": "tools-used", "sessionId": "s1", "tools": ["Edit", "Bash"]},
+        _assistant("u1", "msg_A", [_EDIT], ts="2026-11-13T13:03:11.000Z"),
+        _tool_result("toolu_edit", ts="2026-11-13T13:03:12.000Z"),
+        _assistant("u2", "msg_B", [_BASH], ts="2026-11-13T13:03:13.000Z"),
+        _tool_result("toolu_bash", ts="2026-11-13T13:03:14.000Z"),
+        _request_replay("assistant", [_EDIT, _BASH]),
+        _request_replay(
+            "user",
+            [
+                {"type": "tool_result", "tool_use_id": "toolu_edit", "content": "ok"},
+                {"type": "tool_result", "tool_use_id": "toolu_bash", "content": "ok"},
+            ],
+        ),
+        {"type": "atis-latch", "sessionId": "s1"},
+        {"type": "session-owner", "sessionId": "s1"},
+        _assistant("u3", "msg_C", [{"type": "text", "text": "done"}], ts="2026-11-13T13:03:15.000Z"),
+        {"type": "cost-state", "sessionId": "s1"},
+    ]
+
+
+_UNPATCHED = object()
+
+
+def _export_on_stop(tmp_path, transcript, *, transcript_path=_UNPATCHED):
+    state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
+    state.init_state()
+    for key, value in {
+        "session_id": "s1",
+        "trace_count": "1",
+        "current_trace_id": "a" * 32,
+        "current_trace_span_id": "b" * 16,
+        "current_trace_start_time": "1",
+        "current_trace_prompt": "go",
+        "trace_start_line": "0",
+    }.items():
+        state.set(key, value)
+    captured = []
+    payload = {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)}
+    with (
+        mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+        mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+        mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+        mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+    ):
+        if transcript_path is not _UNPATCHED:
+            with mock.patch.object(handlers, "resolve_transcript_path", lambda *a, **k: transcript_path):
+                handlers.stop()
+        else:
+            handlers.stop()
+    assert captured, "Stop sent nothing"
+    return _spans(captured[0])
+
+
+class TestRequestBookkeepingRecords:
+    """Request records copy earlier messages but are not conversation, so add nothing."""
+
+    def test_replayed_requests_add_no_model_calls(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
+        graph = parse_claude_transcript(transcript, _root())
+        calls = [e for e in graph.events if isinstance(e, ModelCallEvent)]
+        assert [c.event_id for c in calls] == ["u1", "u2", "u3"]
+
+    def test_replayed_tool_blocks_do_not_duplicate_or_retime_tools(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
+        graph = parse_claude_transcript(transcript, _root())
+        tools = [e for e in graph.events if isinstance(e, ToolEvent)]
+        assert [t.event_id for t in tools] == ["tool:toolu_edit", "tool:toolu_bash"]
+        assert all(t.status == EventStatus.COMPLETED for t in tools)
+        assert tools[0].ended_at_ms == int(datetime.fromisoformat("2026-11-13T13:03:12+00:00").timestamp() * 1000)
+
+    def test_a_replay_of_the_previous_turn_adds_nothing(self, tmp_path):
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _request_replay("assistant", [_EDIT]),
+                _request_replay("user", [{"type": "tool_result", "tool_use_id": "toolu_edit", "content": "ok"}]),
+                _assistant("u1", "msg_A", [{"type": "text", "text": "done"}]),
+            ],
+        )
+        graph = parse_claude_transcript(transcript, _root())
+        assert not [e for e in graph.events if isinstance(e, ToolEvent)]
+
+    def test_records_without_a_type_are_still_conversation(self, tmp_path):
+        record = _assistant("u1", "msg_A", [{"type": "text", "text": "a"}])
+        del record["type"]
+        transcript = _write(tmp_path / "t.jsonl", [record])
+        graph = parse_claude_transcript(transcript, _root())
+        assert len([e for e in graph.events if isinstance(e, ModelCallEvent)]) == 1
+
+    def test_turn_exports_every_model_call_and_tool(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
+        spans = _export_on_stop(tmp_path, transcript)
+        kinds = [_attrs(s)["openinference.span.kind"] for s in spans]
+        assert _attrs(_root_span(spans))["openinference.span.kind"] == "CHAIN"
+        assert kinds.count("LLM") == 3
+        assert kinds.count("TOOL") == 2
+
+
+class TestUnidentifiedModelCalls:
+    """A uuid-less copy among uuid'd responses must not cost the turn its spans."""
+
+    def test_turn_stays_high_fidelity_and_drops_the_copy(self, tmp_path):
+        copy = {"type": "assistant", "message": {"role": "assistant", "content": [_EDIT]}}
+        transcript = _write(
+            tmp_path / "t.jsonl",
+            [
+                _assistant("u1", "msg_A", [_EDIT]),
+                _tool_result("toolu_edit"),
+                copy,
+                _assistant("u2", "msg_B", [{"type": "text", "text": "done"}]),
+            ],
+        )
+        spans = _export_on_stop(tmp_path, transcript)
+        kinds = [_attrs(s)["openinference.span.kind"] for s in spans]
+        assert _attrs(_root_span(spans))["openinference.span.kind"] == "CHAIN"
+        assert kinds.count("LLM") == 2
+        assert kinds.count("TOOL") == 1
+
+
+class TestFlattenedTurnIsMarked:
+    """A flat turn looks like a one-call turn unless it says so, which hid a format change."""
+
+    def test_legacy_transcript_is_marked_with_its_reason(self, tmp_path, capsys):
+        record = _assistant(None, "msg_A", [{"type": "text", "text": "hi"}])
+        del record["uuid"]
+        transcript = _write(tmp_path / "t.jsonl", [record])
+        root = _export_on_stop(tmp_path, transcript)[0]
+        assert _attrs(root)["turn.flattened"] == "true"
+        assert _attrs(root)["turn.flatten_reason"] == "no_stable_ids"
+        assert "flat" in capsys.readouterr().err
+
+    def test_transcript_without_model_calls_is_marked(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", [{"type": "user", "message": {"role": "user", "content": "hi"}}])
+        root = _export_on_stop(tmp_path, transcript)[0]
+        assert _attrs(root)["turn.flatten_reason"] == "no_model_calls"
+
+    def test_missing_transcript_is_marked(self, tmp_path):
+        root = _export_on_stop(tmp_path, tmp_path / "missing.jsonl", transcript_path=None)[0]
+        assert _attrs(root)["turn.flatten_reason"] == "no_transcript"
+
+    def test_high_fidelity_root_is_not_marked(self, tmp_path):
+        transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
+        root = _root_span(_export_on_stop(tmp_path, transcript))
+        assert "turn.flattened" not in _attrs(root)
