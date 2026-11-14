@@ -635,8 +635,20 @@ class _TokenUsage:
         return attrs
 
 
-def _wait_for_transcript_flush(transcript: Path, start_line: int, start_offset: "int | None" = None) -> bool:
-    """Poll briefly for an assistant entry at/after *start_line*.
+def _has_text_block(message: dict, text: str) -> bool:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content == text
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") == "text" and b.get("text") == text for b in content)
+
+
+def _wait_for_transcript_flush(
+    transcript: Path, start_line: int, start_offset: "int | None" = None, expected_text: str = ""
+) -> bool:
+    """Poll briefly for an assistant entry at/after *start_line*, or for the one
+    carrying *expected_text* when given.
 
     Claude Code writes the session JSONL asynchronously, so a Stop hook can fire
     before the assistant entry lands on disk. The response text is unaffected --
@@ -666,7 +678,9 @@ def _wait_for_transcript_flush(transcript: Path, start_line: int, start_offset: 
                     continue
                 msg = entry.get("message")
                 if isinstance(msg, dict) and msg.get("role") == "assistant":
-                    return True
+                    # An earlier reply in the same turn is already on disk; only the final text proves the last one is.
+                    if not expected_text or _has_text_block(msg, expected_text):
+                        return True
         except OSError:
             return False
         if time.monotonic() >= deadline:
@@ -1631,7 +1645,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         # The flush race only exists on Stop; by the time a later hook closes the turn,
         # everything it wrote is already on disk.
         if reason is TurnEndReason.COMPLETED:
-            _wait_for_transcript_flush(transcript, start_line, start_offset)
+            _wait_for_transcript_flush(transcript, start_line, start_offset, expected_text=output)
         scanned_output, usage, model = _scan_transcript_for_usage(transcript, start_line, start_offset)
         if not output:
             output = scanned_output
@@ -2055,6 +2069,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     if started_at_ms is None:
         started_at_ms = int(stored_start) if stored_start.isdigit() else _int_or_none(descriptor.get("launched_at_ms"))
     agent_type = str(input_json.get("agent_type") or descriptor.get("agent_type") or "unknown")
+    _wait_for_transcript_flush(Path(transcript_path), 0, expected_text=input_json.get("last_assistant_message") or "")
     agent_event = AgentEvent(
         event_id=f"agent:{agent_id}",
         session_id=state.get("session_id") or "",
@@ -2183,7 +2198,7 @@ def _handle_subagent_stop(input_json: dict) -> None:
             birth = getattr(st, "st_birthtime", st.st_ctime)
             start_time = str(int(birth * 1000))
 
-        _wait_for_transcript_flush(transcript, 0)
+        _wait_for_transcript_flush(transcript, 0, expected_text=last_msg)
         scanned_output, usage, scanned_model = _scan_transcript_for_usage(transcript, 0)
         if not output:
             output = scanned_output

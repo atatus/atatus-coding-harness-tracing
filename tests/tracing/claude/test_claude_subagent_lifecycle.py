@@ -4,6 +4,8 @@
 import io
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -922,3 +924,66 @@ class TestALateAcknowledgementDoesNotEndTheNextTurn:
 
         llm = {_attrs(s).get("llm.message.id") for s in session.spans()}
         assert "msg-reply" in llm
+
+
+def _append_later(path: Path, record: dict, delay_s: float = 0.1) -> threading.Timer:
+    def append():
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+    timer = threading.Timer(delay_s, append)
+    timer.start()
+    return timer
+
+
+def _llm_ids(session):
+    return {_attrs(s).get("llm.message.id") for s in session.spans()}
+
+
+class TestTheFinalMessageIsWaitedFor:
+    """Claude Code can fire Stop before the final reply reaches the transcript file."""
+
+    def test_a_background_agent_waits_for_its_final_message(self, session, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRANSCRIPT_WAIT_MS", "2000")
+        _hold_launching_turn(session)
+        transcript = _write(
+            session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl",
+            [_assistant("u1", "msg_work", [_tool_use("toolu_1")]), _tool_result("r1", "toolu_1")],
+        )
+        timer = _append_later(transcript, _assistant("u2", "msg_final", [{"type": "text", "text": "done"}]))
+        _stop(session, transcript)
+        timer.join()
+
+        assert "msg_final" in _llm_ids(session)
+
+    def test_a_stop_waits_for_the_final_reply_behind_an_earlier_message(self, session, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRANSCRIPT_WAIT_MS", "2000")
+        main = _write(
+            session.dir / "proj" / "s1.jsonl",
+            [
+                _assistant("m1", "msg_early", [{"type": "text", "text": "A3 has reported"}, _tool_use("toolu_send")]),
+                _tool_result("m2", "toolu_send"),
+            ],
+        )
+        _open_turn(session, main)
+        timer = _append_later(main, _assistant("m3", "msg_final", [{"type": "text", "text": "done"}]))
+        _main_stop(session, main)
+        timer.join()
+
+        assert {"msg_early", "msg_final"} <= _llm_ids(session)
+
+    def test_without_an_expected_text_any_assistant_entry_ends_the_wait(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRANSCRIPT_WAIT_MS", "2000")
+        transcript = _write(tmp_path / "t.jsonl", [_assistant("m1", "msg_1", [{"type": "text", "text": "hi"}])])
+        began = time.monotonic()
+
+        assert handlers._wait_for_transcript_flush(transcript, 0)
+        assert time.monotonic() - began < 0.5
+
+    def test_a_final_text_that_never_lands_gives_up_at_the_cap(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRANSCRIPT_WAIT_MS", "100")
+        transcript = _write(tmp_path / "t.jsonl", [_assistant("m1", "msg_1", [{"type": "text", "text": "hi"}])])
+        began = time.monotonic()
+
+        assert not handlers._wait_for_transcript_flush(transcript, 0, expected_text="bye")
+        assert time.monotonic() - began < 1.0
