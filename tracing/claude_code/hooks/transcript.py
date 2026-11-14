@@ -57,6 +57,7 @@ def parse_claude_transcript(
     *,
     start_line: int = 0,
     start_offset: "int | None" = None,
+    skip_through_tool_use_id: "str | None" = None,
 ) -> EventGraph:
     """Return a typed event graph for one main-agent or subagent transcript.
 
@@ -85,6 +86,20 @@ def parse_claude_transcript(
             )
         ]
         return graph
+
+    if skip_through_tool_use_id:
+        boundary = _tool_result_position(window, skip_through_tool_use_id)
+        if boundary is None:
+            parser_diagnostics.append(
+                GraphDiagnostic(
+                    code="fork_context_boundary_missing",
+                    message=f"no tool_result for {skip_through_tool_use_id!r}; nothing skipped",
+                    event_id=root_event.event_id,
+                    severity="warning",
+                )
+            )
+        else:
+            window = window[boundary + 1 :]
 
     for line_index, raw_line in window:
         if not raw_line.strip():
@@ -339,6 +354,25 @@ def _is_interrupt_marker(entry: dict[str, Any], message: dict[str, Any]) -> bool
         block.get("type") == "text" and _string(block.get("text")).startswith(_INTERRUPT_MARKER)
         for block in _content_blocks(content)
     )
+
+
+def _tool_result_position(window: "list[tuple[int, str]]", tool_use_id: str) -> "int | None":
+    for position, (_, raw_line) in enumerate(window):
+        if tool_use_id not in raw_line:
+            continue
+        try:
+            entry = json.loads(raw_line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        message = entry.get("message") if isinstance(entry, dict) else None
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        if any(
+            block.get("type") == "tool_result" and block.get("tool_use_id") == tool_use_id
+            for block in _content_blocks(message.get("content"))
+        ):
+            return position
+    return None
 
 
 # An allowlist: newer versions add record types that carry copies of messages (api-request-blob).

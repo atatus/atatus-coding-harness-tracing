@@ -861,14 +861,16 @@ class TestBackgroundSubagentsStayInTheirTrace:
 
     def test_subagent_stop_attaches_under_the_held_agent_tool_but_does_not_release(self, launched, tmp_path):
         """The agent's completion still has to come back as a notification whose reaction
-        is the parent's own work; the ancestors wait for that, not for the SubagentStop."""
+        is the parent's own work; the ancestors wait for that, not for the SubagentStop.
+        The agent span waits with them, so a resume can still grow it."""
         state, _, captured = launched
         before = len(self._all_spans(captured))
         self._finish_agent(state, tmp_path, captured)
         sent = self._all_spans(captured)[before:]
         assert {s["traceId"] for s in sent} == {"a" * 32}
-        agent = next(s for s in sent if s["name"].startswith("Subagent"))
+        assert not [s for s in sent if s["name"].startswith("Subagent")]
         held = json.loads(state.get("held_spans"))["a" * 32]
+        agent = next(s for s in held["spans"] if s["name"].startswith("Subagent"))
         tool = next(s for s in held["spans"] if s["name"] == "Agent")
         assert agent["parentSpanId"] == tool["spanId"]
         assert _attrs(agent)["subagent.background"] == "true"
@@ -935,13 +937,13 @@ class TestBackgroundSubagentsStayInTheirTrace:
         assert "a" * 32 not in json.loads(state.get("held_spans") or "{}")
 
     def test_notification_reaction_hangs_off_the_agent_tool_not_the_subagent(self, launched, tmp_path):
-        """The subagent span is already on the wire with its own end; the parent's reaction
-        happens after it, so it parents to the Agent tool call, which is held and grows."""
+        """The parent's reaction happens after the agent stopped, so it parents to the Agent
+        tool call, which is held and grows, not to the subagent span."""
         state, transcript, captured = launched
         self._finish_agent(state, tmp_path, captured)
-        spans = self._all_spans(captured)
-        tool = next(s for s in json.loads(state.get("held_spans"))["a" * 32]["spans"] if s["name"] == "Agent")
-        sub = next(s for s in spans if s["name"].startswith("Subagent"))
+        held = json.loads(state.get("held_spans"))["a" * 32]["spans"]
+        tool = next(s for s in held if s["name"] == "Agent")
+        sub = next(s for s in held if s["name"].startswith("Subagent"))
         _run_hook(
             handlers.user_prompt_submit,
             state,
@@ -1173,6 +1175,45 @@ class TestAgentThatStoppedInsideTheTurnIsStillAwaited:
         sent_names = [s["name"] for p in captured if p for s in _spans(p)]
         assert "Turn 1" in sent_names, "root released after the last notification"
         assert "a" * 32 not in json.loads(state.get("held_spans") or "{}")
+
+    def test_a_spliced_agent_stopping_again_sends_only_its_new_work(self, tmp_path, monkeypatch):
+        """An agent spliced into the turn can be resumed and stop again in the background;
+        what the turn already sent must not go out a second time."""
+        import tracing.claude_code.hooks.adapter as adapter
+
+        monkeypatch.setattr(adapter, "STATE_DIR", tmp_path)
+        transcript = _write(tmp_path / "t.jsonl", _agent_launch("toolu_FAST", "agent-fast"))
+        state = _live_turn_state(tmp_path)
+        captured = []
+        first = [_assistant("fu1", "fmsg1", [{"type": "text", "text": "first"}], ts="2026-08-22T16:16:45.000Z")]
+        fast_transcript = _write(tmp_path / "fast.jsonl", first)
+        stop_payload = {
+            "session_id": "s1",
+            "agent_id": "agent-fast",
+            "agent_type": "general-purpose",
+            "agent_transcript_path": str(fast_transcript),
+            "transcript_path": str(transcript),
+        }
+        _run_hook(handlers.subagent_stop, state, stop_payload, captured)
+        _run_hook(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+
+        _write(
+            fast_transcript,
+            first + [_assistant("fu2", "fmsg2", [{"type": "text", "text": "again"}], ts="2026-08-22T16:16:50.000Z")],
+        )
+        _run_hook(handlers.subagent_stop, state, stop_payload, captured)
+
+        message_ids = [
+            _attrs(s)["llm.message.id"]
+            for p in captured
+            if p
+            for s in _spans(p)
+            if _attrs(s).get("openinference.span.kind") == "LLM"
+            and _attrs(s).get("llm.message.id", "").startswith("fmsg")
+        ]
+        assert sorted(message_ids) == ["fmsg1", "fmsg2"]
+        agents = [s for p in captured if p for s in _spans(p) if s["name"].startswith("Subagent")]
+        assert len(agents) == 1
 
 
 class TestSubagentHooksDoNotContendOnTheSessionFile:

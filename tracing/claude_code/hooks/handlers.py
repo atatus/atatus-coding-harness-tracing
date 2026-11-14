@@ -4,6 +4,7 @@
 Replaces 9 bash scripts in tracing/claude_code/hooks/. Each function is a CLI
 entry point registered in pyproject.toml [project.scripts].
 """
+import hashlib
 import json
 import math
 import os
@@ -126,6 +127,22 @@ def _agent_meta(payload: dict) -> "object | None":
         except (OSError, ValueError):
             continue
     return None
+
+
+def _agent_meta_for(agent_transcript: Path) -> dict:
+    try:
+        meta = json.loads(agent_transcript.with_suffix(".meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _fork_cut_tool_use_id(agent_transcript: Path) -> "str | None":
+    """A fork's transcript opens with copies of its parent's records, ending at the
+    launching call's result; everything up to there is the parent's work."""
+    meta = _agent_meta_for(agent_transcript)
+    tool_use_id = meta.get("toolUseId")
+    return tool_use_id if meta.get("isFork") is True and isinstance(tool_use_id, str) and tool_use_id else None
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +527,14 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
         _record_trace_start_line(state, input_json)
         log(f"Task notification for {agent_id}; continuing trace {descriptor['trace_id']}")
         return
+
+    # No reaction turn may ever run for an agent that finished while the session idled.
+    last_running = state.get(LAST_BACKGROUND_TASKS_KEY)
+    if last_running:
+        try:
+            _release_finished_traces(state, set(json.loads(last_running)))
+        except (TypeError, ValueError):
+            pass
 
     # Set up new trace
     state.increment("trace_count")
@@ -928,30 +953,77 @@ def _overlay_agent_observations(subgraph, descriptor: dict) -> None:
         discard_agent_state(agent_state)
 
 
-def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, dict]:
-    """Insert correlated foreground agent graphs and return exported descriptors."""
+_MAX_AGENT_DEPTH = 8
+
+
+def _tool_result_status(event: ToolEvent) -> str:
+    result = event.output.get("toolUseResult") if isinstance(event.output, dict) else None
+    status = result.get("status") if isinstance(result, dict) else None
+    return status if isinstance(status, str) else ""
+
+
+def _subagents_dir(main_transcript: "Path | None") -> "Path | None":
+    return main_transcript.parent / main_transcript.stem / "subagents" if main_transcript is not None else None
+
+
+def _descriptor_from_file(
+    agent_id: str, parent_tool: ToolEvent, subagents_dir: "Path | None", input_json
+) -> "dict | None":
+    """Some built-in agents (web-fetch) fire no SubagentStop; their transcript is still on disk."""
+    if subagents_dir is None or not isinstance(input_json, dict) or _UNSAFE_NAME.search(agent_id):
+        return None
+    transcript = subagents_dir / f"agent-{agent_id}.jsonl"
+    if not transcript.is_file():
+        return None
+    meta = _agent_meta_for(transcript)
+    subagent_type = parent_tool.input.get("subagent_type") if isinstance(parent_tool.input, dict) else None
+    content = parent_tool.output.get("content") if isinstance(parent_tool.output, dict) else parent_tool.output
+    return {
+        "agent_id": agent_id,
+        "agent_type": meta.get("agentType") or subagent_type or "unknown",
+        "transcript_path": str(transcript),
+        "agent_state_file": str(resolve_agent_state(input_json, agent_id).state_file),
+        "started_at_ms": parent_tool.started_at_ms,
+        "ended_at_ms": parent_tool.ended_at_ms,
+        "output": _content_text(content),
+    }
+
+
+def _content_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def _merge_pending_subagents(
+    graph,
+    descriptors: dict[str, dict],
+    *,
+    subagents_dir: "Path | None" = None,
+    input_json: "dict | None" = None,
+    _visited: "set[str] | None" = None,
+    _depth: int = 0,
+) -> dict[str, dict]:
+    """Splice each finished agent under the Agent tool that ran it, recursively, and return
+    the hook-buffered descriptors used. A foreground agent with no descriptor is read from
+    its transcript file."""
     matched: dict[str, dict] = {}
-    if not descriptors or not graph.events:
+    if not graph.events:
         return matched
+    visited = _visited if _visited is not None else set()
     root = graph.events[0]
-    for agent_id, descriptor in descriptors.items():
-        parent_tool = next(
-            (
-                event
-                for event in graph.events
-                if isinstance(event, ToolEvent) and _agent_id_from_tool(event) == agent_id
-            ),
-            None,
-        )
-        if parent_tool is None:
-            graph.diagnostics.append(
-                GraphDiagnostic(
-                    code="unmatched_subagent",
-                    message="Subagent descriptor had no correlated Agent tool",
-                    event_id=f"agent:{agent_id}",
-                )
-            )
+    for parent_tool in [event for event in graph.events if isinstance(event, ToolEvent)]:
+        agent_id = _agent_id_from_tool(parent_tool)
+        if not agent_id or agent_id in visited:
             continue
+        descriptor = descriptors.get(agent_id)
+        if descriptor is None and _tool_result_status(parent_tool) != "async_launched":
+            descriptor = _descriptor_from_file(agent_id, parent_tool, subagents_dir, input_json)
+        if descriptor is None:
+            continue
+        visited.add(agent_id)
         parent_event_id = parent_tool.event_id
         agent_type = str(descriptor.get("agent_type") or "unknown")
         agent_input = None
@@ -981,13 +1053,37 @@ def _merge_pending_subagents(graph, descriptors: dict[str, dict]) -> dict[str, d
             source_id=agent_type,
         )
         transcript_path = Path(str(descriptor.get("transcript_path") or ""))
-        subgraph = parse_claude_transcript(transcript_path, agent_event)
+        subgraph = parse_claude_transcript(
+            transcript_path, agent_event, skip_through_tool_use_id=_fork_cut_tool_use_id(transcript_path)
+        )
         _drop_unidentified_model_calls(subgraph)
         _overlay_agent_observations(subgraph, descriptor)
-        insertion_index = graph.events.index(parent_tool) + 1 if parent_tool is not None else len(graph.events)
+        if _depth + 1 < _MAX_AGENT_DEPTH:
+            matched.update(
+                _merge_pending_subagents(
+                    subgraph,
+                    descriptors,
+                    subagents_dir=subagents_dir,
+                    input_json=input_json,
+                    _visited=visited,
+                    _depth=_depth + 1,
+                )
+            )
+        insertion_index = graph.events.index(parent_tool) + 1
         graph.events[insertion_index:insertion_index] = subgraph.events
         graph.diagnostics.extend(subgraph.diagnostics)
-        matched[agent_id] = descriptor
+        if agent_id in descriptors:
+            matched[agent_id] = descriptor
+    if _depth == 0:
+        for agent_id in descriptors:
+            if agent_id not in visited:
+                graph.diagnostics.append(
+                    GraphDiagnostic(
+                        code="unmatched_subagent",
+                        message="Subagent descriptor had no correlated Agent tool",
+                        event_id=f"agent:{agent_id}",
+                    )
+                )
     graph.validate()
     return matched
 
@@ -1085,6 +1181,7 @@ def _acknowledge_exported_turn(
 
 BACKGROUND_AGENTS_KEY = "background_agents"
 _NOTIFICATION_TOOL_USE = re.compile(r"<tool-use-id>\s*([A-Za-z0-9_]+)\s*</tool-use-id>")
+_NOTIFICATION_TASK_ID = re.compile(r"\s*<task-notification>\s*<task-id>\s*([A-Za-z0-9_-]+)\s*</task-id>")
 _AGENT_MESSAGE_FROM = re.compile(r'<agent-message\s+from="([A-Za-z0-9_-]+)"')
 
 
@@ -1093,7 +1190,12 @@ def _background_agents(state) -> dict[str, dict]:
 
 
 def _register_background_agents(
-    state, graph, trace_id: str, span_ids: dict[str, str], already_spliced: "set[str] | None" = None
+    state,
+    graph,
+    trace_id: str,
+    span_ids: dict[str, str],
+    already_spliced: "set[str] | None" = None,
+    nested_parent: str = "",
 ) -> dict[str, dict]:
     """Remember every Agent tool the turn launched in the background and that is still
     running at export, keyed by agent id and by tool_use_id, so a SubagentStop or a task
@@ -1115,12 +1217,24 @@ def _register_background_agents(
         launched[agent_id] = {
             "trace_id": trace_id,
             "tool_span_id": tool_span_id,
-            **({"subagent_span_id": span_ids.get(f"agent:{agent_id}", "")} if agent_id in spliced else {}),
+            **(
+                {
+                    "subagent_span_id": span_ids.get(f"agent:{agent_id}", ""),
+                    "sent_span_ids": sorted(
+                        span_ids[event_id]
+                        for event_id in _subtree_event_ids(graph, f"agent:{agent_id}")
+                        if event_id in span_ids
+                    ),
+                }
+                if agent_id in spliced
+                else {}
+            ),
             "tool_use_id": event.tool_call_id or "",
             "agent_type": (event.input or {}).get("subagent_type") if isinstance(event.input, dict) else None,
             "prompt": (event.input or {}).get("prompt") if isinstance(event.input, dict) else None,
             "turn_id": event.turn_id,
             "launched_at_ms": event.ended_at_ms or event.started_at_ms,
+            **({"parent_agent_id": nested_parent} if nested_parent else {}),
         }
     if not launched or state.state_file is None:
         return {}
@@ -1128,16 +1242,22 @@ def _register_background_agents(
         with state._lock():
             data = state._read_safe()
             current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
-            current.update(launched)
+            # A later render must not wipe what an earlier export recorded (span ids, sent set).
+            new_ids = [agent_id for agent_id in launched if agent_id not in current]
+            for agent_id in new_ids:
+                current[agent_id] = launched[agent_id]
             data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
-            held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
-            entry = held.get(trace_id) or {"spans": [], "pending": []}
-            # Every launch is awaited: the agent's completion comes back as a notification
-            # whose reaction is the parent's own work, after this Stop - even for an agent
-            # whose SubagentStop already landed inside the turn.
-            entry["pending"] = sorted(set(entry.get("pending", [])) | set(launched))
-            held[trace_id] = entry
-            data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
+            # A nested agent's completion is handled inside its parent's transcript, and the
+            # parent itself is awaited, so only depth-1 launches wait for a notification.
+            if not nested_parent:
+                held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+                entry = held.get(trace_id) or {"spans": [], "pending": []}
+                # Every launch is awaited: the agent's completion comes back as a notification
+                # whose reaction is the parent's own work, after this Stop - even for an agent
+                # whose SubagentStop already landed inside the turn.
+                entry["pending"] = sorted(set(entry.get("pending", [])) | set(new_ids))
+                held[trace_id] = entry
+                data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
             state._write(data)
     except Exception as exc:
         error(f"Failed to register background agents: {exc}")
@@ -1176,7 +1296,7 @@ def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_id
             data = state._read_safe()
             current_held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
             entry = current_held.get(trace_id) or {"spans": [], "pending": []}
-            entry["spans"] = [*entry.get("spans", []), *held]
+            entry["spans"] = _merge_held(entry.get("spans", []), held)
             data[HELD_SPANS_KEY] = json.dumps(current_held | {trace_id: entry}, sort_keys=True)
             state._write(data)
     except Exception as exc:
@@ -1188,9 +1308,12 @@ def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_id
     return payload
 
 
-def _extend_held_spans(state, trace_id: str, end_ms: int, agent_id: str = "", release: bool = False) -> None:
-    """Grow every held span of the trace to at least ``end_ms``. With ``release`` (or when
-    ``agent_id`` was the last pending one) the held spans are sent."""
+def _extend_held_spans(
+    state, trace_id: str, end_ms: int, agent_id: str = "", release: bool = False, anchor_span_id: str = ""
+) -> None:
+    """Grow held spans to at least ``end_ms``: only the path from ``anchor_span_id`` up to the
+    root when given, so a sibling is not stretched. With ``release`` (or when ``agent_id`` was
+    the last pending one) the held spans are sent."""
     if state.state_file is None:
         return
     to_send: list[dict] = []
@@ -1201,15 +1324,23 @@ def _extend_held_spans(state, trace_id: str, end_ms: int, agent_id: str = "", re
             entry = current_held.get(trace_id)
             if not entry:
                 return
+            spans = entry.get("spans", [])
+            grow = _ancestor_span_ids(spans, {anchor_span_id}) if anchor_span_id else {s.get("spanId") for s in spans}
             end_nano = f"{end_ms}000000"
-            for span in entry.get("spans", []):
-                if int(span.get("endTimeUnixNano", "0")) < int(end_nano):
+            for span in spans:
+                if span.get("spanId") in grow and int(span.get("endTimeUnixNano", "0")) < int(end_nano):
                     span["endTimeUnixNano"] = end_nano
             pending = [a for a in entry.get("pending", []) if a != agent_id]
             entry["pending"] = pending
             if release or (not pending and not entry.get("in_flight")):
                 to_send = entry.get("spans", [])
                 current_held.pop(trace_id, None)
+                released = {span.get("spanId") for span in to_send}
+                agents = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+                for agent in agents.values():
+                    if agent.get("trace_id") == trace_id:
+                        agent["sent_span_ids"] = sorted(set(agent.get("sent_span_ids") or []) | released)
+                data[BACKGROUND_AGENTS_KEY] = json.dumps(agents, sort_keys=True)
             else:
                 current_held[trace_id] = entry
             data[HELD_SPANS_KEY] = json.dumps(current_held, sort_keys=True)
@@ -1245,7 +1376,33 @@ def _mark_continuation(state, trace_id: str, agent_id: str, in_flight: bool) -> 
 
 def _release_all_held_spans(state) -> None:
     for trace_id in list(_held_spans(state)):
-        _extend_held_spans(state, trace_id, get_timestamp_ms(), release=True)
+        _extend_held_spans(state, trace_id, 0, release=True)
+
+
+LAST_BACKGROUND_TASKS_KEY = "last_background_task_ids"
+
+
+def _running_task_ids(input_json: dict) -> "set[str] | None":
+    tasks = input_json.get("background_tasks")
+    if not isinstance(tasks, list):
+        return None
+    return {
+        str(task.get("id"))
+        for task in tasks
+        if isinstance(task, dict) and task.get("id") and task.get("status") in (None, "running")
+    }
+
+
+def _release_finished_traces(state, running: "set[str] | None") -> None:
+    """Release every held trace none of whose agents is still running. Claude Code reports
+    the running background agents of the whole session, at any depth, on each Stop."""
+    if running is None:
+        return
+    agents = _background_agents(state)
+    for trace_id in list(_held_spans(state)):
+        mine = {agent_id for agent_id, agent in agents.items() if agent.get("trace_id") == trace_id}
+        if not mine & running:
+            _extend_held_spans(state, trace_id, 0, release=True)
 
 
 def _update_background_agent(state, agent_id: str, **fields) -> None:
@@ -1264,6 +1421,135 @@ def _update_background_agent(state, agent_id: str, **fields) -> None:
         error(f"Failed to update background agent {agent_id}: {exc}")
 
 
+def _subtree_event_ids(graph, root_event_id: str) -> list[str]:
+    parent_of = {event.event_id: event.parent_event_id for event in graph.events}
+    subtree = []
+    for event in graph.events:
+        current, seen = event.event_id, set()
+        while current and current not in seen:
+            if current == root_event_id:
+                subtree.append(event.event_id)
+                break
+            seen.add(current)
+            current = parent_of.get(current)
+    return subtree
+
+
+def _derived_span_id(trace_id: str, event_id: str) -> str:
+    """Every hook process derives the same id for the same event, so a re-export cannot
+    mint a second span and a child can name a parent that has not been rendered yet."""
+    span_id = hashlib.sha256(f"{trace_id}:{event_id}".encode()).hexdigest()[:16]
+    return span_id if span_id != "0" * 16 else "0" * 15 + "1"
+
+
+def _int_or_none(value: object) -> "int | None":
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return int(value) if isinstance(value, str) and value.isdigit() else None
+
+
+def _payload_spans(payload: dict) -> list[dict]:
+    try:
+        return list(payload["resourceSpans"][0]["scopeSpans"][0]["spans"])
+    except (KeyError, IndexError, TypeError):
+        return []
+
+
+def _with_spans(payload: dict, spans: list[dict]) -> dict:
+    resource = payload["resourceSpans"][0]
+    scope = resource["scopeSpans"][0]
+    return {**payload, "resourceSpans": [{**resource, "scopeSpans": [{**scope, "spans": spans}]}]}
+
+
+def _ancestor_span_ids(spans: list[dict], start_ids: "set[str]") -> "set[str]":
+    by_id = {span["spanId"]: span for span in spans}
+    found: set[str] = set()
+    for span_id in start_ids:
+        current = span_id
+        while current and current in by_id and current not in found:
+            found.add(current)
+            current = by_id[current].get("parentSpanId", "")
+    return found
+
+
+def _merge_held(existing: list[dict], spans: list[dict]) -> list[dict]:
+    """Replace held spans by id, never shrinking an end an earlier hold already grew."""
+    ends = {span.get("spanId"): int(span.get("endTimeUnixNano", "0")) for span in existing}
+    incoming = []
+    for span in spans:
+        held_end = ends.get(span["spanId"], 0)
+        incoming.append(
+            {**span, "endTimeUnixNano": str(held_end)} if held_end > int(span.get("endTimeUnixNano", "0")) else span
+        )
+    ids = {span["spanId"] for span in incoming}
+    return [span for span in existing if span.get("spanId") not in ids] + incoming
+
+
+def _hold_spans(state, trace_id: str, spans: list[dict]) -> bool:
+    """Hold spans with their trace's other held spans. False when the trace is no longer
+    held (already released), so the caller sends them instead."""
+    if state.state_file is None or not spans:
+        return False
+    try:
+        with state._lock():
+            data = state._read_safe()
+            held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            entry = held.get(trace_id)
+            if entry is None:
+                return False
+            entry["spans"] = _merge_held(entry.get("spans", []), spans)
+            held[trace_id] = entry
+            data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to hold spans for trace {trace_id}: {exc}")
+        return False
+    return True
+
+
+def _mark_spans_sent(state, agent_id: str, span_ids: list[str]) -> None:
+    if state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            agents = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            if agent_id not in agents:
+                return
+            agents[agent_id]["sent_span_ids"] = sorted(set(agents[agent_id].get("sent_span_ids") or []) | set(span_ids))
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(agents, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to record sent spans for agent {agent_id}: {exc}")
+
+
+def _sent_spans_ref(state, agent_id: str, span_ids: list[str]):
+    if state.state_file is None:
+        return None
+    return (
+        f"{__name__}:record_sent_spans",
+        {
+            "state_dir": str(state.state_dir),
+            "state_file": str(state.state_file),
+            "lock_path": str(state._lock_path) if state._lock_path else None,
+            "agent_id": agent_id,
+            "span_ids": span_ids,
+        },
+    )
+
+
+def record_sent_spans(
+    *, state_dir: str, state_file: str, lock_path: "str | None", agent_id: str, span_ids: list
+) -> None:
+    """Record delivered spans from a detached sender process."""
+    state = StateManager(
+        state_dir=Path(state_dir), state_file=Path(state_file), lock_path=Path(lock_path) if lock_path else None
+    )
+    _mark_spans_sent(state, agent_id, [str(span_id) for span_id in span_ids])
+
+
 def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, dict] | None":
     """Resolve a machine-injected prompt to the background agent it comes from: a task
     notification names the Agent tool call, a peer message from a still-running agent
@@ -1272,6 +1558,11 @@ def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, d
     if not isinstance(prompt, str):
         return None
     agents = _background_agents(state)
+    # The task id is the agent id, and it is the only tag every completion carries; the
+    # tool-use id can be missing or name the SendMessage that resumed the agent.
+    match = _NOTIFICATION_TASK_ID.match(prompt)
+    if match is not None and match.group(1) in agents:
+        return match.group(1), agents[match.group(1)]
     match = _NOTIFICATION_TOOL_USE.search(prompt)
     if match is not None:
         tool_use_id = match.group(1)
@@ -1383,7 +1674,9 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         observations = buffer.all()
         pending_subagents = _pending_subagents(state)
         matched_observations = _merge_tool_observations(graph, observations)
-        matched_subagents = _merge_pending_subagents(graph, pending_subagents)
+        matched_subagents = _merge_pending_subagents(
+            graph, pending_subagents, subagents_dir=_subagents_dir(transcript), input_json=input_json
+        )
         graph.validate()
 
         # The turn ends when its last child does. Taken from the graph because Stop
@@ -1417,7 +1710,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 log(f"invalid high_fidelity_span_ids state; regenerating span IDs: {exc}")
         for event in graph.events:
-            span_id_overrides.setdefault(event.event_id, generate_span_id())
+            span_id_overrides.setdefault(event.event_id, _derived_span_id(trace_id, event.event_id))
         state.set("high_fidelity_span_ids", json.dumps(span_id_overrides, sort_keys=True))
 
         common_attrs = {
@@ -1447,7 +1740,13 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             agent_id = str(state.get("continuation_agent_id"))
             _mark_continuation(state, trace_id, agent_id, in_flight=False)
             settled = agent_id if state.get("continuation_is_final") != "false" else ""
-            _extend_held_spans(state, trace_id, int(root_event.ended_at_ms or get_timestamp_ms()), agent_id=settled)
+            _extend_held_spans(
+                state,
+                trace_id,
+                int(root_event.ended_at_ms or get_timestamp_ms()),
+                agent_id=settled,
+                anchor_span_id=trace_span_id,
+            )
         return _TurnExport(payload, reason, matched_observations, matched_subagents)
 
     if state.get("continuation_agent_id"):
@@ -1455,7 +1754,13 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         agent_id = str(state.get("continuation_agent_id"))
         _mark_continuation(state, trace_id, agent_id, in_flight=False)
         settled = agent_id if state.get("continuation_is_final") != "false" else ""
-        _extend_held_spans(state, trace_id, get_timestamp_ms(), agent_id=settled)
+        _extend_held_spans(
+            state,
+            trace_id,
+            get_timestamp_ms(),
+            agent_id=settled,
+            anchor_span_id=str(state.get("current_trace_span_id") or ""),
+        )
         return _TurnExport({}, reason, [], {})
 
     # Legacy fallback: a transcript with no stable assistant UUIDs cannot be resolved into
@@ -1571,8 +1876,17 @@ def _close_live_turn(state, input_json: dict, reason: TurnEndReason) -> None:
 
 
 def _handle_stop(input_json: dict) -> None:
-    """Handle Stop: export the completed turn and clean up trace state."""
+    """Handle Stop: export the completed turn, then release any held trace whose agents
+    have all finished."""
     state = resolve_session(input_json)
+    _export_stopped_turn(state, input_json)
+    running = _running_task_ids(input_json)
+    if running is not None:
+        state.set(LAST_BACKGROUND_TASKS_KEY, json.dumps(sorted(running)))
+    _release_finished_traces(state, running)
+
+
+def _export_stopped_turn(state, input_json: dict) -> None:
     session_id = state.get("session_id")
     trace_id = state.get("current_trace_id")
     if session_id is None or trace_id is None:
@@ -1670,6 +1984,45 @@ def _handle_subagent_start(input_json: dict) -> None:
         agent_state.set("prompt", prompt)
 
 
+def _register_from_meta(state, input_json: dict, agent_id: object) -> "dict | None":
+    """A nested background agent can stop before its parent has rendered the call that
+    launched it; its meta file names that parent and call, which is enough to place it."""
+    transcript = input_json.get("agent_transcript_path")
+    if not isinstance(agent_id, str) or not agent_id or _UNSAFE_NAME.search(agent_id):
+        return None
+    if not isinstance(transcript, str) or not transcript or state.state_file is None:
+        return None
+    meta = _agent_meta_for(Path(transcript))
+    parent_id, tool_use_id = meta.get("parentAgentId"), meta.get("toolUseId")
+    if not isinstance(parent_id, str) or not parent_id or not isinstance(tool_use_id, str) or not tool_use_id:
+        return None
+    if meta.get("requestShape") == "foreground":
+        return None
+    try:
+        with state._lock():
+            data = state._read_safe()
+            agents = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            if agent_id in agents:
+                return agents[agent_id]
+            parent = agents.get(parent_id)
+            if not parent or not parent.get("trace_id"):
+                return None
+            agents[agent_id] = {
+                "trace_id": parent["trace_id"],
+                "tool_span_id": _derived_span_id(str(parent["trace_id"]), f"tool:{tool_use_id}"),
+                "tool_use_id": tool_use_id,
+                "agent_type": meta.get("agentType") or input_json.get("agent_type"),
+                "turn_id": parent.get("turn_id"),
+                "parent_agent_id": parent_id,
+            }
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(agents, sort_keys=True)
+            state._write(data)
+            return agents[agent_id]
+    except Exception as exc:
+        error(f"Failed to register nested agent {agent_id}: {exc}")
+        return None
+
+
 def _export_background_subagent(state, input_json: dict, agent_id: str, descriptor: dict) -> bool:
     """A background agent finished after the turn that launched it was exported. Render
     its transcript into that trace, under the Agent tool that spawned it."""
@@ -1682,8 +2035,11 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         return False
 
     ended_at_ms = get_timestamp_ms()
+    # SubagentStart fires again on every resume; the agent began at its first start.
     stored_start = state.get(f"subagent_{agent_id}_start_time") or ""
-    started_at_ms = int(stored_start) if stored_start.isdigit() else descriptor.get("launched_at_ms")
+    started_at_ms = _int_or_none(descriptor.get("started_at_ms"))
+    if started_at_ms is None:
+        started_at_ms = int(stored_start) if stored_start.isdigit() else _int_or_none(descriptor.get("launched_at_ms"))
     agent_type = str(input_json.get("agent_type") or descriptor.get("agent_type") or "unknown")
     agent_event = AgentEvent(
         event_id=f"agent:{agent_id}",
@@ -1698,11 +2054,20 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         agent_id=agent_id,
         source_id=agent_type,
     )
-    graph = parse_claude_transcript(Path(transcript_path), agent_event)
+    graph = parse_claude_transcript(
+        Path(transcript_path), agent_event, skip_through_tool_use_id=_fork_cut_tool_use_id(Path(transcript_path))
+    )
     _overlay_agent_observations(graph, {"agent_state_file": str(resolve_agent_state(input_json, agent_id).state_file)})
+    spliced = _merge_pending_subagents(
+        graph, _pending_subagents(state), subagents_dir=Path(transcript_path).parent, input_json=input_json
+    )
+    if spliced:
+        _cleanup_pending_subagents(state, spliced)
     if graph.events and graph.events[-1].ended_at_ms:
         agent_event.ended_at_ms = max(int(e.ended_at_ms) for e in graph.events if isinstance(e.ended_at_ms, int))
-    subagent_span_id = generate_span_id()
+    subagent_span_id = str(descriptor.get("subagent_span_id") or "") or _derived_span_id(trace_id, agent_event.event_id)
+    span_ids = {event.event_id: _derived_span_id(trace_id, event.event_id) for event in graph.events}
+    span_ids[agent_event.event_id] = subagent_span_id
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
     payload = render_event_graph(
@@ -1710,7 +2075,7 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         trace_id=trace_id,
         service_name=SERVICE_NAME,
         scope_name=SCOPE_NAME,
-        span_id_overrides={agent_event.event_id: subagent_span_id},
+        span_id_overrides=span_ids,
         extra_attributes={agent_event.event_id: {"subagent.background": "true"}},
         common_attributes={
             **({"user.id": user_id} if user_id else {}),
@@ -1718,9 +2083,33 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
         },
         root_parent_span_id=tool_span_id,
     )
-    _send_span_async(payload)
-    _update_background_agent(state, agent_id, subagent_span_id=subagent_span_id, ended_at_ms=agent_event.ended_at_ms)
-    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms))
+    _update_background_agent(
+        state,
+        agent_id,
+        subagent_span_id=subagent_span_id,
+        ended_at_ms=agent_event.ended_at_ms,
+        **({"started_at_ms": started_at_ms} if isinstance(started_at_ms, int) else {}),
+    )
+    spans = _payload_spans(payload)
+    nested = _register_background_agents(state, graph, trace_id, span_ids, nested_parent=agent_id)
+    hold_ids = _ancestor_span_ids(spans, {d["tool_span_id"] for d in nested.values()}) | {subagent_span_id}
+    held_now = _hold_spans(state, trace_id, [span for span in spans if span["spanId"] in hold_ids])
+    # A nested agent can finish before this render held the call that launched it.
+    registry = _background_agents(state)
+    for nested_id, nested_launch in nested.items():
+        nested_end = _int_or_none(registry.get(nested_id, {}).get("ended_at_ms"))
+        if held_now and nested_end:
+            _extend_held_spans(state, trace_id, nested_end, anchor_span_id=nested_launch["tool_span_id"])
+    sent = set(descriptor.get("sent_span_ids") or [])
+    new_spans = [span for span in spans if span["spanId"] not in sent and not (held_now and span["spanId"] in hold_ids)]
+    if new_spans:
+        new_ids = [span["spanId"] for span in new_spans]
+        _send_span_async(
+            _with_spans(payload, new_spans),
+            on_success=lambda: _mark_spans_sent(state, agent_id, new_ids),
+            on_success_ref=_sent_spans_ref(state, agent_id, new_ids),
+        )
+    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), anchor_span_id=tool_span_id)
     state.delete(f"subagent_{agent_id}_start_time")
     state.delete(f"subagent_{agent_id}_prompt")
     log(f"Background subagent {agent_id} attached to trace {trace_id}")
@@ -1732,6 +2121,8 @@ def _handle_subagent_stop(input_json: dict) -> None:
     state = resolve_session(input_json)
     agent_id = input_json.get("agent_id", "")
     background = _background_agents(state).get(agent_id) if isinstance(agent_id, str) and agent_id else None
+    if background is None:
+        background = _register_from_meta(state, input_json, agent_id)
     if background is not None and _export_background_subagent(state, input_json, agent_id, background):
         return
 
