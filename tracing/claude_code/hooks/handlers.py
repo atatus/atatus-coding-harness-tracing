@@ -17,6 +17,7 @@ from core.common import (
     StateManager,
     build_multi_span,
     build_span,
+    debug_dump,
     env,
     error,
     generate_span_id,
@@ -81,9 +82,50 @@ def _read_stdin() -> dict:
     """Read UTF-8 JSON from stdin. Returns {} on empty/invalid input."""
     try:
         raw = read_stdin_text()
-        return json.loads(raw) if raw else {}
+        payload = json.loads(raw) if raw else {}
     except (UnicodeDecodeError, json.JSONDecodeError, OSError):
         return {}
+    _debug_dump_payload(payload)
+    return payload
+
+
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _debug_dump_payload(payload: object) -> None:
+    if os.environ.get("ATATUS_TRACE_DEBUG", "").lower() != "true" or not isinstance(payload, dict):
+        return
+    event = _UNSAFE_NAME.sub("", str(payload.get("hook_event_name") or "")) or "unknown"
+    record: dict = {"payload": payload}
+    meta = _agent_meta(payload)
+    if meta is not None:
+        record["agent_meta"] = meta
+    debug_dump(f"{SERVICE_NAME}_{event}_{os.getpid()}", record)
+
+
+def _agent_meta(payload: dict) -> "object | None":
+    agent_id = payload.get("agent_id")
+    session_id = payload.get("session_id")
+    if not isinstance(agent_id, str) or not agent_id or _UNSAFE_NAME.search(agent_id):
+        return None
+    candidates = []
+    agent_transcript = payload.get("agent_transcript_path")
+    if isinstance(agent_transcript, str) and agent_transcript:
+        candidates.append(Path(agent_transcript).with_suffix(".meta.json"))
+    transcript = payload.get("transcript_path")
+    if (
+        isinstance(transcript, str)
+        and transcript
+        and isinstance(session_id, str)
+        and not _UNSAFE_NAME.search(session_id)
+    ):
+        candidates.append(Path(transcript).parent / session_id / "subagents" / f"agent-{agent_id}.meta.json")
+    for path in candidates:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
