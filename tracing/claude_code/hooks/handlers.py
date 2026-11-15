@@ -15,6 +15,7 @@ from pathlib import Path
 
 from core.common import (
     LLM_EFFORT_ATTR,
+    OTLP_MAX_PAYLOAD_BYTES,
     StateManager,
     build_multi_span,
     build_span,
@@ -73,10 +74,19 @@ from tracing.claude_code.hooks.transcript import (
 # ---------------------------------------------------------------------------
 
 
-def _send_span_async(span_dict: dict, on_success=None, on_success_ref=None) -> None:
+def _send_span_async(span_dict: dict, on_success=None, on_success_ref=None, on_chunk=None, on_chunk_ref=None) -> None:
     """Detached span send. ``sender`` keeps this module's ``send_span`` binding
     on the synchronous fallback path so test doubles still intercept it."""
-    send_span_async(span_dict, sender=send_span, on_success=on_success, on_success_ref=on_success_ref)
+    send_span_async(
+        span_dict,
+        sender=send_span,
+        on_success=on_success,
+        on_success_ref=on_success_ref,
+        on_chunk=on_chunk,
+        on_chunk_ref=on_chunk_ref,
+        max_bytes=OTLP_MAX_PAYLOAD_BYTES,
+        retries=1,
+    )
 
 
 def _read_stdin() -> dict:
@@ -1547,7 +1557,7 @@ def _mark_spans_sent(state, agent_id: str, span_ids: list[str]) -> None:
         error(f"Failed to record sent spans for agent {agent_id}: {exc}")
 
 
-def _sent_spans_ref(state, agent_id: str, span_ids: list[str]):
+def _sent_spans_ref(state, agent_id: str):
     if state.state_file is None:
         return None
     return (
@@ -1557,7 +1567,6 @@ def _sent_spans_ref(state, agent_id: str, span_ids: list[str]):
             "state_file": str(state.state_file),
             "lock_path": str(state._lock_path) if state._lock_path else None,
             "agent_id": agent_id,
-            "span_ids": span_ids,
         },
     )
 
@@ -2132,11 +2141,10 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     sent = set(descriptor.get("sent_span_ids") or [])
     new_spans = [span for span in spans if span["spanId"] not in sent and not (held_now and span["spanId"] in hold_ids)]
     if new_spans:
-        new_ids = [span["spanId"] for span in new_spans]
         _send_span_async(
             _with_spans(payload, new_spans),
-            on_success=lambda: _mark_spans_sent(state, agent_id, new_ids),
-            on_success_ref=_sent_spans_ref(state, agent_id, new_ids),
+            on_chunk=lambda span_ids: _mark_spans_sent(state, agent_id, span_ids),
+            on_chunk_ref=_sent_spans_ref(state, agent_id),
         )
     _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), anchor_span_id=tool_span_id)
     state.delete(f"subagent_{agent_id}_start_time")

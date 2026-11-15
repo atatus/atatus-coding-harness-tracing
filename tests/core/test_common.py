@@ -36,6 +36,7 @@ from core.common import (
     restore_stderr_from_log_file,
     send_span,
     send_span_async,
+    split_payload,
 )
 
 
@@ -1916,6 +1917,228 @@ class TestDetachedSender:
             assert sender.main([]) == 2
         send.assert_not_called()
         assert not bad.exists()
+
+    def test_splits_by_the_envelope_budget_and_reports_each_delivered_chunk(self, tmp_path):
+        import core.sender as sender
+
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        chunks = split_payload(payload, 10_000)
+        path = tmp_path / "env.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "payload": payload,
+                    "max_bytes": 10_000,
+                    "retries": 1,
+                    "on_chunk": {"callable": "core.sender:_probe_hook", "kwargs": {"a": 1}},
+                }
+            )
+        )
+        calls = []
+        outcomes = [True, False, False] + [True] * (len(chunks) - 2)
+        with (
+            mock.patch("core.sender._probe_hook", lambda **kw: calls.append(kw), create=True),
+            mock.patch("core.common.send_span", side_effect=outcomes) as send,
+        ):
+            assert sender.main([str(path)]) == 1
+        assert [c.args[0] for c in send.call_args_list] == [chunks[0], chunks[1], *chunks[1:]]
+        assert calls == [{"a": 1, "span_ids": _ids(c)} for i, c in enumerate(chunks) if i != 1]
+
+
+def _otlp(*spans, service="svc"):
+    return {
+        "resourceSpans": [
+            {
+                "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service}}]},
+                "scopeSpans": [{"scope": {"name": "scope"}, "spans": list(spans)}],
+            }
+        ]
+    }
+
+
+def _padded_span(index, pad, prefix=""):
+    return {
+        "traceId": "a" * 32,
+        "spanId": f"{prefix}{index:0{16 - len(prefix)}x}",
+        "name": "span",
+        "attributes": [{"key": "pad", "value": {"stringValue": "p" * pad}}],
+    }
+
+
+def _wire_size(payload):
+    return len(json.dumps(payload).encode("utf-8"))
+
+
+def _ids(payload):
+    return [s["spanId"] for rs in payload["resourceSpans"] for ss in rs["scopeSpans"] for s in ss["spans"]]
+
+
+class TestSplitPayload:
+    def test_a_payload_under_budget_is_returned_as_is(self):
+        payload = _otlp(_padded_span(1, 100), _padded_span(2, 100))
+        [chunk] = split_payload(payload, 10_000)
+        assert chunk is payload
+
+    def test_an_oversized_payload_splits_into_chunks_under_budget_in_order(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        chunks = split_payload(payload, 10_000)
+        assert len(chunks) >= 3
+        assert all(_wire_size(c) <= 10_000 for c in chunks)
+        assert [i for c in chunks for i in _ids(c)] == _ids(payload)
+
+    def test_each_chunk_keeps_its_resource_and_scope(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(6)])
+        for chunk in split_payload(payload, 10_000):
+            [rs] = chunk["resourceSpans"]
+            assert rs["resource"] == payload["resourceSpans"][0]["resource"]
+            assert [ss["scope"] for ss in rs["scopeSpans"]] == [{"name": "scope"}]
+
+    def test_spans_stay_under_their_own_resource(self):
+        one = _otlp(*[_padded_span(i, 3_000, "a") for i in range(3)], service="one")
+        two = _otlp(*[_padded_span(i, 3_000, "b") for i in range(3)], service="two")
+        payload = {"resourceSpans": one["resourceSpans"] + two["resourceSpans"]}
+        chunks = split_payload(payload, 7_000)
+        for chunk in chunks:
+            for rs in chunk["resourceSpans"]:
+                service = rs["resource"]["attributes"][0]["value"]["stringValue"]
+                prefix = {"one": "a", "two": "b"}[service]
+                assert all(s["spanId"].startswith(prefix) for ss in rs["scopeSpans"] for s in ss["spans"])
+        assert [i for c in chunks for i in _ids(c)] == _ids(payload)
+
+    def test_a_single_span_over_budget_goes_alone_and_untrimmed(self):
+        big = _padded_span(15, 20_000)
+        payload = _otlp(_padded_span(1, 100), big, _padded_span(2, 100))
+        chunks = split_payload(payload, 10_000)
+        [alone] = [c for c in chunks if big["spanId"] in _ids(c)]
+        assert alone["resourceSpans"][0]["scopeSpans"][0]["spans"] == [big]
+        assert [i for c in chunks for i in _ids(c)] == _ids(payload)
+
+    def test_an_oversized_payload_with_no_spans_is_never_dropped(self):
+        payload = {"other": "x" * 20_000}
+        assert split_payload(payload, 10_000) == [payload]
+
+    def test_size_is_measured_as_the_wire_encodes_it(self):
+        """The body is sent ASCII-escaped, so one non-ASCII character can cost six bytes."""
+        payload = _otlp(*[{**_padded_span(i, 0), "name": "é" * 1_000} for i in range(4)])
+        chunks = split_payload(payload, 10_000)
+        assert len(chunks) >= 3
+        assert all(_wire_size(c) <= 10_000 for c in chunks)
+
+
+class TestSendSpanAsyncSplitsBySize:
+    @pytest.fixture(autouse=True)
+    def _inline(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
+
+    def test_without_a_budget_a_payload_is_never_split(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        sender = mock.Mock(return_value=True)
+        send_span_async(payload, sender=sender)
+        sender.assert_called_once_with(payload)
+
+    def test_a_payload_under_budget_is_sent_unchanged_in_one_post(self):
+        payload = _otlp(_padded_span(1, 10))
+        sender = mock.Mock(return_value=True)
+        send_span_async(payload, sender=sender, max_bytes=10_000)
+        sender.assert_called_once()
+        assert sender.call_args.args[0] is payload
+
+    def test_each_chunk_is_sent_in_order_under_budget(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        sent = []
+        send_span_async(payload, sender=lambda p: sent.append(p) or True, max_bytes=10_000)
+        assert len(sent) >= 3
+        assert all(_wire_size(p) <= 10_000 for p in sent)
+        assert [i for p in sent for i in _ids(p)] == _ids(payload)
+
+    def test_on_chunk_reports_only_delivered_chunks(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        chunks = split_payload(payload, 10_000)
+        outcomes = iter([index != 1 for index in range(len(chunks))])
+        delivered = []
+        send_span_async(payload, sender=lambda _p: next(outcomes), max_bytes=10_000, on_chunk=delivered.append)
+        assert delivered == [_ids(c) for i, c in enumerate(chunks) if i != 1]
+
+    def test_on_success_waits_for_every_chunk(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        settled = mock.Mock()
+        calls = iter([True, False] + [True] * 20)
+        send_span_async(payload, sender=lambda _p: next(calls), max_bytes=10_000, on_success=settled)
+        settled.assert_not_called()
+
+        send_span_async(payload, sender=lambda _p: True, max_bytes=10_000, on_success=settled)
+        settled.assert_called_once_with()
+
+    def test_without_retries_a_failed_chunk_is_sent_once(self):
+        sender = mock.Mock(return_value=False)
+        send_span_async(_otlp(_padded_span(1, 10)), sender=sender, max_bytes=10_000)
+        sender.assert_called_once()
+
+    def test_a_failed_chunk_is_retried_once_then_dropped(self):
+        payload = _otlp(*[_padded_span(i, 3_000) for i in range(10)])
+        chunks = split_payload(payload, 10_000)
+        sent = []
+        outcomes = iter([True, False, False] + [True] * 20)
+        delivered = []
+        settled = mock.Mock()
+
+        def sender(chunk):
+            sent.append(chunk)
+            return next(outcomes)
+
+        send_span_async(
+            payload, sender=sender, max_bytes=10_000, retries=1, on_chunk=delivered.append, on_success=settled
+        )
+        assert sent == [chunks[0], chunks[1], *chunks[1:]]
+        assert delivered == [_ids(c) for i, c in enumerate(chunks) if i != 1]
+        settled.assert_not_called()
+
+    def test_a_chunk_delivered_on_its_retry_counts_as_delivered(self):
+        payload = _otlp(_padded_span(1, 10))
+        outcomes = iter([False, True])
+        delivered = []
+        settled = mock.Mock()
+        send_span_async(
+            payload,
+            sender=lambda _p: next(outcomes),
+            max_bytes=10_000,
+            retries=1,
+            on_chunk=delivered.append,
+            on_success=settled,
+        )
+        assert delivered == [_ids(payload)]
+        settled.assert_called_once_with()
+
+
+class TestSendSpanAsyncSplitsWithoutFork:
+    @pytest.fixture(autouse=True)
+    def _no_fork(self, monkeypatch):
+        monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
+        monkeypatch.delattr(common.os, "fork", raising=False)
+
+    def test_the_budget_and_chunk_ref_travel_in_the_envelope(self, monkeypatch):
+        spawned = {}
+        monkeypatch.setattr(common.subprocess, "Popen", lambda cmd, **k: spawned.setdefault("cmd", cmd) and mock.Mock())
+        send_span_async(
+            {"x": 3},
+            on_chunk=lambda _ids: None,
+            on_chunk_ref=("core.sender:deliver", {"k": 1}),
+            max_bytes=10_000,
+            retries=1,
+        )
+        envelope = json.loads(open(spawned["cmd"][3], encoding="utf-8").read())
+        assert envelope["on_chunk"] == {"callable": "core.sender:deliver", "kwargs": {"k": 1}}
+        assert envelope["max_bytes"] == 10_000
+        assert envelope["retries"] == 1
+        os.unlink(spawned["cmd"][3])
+
+    def test_a_bare_chunk_callback_keeps_the_synchronous_send(self, monkeypatch):
+        popen = mock.Mock()
+        monkeypatch.setattr(common.subprocess, "Popen", popen)
+        delivered = []
+        send_span_async(_otlp(_padded_span(1, 10)), sender=lambda _s: True, on_chunk=delivered.append)
+        popen.assert_not_called()
+        assert delivered == [[f"{1:016x}"]]
 
 
 # ── Additional FileLock coverage (mkdir fallback) ─────────────────────────

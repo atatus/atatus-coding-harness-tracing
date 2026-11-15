@@ -31,12 +31,13 @@ class Session:
         self.state.set("session_id", "s1")
         self.state.set("trace_count", "1")
         self.payloads: list[dict] = []
+        self.sender = None
 
     def hook(self, entry, payload: dict) -> None:
         payload = {"session_id": "s1", **payload}
         with (
             mock.patch.object(handlers, "resolve_session", lambda *a, **k: self.state),
-            mock.patch.object(handlers, "send_span", lambda p: self.payloads.append(p) or True),
+            mock.patch.object(handlers, "send_span", self.sender or (lambda p: self.payloads.append(p) or True)),
             mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
         ):
@@ -657,6 +658,94 @@ class TestHeldSpansAreReleasedWhenTheWorkIsDone:
         session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
         [root] = _roots(session)
         assert _end_ms(root) == 1794627110000
+
+
+def _flaky(session, fail_calls):
+    """A collector that refuses the given (1-based) POSTs and accepts the rest."""
+    calls = {"n": 0}
+
+    def send(payload):
+        calls["n"] += 1
+        if calls["n"] in fail_calls:
+            return False
+        session.payloads.append(payload)
+        return True
+
+    return send
+
+
+def _wire_size(payload):
+    return len(json.dumps(payload).encode("utf-8"))
+
+
+class TestLargePayloadsAreSplit:
+    BUDGET = 6_000
+
+    @pytest.fixture(autouse=True)
+    def _small_budget(self, monkeypatch):
+        monkeypatch.setattr(handlers, "OTLP_MAX_PAYLOAD_BYTES", self.BUDGET)
+
+    def _llm_ids(self, session):
+        return sorted(
+            _attrs(s)["llm.message.id"] for s in session.spans() if _attrs(s).get("openinference.span.kind") == "LLM"
+        )
+
+    def _padded_held_trace(self, session):
+        _hold_launching_turn(session)
+        held = json.loads(session.state.get("held_spans"))
+        pad = [{"key": "pad", "value": {"stringValue": "p" * 2_500}}]
+        held[TRACE]["spans"] += [
+            {**_held_span(f"{i:016x}", f"Tool {i}", "e" * 16), "attributes": pad} for i in range(1, 7)
+        ]
+        session.state.set("held_spans", json.dumps(held))
+        return sorted(s["spanId"] for s in held[TRACE]["spans"])
+
+    def test_a_large_agent_export_goes_in_posts_under_budget(self, session):
+        _hold_launching_turn(session)
+        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
+        _grow(transcript, 12)
+        _stop(session, transcript)
+
+        assert len(session.payloads) > 1
+        assert all(_wire_size(p) <= self.BUDGET for p in session.payloads)
+        assert self._llm_ids(session) == sorted(f"msg_{i}" for i in range(1, 13))
+
+    def test_a_chunk_lost_twice_is_resent_alone_at_the_next_stop(self, session):
+        _hold_launching_turn(session)
+        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
+        _grow(transcript, 12)
+        session.sender = _flaky(session, {2, 3})
+        _stop(session, transcript)
+        session.sender = None
+        delivered_first = len(session.spans())
+        _stop(session, transcript)
+
+        assert 0 < delivered_first < len(session.spans())
+        assert self._llm_ids(session) == sorted(f"msg_{i}" for i in range(1, 13))
+
+    def test_a_held_release_goes_in_posts_under_budget(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        assert len(session.payloads) > 1
+        assert all(_wire_size(p) <= self.BUDGET for p in session.payloads)
+        assert sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE) == held_ids
+
+    def test_a_release_chunk_that_fails_once_is_retried(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.sender = _flaky(session, {1})
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        assert sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE) == held_ids
+
+    def test_a_release_chunk_that_fails_twice_is_dropped_and_the_rest_still_go(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.sender = _flaky(session, {2, 3})
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        sent = sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE)
+        assert 0 < len(sent) < len(held_ids)
+        assert set(sent) < set(held_ids)
 
 
 def _registered(session, agent_id="a1", tool_use_id="toolu_A1"):

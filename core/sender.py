@@ -54,13 +54,29 @@ def _resolve_callable(ref: object):
 
 
 def deliver(envelope: dict) -> bool:
-    from core.common import error, send_span
+    from core.common import deliver_chunks, error, send_span
 
     payload = envelope.get("payload")
     if not isinstance(payload, dict):
         return False
-    ok = send_span(payload)
-    if ok is False:
+    max_bytes = envelope.get("max_bytes")
+    retries = envelope.get("retries")
+    chunk_func, chunk_kwargs = _resolve_callable(envelope.get("on_chunk"))
+
+    def on_chunk(span_ids: list) -> None:
+        try:
+            chunk_func(**chunk_kwargs, span_ids=span_ids)
+        except Exception as e:
+            error(f"on_chunk follow-up failed: {e}")
+
+    ok = deliver_chunks(
+        payload,
+        send_span,
+        max_bytes if isinstance(max_bytes, int) else None,
+        retries if isinstance(retries, int) else 0,
+        on_chunk if chunk_func is not None else None,
+    )
+    if not ok:
         return False
     func, kwargs = _resolve_callable(envelope.get("on_success"))
     if func is not None:

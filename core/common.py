@@ -508,6 +508,9 @@ EGRESS_FAILURE_THRESHOLD = _env_int("ATATUS_EGRESS_FAILURE_THRESHOLD", 2, 1)
 #: How long the breaker stays open before one probe is let through.
 EGRESS_COOLDOWN_SECONDS = _env_float("ATATUS_EGRESS_COOLDOWN", 60.0, 1.0)
 
+#: Largest JSON body per OTLP POST: the receiver's default body limit is 1 MB.
+OTLP_MAX_PAYLOAD_BYTES = 700_000
+
 
 def _breaker_file() -> Path:
     from core.constants import STATE_BASE_DIR
@@ -812,6 +815,75 @@ def send_span(span_dict: dict) -> bool:
         return False
 
 
+def _wire_size(obj) -> int:
+    return len(json.dumps(obj))
+
+
+def payload_span_ids(span_dict: dict) -> list[str]:
+    return [
+        str(span.get("spanId", ""))
+        for rs in span_dict.get("resourceSpans") or []
+        for ss in rs.get("scopeSpans") or []
+        for span in ss.get("spans") or []
+    ]
+
+
+def split_payload(span_dict: dict, max_bytes: int) -> list[dict]:
+    """A span bigger than ``max_bytes`` on its own travels alone, untrimmed."""
+    if _wire_size(span_dict) <= max_bytes:
+        return [span_dict]
+    extra = {key: value for key, value in span_dict.items() if key != "resourceSpans"}
+    base = _wire_size({**extra, "resourceSpans": []})
+    chunks: list[dict] = []
+    built: list[dict] = []
+    size = base
+    last_rs = last_ss = None
+    for rs in span_dict.get("resourceSpans") or []:
+        rs_shell = {key: value for key, value in rs.items() if key != "scopeSpans"}
+        rs_size = _wire_size({**rs_shell, "scopeSpans": []})
+        for ss in rs.get("scopeSpans") or []:
+            ss_shell = {key: value for key, value in ss.items() if key != "spans"}
+            ss_size = _wire_size({**ss_shell, "spans": []})
+            for span in ss.get("spans") or []:
+                span_size = _wire_size(span)
+                if last_ss is ss:
+                    cost = span_size + 2
+                elif last_rs is rs:
+                    cost = ss_size + span_size + 2
+                else:
+                    cost = rs_size + ss_size + span_size + (2 if built else 0)
+                if built and size + cost > max_bytes:
+                    chunks.append({**extra, "resourceSpans": built})
+                    built, size, last_rs, last_ss = [], base, None, None
+                    cost = rs_size + ss_size + span_size
+                if last_rs is not rs:
+                    built.append({**rs_shell, "scopeSpans": []})
+                    last_rs = rs
+                if last_ss is not ss:
+                    built[-1]["scopeSpans"].append({**ss_shell, "spans": []})
+                    last_ss = ss
+                built[-1]["scopeSpans"][-1]["spans"].append(span)
+                size += cost
+    if built:
+        chunks.append({**extra, "resourceSpans": built})
+    return chunks or [span_dict]
+
+
+def deliver_chunks(span_dict: dict, send, max_bytes: "int | None" = None, retries: int = 0, on_chunk=None) -> bool:
+    """True only when every chunk was accepted; a chunk that keeps failing is dropped."""
+    chunks = split_payload(span_dict, max_bytes) if max_bytes else [span_dict]
+    delivered_all = True
+    for chunk in chunks:
+        for _attempt in range(1 + max(0, retries)):
+            if send(chunk) is not False:
+                if on_chunk is not None:
+                    on_chunk(payload_span_ids(chunk))
+                break
+        else:
+            delivered_all = False
+    return delivered_all
+
+
 #: Detached-process flags for Windows, where the sender must not die with the hook.
 _DETACHED_CREATION_FLAGS = (
     getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -820,7 +892,9 @@ _DETACHED_CREATION_FLAGS = (
 )
 
 
-def _spawn_detached_sender(span_dict: dict, on_success_ref=None) -> bool:
+def _spawn_detached_sender(
+    span_dict: dict, on_success_ref=None, on_chunk_ref=None, max_bytes: "int | None" = None, retries: int = 0
+) -> bool:
     """Hand the POST to a detached ``core.sender`` process (the no-fork path).
 
     The envelope goes through a temp file rather than a stdin pipe: a multi-MB turn
@@ -832,6 +906,13 @@ def _spawn_detached_sender(span_dict: dict, on_success_ref=None) -> bool:
     if on_success_ref is not None:
         target, kwargs = on_success_ref
         envelope["on_success"] = {"callable": target, "kwargs": kwargs}
+    if on_chunk_ref is not None:
+        target, kwargs = on_chunk_ref
+        envelope["on_chunk"] = {"callable": target, "kwargs": kwargs}
+    if max_bytes:
+        envelope["max_bytes"] = max_bytes
+    if retries:
+        envelope["retries"] = retries
     path = None
     try:
         fd, path = tempfile.mkstemp(prefix="atatus-span-", suffix=".json")
@@ -856,7 +937,16 @@ def _spawn_detached_sender(span_dict: dict, on_success_ref=None) -> bool:
         return False
 
 
-def send_span_async(span_dict: dict, sender=None, on_success=None, on_success_ref=None) -> None:
+def send_span_async(
+    span_dict: dict,
+    sender=None,
+    on_success=None,
+    on_success_ref=None,
+    on_chunk=None,
+    on_chunk_ref=None,
+    max_bytes: "int | None" = None,
+    retries: int = 0,
+) -> None:
     """Send a span without blocking the host.
 
     Hooks are invoked synchronously: the harness waits for the hook process to
@@ -887,28 +977,33 @@ def send_span_async(span_dict: dict, sender=None, on_success=None, on_success_re
     test doubles replace.
     """
     send = sender or send_span
+    closure_only = (on_success is not None and on_success_ref is None) or (
+        on_chunk is not None and on_chunk_ref is None
+    )
 
     def _send_and_settle() -> None:
-        ok = send(span_dict)
-        if ok is not False and on_success is not None:
+        if deliver_chunks(span_dict, send, max_bytes, retries, on_chunk) and on_success is not None:
             on_success()
+
+    def _spawn() -> bool:
+        return _spawn_detached_sender(span_dict, on_success_ref, on_chunk_ref, max_bytes, retries)
 
     if os.environ.get("ATATUS_DISABLE_FORK", "").lower() == "true":
         _send_and_settle()
         return
     if not hasattr(os, "fork"):
-        if on_success is not None and on_success_ref is None:
+        if closure_only:
             _send_and_settle()
             return
-        if not _spawn_detached_sender(span_dict, on_success_ref):
+        if not _spawn():
             _send_and_settle()
         return
 
     try:
         pid = os.fork()
     except OSError:
-        if sender is None and not (on_success is not None and on_success_ref is None):
-            if _spawn_detached_sender(span_dict, on_success_ref):
+        if sender is None and not closure_only:
+            if _spawn():
                 return
         _send_and_settle()
         return

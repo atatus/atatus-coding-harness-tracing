@@ -677,7 +677,8 @@ class TestStopMarksTheExportBeforeSending:
             ),
         ):
             handlers.stop()
-        assert len(refused) == 1
+        assert len(refused) == 2, "one POST, retried once"
+        assert refused[0] == refused[1]
         assert state.get("current_trace_id") == "a" * 32, "un-acked on refusal"
         assert state.get("export_attempted_trace_id") == "a" * 32
 
@@ -700,7 +701,7 @@ class TestStopAckSurvivesTheDetachedSender:
         state = _live_turn_state(tmp_path)
         seen = {}
 
-        def capture(span_dict, sender=None, on_success=None, on_success_ref=None):
+        def capture(span_dict, sender=None, on_success=None, on_success_ref=None, **_):
             seen["payload"] = span_dict
             seen["ref"] = on_success_ref
 
