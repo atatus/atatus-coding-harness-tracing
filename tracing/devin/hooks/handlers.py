@@ -92,7 +92,13 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
 
     trace_id = generate_trace_id()
     root_span_id = generate_span_id()
+    identity_attrs: dict[str, Any] = {}
     user_id = env.get_user_id(SERVICE_NAME)
+    if user_id:
+        identity_attrs["user.id"] = user_id
+    login_id = env.get_user_login_id(SERVICE_NAME)
+    if login_id:
+        identity_attrs["user.login_id"] = login_id
 
     start_ms = steps[0].start_ms
     end_ms = steps[-1].end_ms or start_ms
@@ -107,8 +113,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
     # No tokens and no model on the root. Each step already carries its own, and the
     # summary queries sum these columns across every span in the range - a copy here is
     # the exact sum of the children, so the turn was being billed twice.
-    if user_id:
-        root_attrs["user.id"] = user_id
+    root_attrs.update(identity_attrs)
     if meta.get("backend"):
         root_attrs["devin.backend"] = meta["backend"]
 
@@ -137,6 +142,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
             "output.value": output_text,
             "llm.output_messages": json.dumps(output_messages),
         }
+        step_attrs.update(identity_attrs)
         if step.model_name:
             step_attrs["llm.model_name"] = step.model_name
         if step.request_id:
@@ -176,6 +182,7 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
                 "input.value": redact_content(env.log_tool_details, json.dumps(tc.arguments)),
                 "output.value": redact_content(env.log_tool_content, tc.result),
             }
+            tool_attrs.update(identity_attrs)
             tool_span = build_span(
                 f"Tool: {tc.name}",
                 "TOOL",
