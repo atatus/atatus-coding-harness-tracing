@@ -109,11 +109,11 @@ omitted from that span.
 | Gemini CLI | local Google-account file | |
 | Cursor | the hook's own payload | already carries the logged-in user's email natively |
 | Kiro | `kiro-cli user whoami` | resolved in the background — the CLI takes ~2s, so the first span or two in a session may not have it yet; later spans do |
-| GitHub Copilot | local config file | **a GitHub username, not an email** — Copilot has no local email surface |
-| opencode | local credential file | only populated when signed in via an OAuth provider; an API-key provider carries no email |
+| GitHub Copilot | local config file | **a GitHub username, not an email** — Copilot has no local email surface; respects `COPILOT_HOME` |
+| opencode | local account database, then local credential file | the signed-in opencode account's email; without one, only an OAuth provider's email — an API-key provider carries no email |
 | Antigravity | local Google-account and credentials files | |
 | omp | unverified | no confirmed install to test the detection against yet |
-| Devin | not implemented | out of scope for now |
+| Devin | none yet | the CLI's local credentials hold only an API token, with no email or username to report |
 
 #### `llm.reasoning_effort` — auto-detected, no setup
 

@@ -9,7 +9,9 @@ only thing standing between a bad detector and a crashed hook.
 
 import base64
 import json
+import sqlite3
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -146,7 +148,75 @@ class TestGeminiDetector:
         assert detect_gemini_login_id() == ""
 
 
+_COPILOT_CONFIG_WITH_HEADER = """// User settings belong in settings.json.
+// This file is managed automatically.
+{
+  "firstLaunchAt": "2026-01-01T00:00:00.000Z",
+  "appTipShown": true,
+  "lastLoggedInUser": {
+    "host": "https://github.com",
+    "login": "octocat"
+  },
+  "loggedInUsers": [
+    {
+      "host": "https://github.com",
+      "login": "octocat"
+    }
+  ]
+}
+"""
+
+
 class TestCopilotDetector:
+    @pytest.fixture(autouse=True)
+    def _default_copilot_home(self, monkeypatch):
+        monkeypatch.delenv("COPILOT_HOME", raising=False)
+
+    def test_reads_login_from_config_with_comment_header(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        copilot_dir = tmp_path / ".copilot"
+        copilot_dir.mkdir()
+        (copilot_dir / "config.json").write_text(_COPILOT_CONFIG_WITH_HEADER)
+        assert detect_copilot_login_id() == "octocat"
+
+    def test_reads_from_copilot_home_when_set(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        copilot_home = tmp_path / "custom-copilot"
+        copilot_home.mkdir()
+        (copilot_home / "config.json").write_text(_COPILOT_CONFIG_WITH_HEADER.replace("octocat", "hubot"))
+        monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
+        assert detect_copilot_login_id() == "hubot"
+
+    def test_copilot_home_ignores_default_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        default_dir = tmp_path / ".copilot"
+        default_dir.mkdir()
+        (default_dir / "config.json").write_text(_COPILOT_CONFIG_WITH_HEADER)
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "empty-copilot-home"))
+        assert detect_copilot_login_id() == ""
+
+    def test_inline_and_block_comments_keep_urls_in_strings(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        copilot_dir = tmp_path / ".copilot"
+        copilot_dir.mkdir()
+        (copilot_dir / "config.json").write_text(
+            "/* managed */\n"
+            "{\n"
+            '  "lastLoggedInUser": {\n'
+            '    "host": "https://github.com/*not-a-comment*/", // trailing\n'
+            '    "login": "octocat"\n'
+            "  }\n"
+            "}\n"
+        )
+        assert detect_copilot_login_id() == "octocat"
+
+    def test_malformed_config_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        copilot_dir = tmp_path / ".copilot"
+        copilot_dir.mkdir()
+        (copilot_dir / "config.json").write_text('// header\n{"lastLoggedInUser": {"login": ')
+        assert detect_copilot_login_id() == ""
+
     def test_reads_github_username(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
         copilot_dir = tmp_path / ".copilot"
@@ -186,6 +256,182 @@ class TestOpencodeDetector:
     def test_missing_file_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
         assert detect_opencode_login_id() == ""
+
+
+def _opencode_data_dir(home: Path) -> Path:
+    data_dir = home / ".local" / "share" / "opencode"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def _build_opencode_db(path: Path, accounts=(), control_accounts=(), active_account_id=None) -> None:
+    con = sqlite3.connect(str(path))
+    con.executescript("""
+        CREATE TABLE `account` (
+          `id` text PRIMARY KEY,
+          `email` text NOT NULL,
+          `url` text NOT NULL,
+          `access_token` text NOT NULL,
+          `refresh_token` text NOT NULL,
+          `token_expiry` integer,
+          `time_created` integer NOT NULL,
+          `time_updated` integer NOT NULL
+        );
+        CREATE TABLE `control_account` (
+          `email` text NOT NULL,
+          `url` text NOT NULL,
+          `access_token` text NOT NULL,
+          `refresh_token` text NOT NULL,
+          `token_expiry` integer,
+          `active` integer NOT NULL,
+          `time_created` integer NOT NULL,
+          `time_updated` integer NOT NULL,
+          CONSTRAINT `control_account_pk` PRIMARY KEY(`email`, `url`)
+        );
+        CREATE TABLE `account_state` (
+          `id` integer PRIMARY KEY,
+          `active_account_id` text,
+          `active_org_id` text,
+          FOREIGN KEY (`active_account_id`) REFERENCES `account`(`id`) ON DELETE SET NULL
+        );
+        """)
+    for account_id, email in accounts:
+        con.execute(
+            "INSERT INTO account VALUES (?, ?, 'https://opencode.ai', 'at', 'rt', NULL, 1, 1)",
+            (account_id, email),
+        )
+    for email, active, updated in control_accounts:
+        con.execute(
+            "INSERT INTO control_account VALUES (?, 'https://opencode.ai', 'at', 'rt', NULL, ?, 1, ?)",
+            (email, active, updated),
+        )
+    if active_account_id is not None:
+        con.execute("INSERT INTO account_state VALUES (1, ?, NULL)", (active_account_id,))
+    con.commit()
+    con.close()
+
+
+def _write_opencode_oauth_auth(data_dir: Path, email: str) -> None:
+    (data_dir / "auth.json").write_text(json.dumps({"chatgpt": {"type": "oauth", "email": email}}))
+
+
+class TestOpencodeAccountDb:
+    def test_reads_active_account_email(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        _build_opencode_db(
+            data_dir / "opencode.db",
+            accounts=[("acc-1", "first@example.com"), ("acc-2", "active@example.com")],
+            active_account_id="acc-2",
+        )
+        assert detect_opencode_login_id() == "active@example.com"
+
+    def test_reads_account_still_in_uncheckpointed_wal(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        db_path = data_dir / "opencode.db"
+        _build_opencode_db(db_path)
+        writer = sqlite3.connect(str(db_path))
+        try:
+            writer.execute("PRAGMA journal_mode=WAL")
+            writer.execute("PRAGMA wal_autocheckpoint=0")
+            writer.execute("INSERT INTO account VALUES ('acc-1', 'live@example.com', 'u', 'at', 'rt', NULL, 1, 1)")
+            writer.execute("INSERT INTO account_state VALUES (1, 'acc-1', NULL)")
+            writer.commit()
+            assert detect_opencode_login_id() == "live@example.com"
+        finally:
+            writer.close()
+
+    def test_active_account_wins_over_auth_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        _build_opencode_db(data_dir / "opencode.db", accounts=[("acc-1", "db@example.com")], active_account_id="acc-1")
+        _write_opencode_oauth_auth(data_dir, "provider@example.com")
+        assert detect_opencode_login_id() == "db@example.com"
+
+    def test_falls_back_to_active_control_account(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        _build_opencode_db(
+            data_dir / "opencode.db",
+            accounts=[("acc-1", "unselected@example.com")],
+            control_accounts=[
+                ("old@example.com", 0, 300),
+                ("current@example.com", 1, 200),
+                ("stale@example.com", 1, 100),
+            ],
+        )
+        assert detect_opencode_login_id() == "current@example.com"
+
+    def test_dangling_active_account_id_falls_back_to_control_account(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        _build_opencode_db(
+            data_dir / "opencode.db",
+            control_accounts=[("control@example.com", 1, 1)],
+            active_account_id="deleted-account",
+        )
+        assert detect_opencode_login_id() == "control@example.com"
+
+    def test_no_active_account_falls_back_to_auth_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        _build_opencode_db(
+            data_dir / "opencode.db",
+            accounts=[("acc-1", "unselected@example.com")],
+            control_accounts=[("inactive@example.com", 0, 1)],
+        )
+        _write_opencode_oauth_auth(data_dir, "provider@example.com")
+        assert detect_opencode_login_id() == "provider@example.com"
+
+    def test_db_without_account_tables_falls_back_to_auth_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        con = sqlite3.connect(str(data_dir / "opencode.db"))
+        con.execute("CREATE TABLE session (id text PRIMARY KEY)")
+        con.commit()
+        con.close()
+        _write_opencode_oauth_auth(data_dir, "provider@example.com")
+        assert detect_opencode_login_id() == "provider@example.com"
+
+    def test_corrupt_db_falls_back_to_auth_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        (data_dir / "opencode.db").write_bytes(b"this is not a sqlite database" * 64)
+        _write_opencode_oauth_auth(data_dir, "provider@example.com")
+        assert detect_opencode_login_id() == "provider@example.com"
+
+    def test_locked_db_falls_back_to_auth_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        db_path = data_dir / "opencode.db"
+        _build_opencode_db(db_path, accounts=[("acc-1", "db@example.com")], active_account_id="acc-1")
+        _write_opencode_oauth_auth(data_dir, "provider@example.com")
+        holder = sqlite3.connect(str(db_path), isolation_level=None)
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            started = time.monotonic()
+            assert detect_opencode_login_id() == "provider@example.com"
+            assert time.monotonic() - started < 1.0
+        finally:
+            holder.execute("ROLLBACK")
+            holder.close()
+
+    def test_never_creates_the_db(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        assert detect_opencode_login_id() == ""
+        assert not (data_dir / "opencode.db").exists()
+
+    def test_never_writes_to_the_db(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        data_dir = _opencode_data_dir(tmp_path)
+        db_path = data_dir / "opencode.db"
+        _build_opencode_db(db_path, accounts=[("acc-1", "db@example.com")], active_account_id="acc-1")
+        before = db_path.read_bytes()
+        assert detect_opencode_login_id() == "db@example.com"
+        assert db_path.read_bytes() == before
+        assert sorted(p.name for p in data_dir.iterdir()) == ["opencode.db"]
 
 
 class TestOmpDetector:

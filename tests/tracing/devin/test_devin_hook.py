@@ -293,6 +293,41 @@ class TestEmitInteraction:
         handlers.emit_interaction("sess-1", [], "prompt", {})
         assert captured_spans == []
 
+    def _emit_with_tool(self, captured):
+        steps = [
+            _step("A", content="a", prompt=1, completion=1, tools=[ToolCall("t1", "grep", {"q": "x"}, "")]),
+            _step("B", content="b", prompt=1, completion=1),
+        ]
+        return self._emit(captured, steps)
+
+    def test_every_span_carries_user_id(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_USER_ID", "dev-1")
+        monkeypatch.setattr(env, "get_user_login_id", lambda service_name="": "")
+        self._emit_with_tool(captured_spans)
+        assert sorted(_kind(s) for s in captured_spans) == ["AGENT", "LLM", "LLM", "TOOL"]
+        assert all(_span_attrs(s).get("user.id") == "dev-1" for s in captured_spans)
+
+    def test_every_span_carries_detected_login_id(self, captured_spans, monkeypatch):
+        asked: list[str] = []
+
+        def fake_login_id(service_name=""):
+            asked.append(service_name)
+            return "dev@example.com" if service_name == "devin" else ""
+
+        monkeypatch.setattr(env, "get_user_login_id", fake_login_id)
+        self._emit_with_tool(captured_spans)
+        assert len(captured_spans) == 4
+        assert all(_span_attrs(s).get("user.login_id") == "dev@example.com" for s in captured_spans)
+        assert asked == ["devin"]
+
+    def test_identity_omitted_when_unknown(self, captured_spans, monkeypatch):
+        monkeypatch.setattr(env, "get_user_login_id", lambda service_name="": "")
+        self._emit_with_tool(captured_spans)
+        for span in captured_spans:
+            attrs = _span_attrs(span)
+            assert "user.id" not in attrs
+            assert "user.login_id" not in attrs
+
 
 # ===========================================================================
 # flush_session — DB-sourced emission + watermark
