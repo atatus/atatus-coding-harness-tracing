@@ -510,7 +510,7 @@ def debug_dump(label: str, data: object) -> None:
 #: or an ``endpoint`` key in ``~/.atatus/harness/config.json``.
 DEFAULT_OTLP_ENDPOINT = "https://otel-rx.atatus.com"
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.0"
 
 
 def _env_float(name: str, default: float, minimum: float) -> float:
