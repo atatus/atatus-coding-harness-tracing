@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from core.common import StateManager
+from core.common import StateManager, env
 from tracing.antigravity.hooks import adapter
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -190,6 +190,20 @@ class TestEnsureSessionInitialized:
         sm = self._make_state(antigravity_state_dir, "user-env")
         adapter.ensure_session_initialized(sm, {"conversationId": "c"})
         assert sm.get("user_id") == "test-user-123"
+
+    def test_user_id_per_harness_override(self, antigravity_state_dir, disable_env_vars, monkeypatch):
+        """harnesses.antigravity.user_id in config overrides the global user_id."""
+        monkeypatch.setattr(
+            "core.config.load_config",
+            lambda config_path=None: {
+                "user_id": "global@x",
+                "harnesses": {adapter.SERVICE_NAME: {"user_id": "scoped@x"}},
+            },
+        )
+        env.invalidate_caches()
+        sm = self._make_state(antigravity_state_dir, "user-scoped")
+        adapter.ensure_session_initialized(sm, {"conversationId": "c"})
+        assert sm.get("user_id") == "scoped@x"
 
 
 # ── gc_stale_state_files tests ───────────────────────────────────────────────

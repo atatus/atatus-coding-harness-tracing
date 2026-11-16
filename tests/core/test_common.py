@@ -5,6 +5,7 @@ import io
 import json
 import os
 import platform
+import select
 import sys
 import threading
 import time
@@ -1762,25 +1763,38 @@ class TestSendSpanAsync:
             send_span_async({"x": 3}, sender=sender)
         sender.assert_called_once_with({"x": 3})
 
-    def test_the_detached_send_leaves_the_hooks_process_group(self, tmp_path, monkeypatch):
+    def test_the_detached_send_leaves_the_hooks_process_group(self, monkeypatch):
         """Otherwise a group-wide signal — the harness reaping a timed-out hook,
         a Ctrl-C, a SIGHUP on terminal close — kills the send mid-flight."""
         monkeypatch.delenv("ATATUS_DISABLE_FORK", raising=False)
         if not hasattr(os, "fork") or not hasattr(os, "setsid"):
             pytest.skip("POSIX sessions unavailable on this platform")
 
-        report = tmp_path / "sid"
+        read_end, write_end = os.pipe()
 
         def record(_span):
-            report.write_text(f"{os.getsid(0)} {os.getpgid(0)}")
+            os.write(write_end, f"{os.getsid(0)} {os.getpgid(0)}".encode())
             return True
 
-        send_span_async({"x": 8}, sender=record)
+        try:
+            send_span_async({"x": 8}, sender=record)
+        finally:
+            os.close(write_end)
 
+        # The read end hits EOF only once the detached grandchild, the last holder of the write end, has exited.
+        report = b""
         deadline = time.monotonic() + 5
-        while not report.exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        child_sid, child_pgid = report.read_text().split()
+        try:
+            while True:
+                ready, _, _ = select.select([read_end], [], [], max(0.0, deadline - time.monotonic()))
+                assert ready, "the detached send did not finish"
+                chunk = os.read(read_end, 64)
+                if not chunk:
+                    break
+                report += chunk
+        finally:
+            os.close(read_end)
+        child_sid, child_pgid = report.decode().split()
         assert child_sid != str(os.getsid(0))
         assert child_pgid != str(os.getpgid(0))
 
