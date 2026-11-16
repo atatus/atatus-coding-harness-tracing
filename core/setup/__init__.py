@@ -426,7 +426,7 @@ def prompt_content_logging() -> dict:
             LOG_FLAG_DEFAULTS["tool_details"],
         ),
         "tool_content": _prompt_bool(
-            "Log what tools returned (file contents, command output)?",
+            "Log full tool arguments and output (file contents, patches, command output)?",
             LOG_FLAG_DEFAULTS["tool_content"],
         ),
     }

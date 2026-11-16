@@ -130,6 +130,7 @@ the generation that spent them; the root is a container.
 | `openinference.span.kind` | `LLM` |
 | `output.value` | Assistant text for the generation, or its reasoning when the generation produced only thinking + tool calls |
 | `llm.output_messages` | Structured assistant response (JSON string) |
+| `user.id` | Optional user identifier |
 | `llm.model_name` | Model name for the generation |
 | `llm.reasoning` | Reasoning content (when present) |
 | `llm.token_count.prompt` | Per-generation prompt tokens (omitted when 0) |
@@ -147,6 +148,7 @@ the generation that spent them; the root is a container.
 | `tool.name` | Tool name from the tool call |
 | `input.value` | Serialized tool-call arguments |
 | `output.value` | Tool result, when available in the live DB (often empty — see note) |
+| `user.id` | Optional user identifier |
 
 TOOL spans are parented to the LLM span that issued the call.
 

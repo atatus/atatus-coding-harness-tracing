@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO, Any, Dict, Optional
 
 from core.identity import (
     detect_antigravity_login_id,
@@ -304,6 +304,35 @@ def redact_content(allowed: bool, content: str) -> str:
     if allowed:
         return text
     return f"<redacted ({len(text)} chars)>"
+
+
+_TOOL_DETAIL_ARG_KEYS = (
+    ("tool.command", ("command", "cmd", "CommandLine")),
+    ("tool.file_path", ("file_path", "filePath", "path", "AbsolutePath")),
+    ("tool.url", ("url", "Url")),
+    ("tool.query", ("query", "pattern", "Query")),
+)
+
+
+def tool_detail_attributes(tool_input: Any) -> Dict[str, str]:
+    """Command, file path, URL and query from a tool's arguments: tool details, never file bodies or patches."""
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except ValueError:
+            return {}
+    if not isinstance(tool_input, dict):
+        return {}
+    attrs: Dict[str, str] = {}
+    for attr, keys in _TOOL_DETAIL_ARG_KEYS:
+        for key in keys:
+            value = tool_input.get(key)
+            if isinstance(value, list) and value and all(isinstance(part, str) for part in value):
+                value = " ".join(value)
+            if isinstance(value, str) and value:
+                attrs[attr] = redact_content(env.log_tool_details, value)
+                break
+    return attrs
 
 
 # ---------------------------------------------------------------------------

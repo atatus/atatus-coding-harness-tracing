@@ -30,6 +30,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    tool_detail_attributes,
 )
 from core.event_model import (
     AgentEvent,
@@ -1897,6 +1898,15 @@ def _close_live_turn(state, input_json: dict, reason: TurnEndReason) -> None:
     log(f"Closed Turn {trace_count} ({export.reason.value})")
 
 
+def _root_already_sent(state, trace_id: str, trace_count: str) -> bool:
+    """Stop's root is on the wire until its POST is acknowledged; a second root under the same
+    span id would leave two contradictory rows for the turn, so the first close wins."""
+    if state.get("export_attempted_trace_id") != trace_id:
+        return False
+    log(f"Turn {trace_count} root already sent; not sending it again")
+    return True
+
+
 def _handle_stop(input_json: dict) -> None:
     """Handle Stop: export the completed turn, then release any held trace whose agents
     have all finished."""
@@ -1914,6 +1924,8 @@ def _export_stopped_turn(state, input_json: dict) -> None:
     if session_id is None or trace_id is None:
         return
     trace_count = state.get("trace_count") or "0"
+    if _root_already_sent(state, trace_id, trace_count):
+        return
 
     export = _export_turn(state, input_json, TurnEndReason.COMPLETED)
     if export is None:
@@ -2266,6 +2278,8 @@ def _handle_stop_failure(input_json: dict) -> None:
     trace_start_time = state.get("current_trace_start_time") or str(get_timestamp_ms())
     user_prompt = state.get("current_trace_prompt") or ""
     trace_count = state.get("trace_count") or "0"
+    if _root_already_sent(state, trace_id, trace_count):
+        return
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
 
@@ -2326,7 +2340,7 @@ def _handle_notification(input_json: dict) -> None:
     session_id = state.get("session_id")
     message = redact_content(env.log_prompts, input_json.get("message", ""))
     title = redact_content(env.log_prompts, input_json.get("title", ""))
-    notification_type = input_json.get("type", "info")
+    notification_type = input_json.get("notification_type", "info")
 
     attrs = {
         "session.id": session_id,
@@ -2459,9 +2473,9 @@ def _handle_permission_request(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id")
-    permission = input_json.get("permission", "")
+    permission = input_json.get("permission_mode", "")
     tool_name = input_json.get("tool_name", "")
-    tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
+    tool_input = redact_content(env.log_tool_content, json.dumps(input_json.get("tool_input", {})))
 
     attrs = {
         "session.id": session_id,
@@ -2470,6 +2484,7 @@ def _handle_permission_request(input_json: dict) -> None:
         "permission.type": permission,
         "permission.tool": tool_name,
         "input.value": tool_input,
+        **tool_detail_attributes(input_json.get("tool_input")),
     }
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
@@ -2502,9 +2517,9 @@ def _handle_permission_denied(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id")
-    permission = input_json.get("permission", "")
+    permission = input_json.get("permission_mode", "")
     tool_name = input_json.get("tool_name", "")
-    tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
+    tool_input = redact_content(env.log_tool_content, json.dumps(input_json.get("tool_input", {})))
 
     attrs = {
         "session.id": session_id,
@@ -2514,6 +2529,7 @@ def _handle_permission_denied(input_json: dict) -> None:
         "permission.tool": tool_name,
         "permission.denied": "true",
         "input.value": tool_input,
+        **tool_detail_attributes(input_json.get("tool_input")),
     }
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
@@ -2521,6 +2537,12 @@ def _handle_permission_denied(input_json: dict) -> None:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    reason = input_json.get("reason", "")
+    if reason:
+        attrs["permission.denial_reason"] = reason
+    tool_use_id = input_json.get("tool_use_id", "")
+    if tool_use_id:
+        attrs["tool.call.id"] = tool_use_id
 
     now = str(get_timestamp_ms())
     span = build_span(

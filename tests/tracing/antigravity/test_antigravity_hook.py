@@ -749,10 +749,10 @@ class TestRedaction:
         llm_attrs = _get_span_attrs(llm_payload)
         assert "redacted" in llm_attrs["output.value"]["stringValue"]
 
-    def test_tool_content_redacts_outputs_only(
+    def test_tool_content_redacts_arguments_and_outputs(
         self, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
     ):
-        """tool_content gates tool *outputs*; tool inputs stay visible."""
+        """Arguments carry file bodies (write_to_file, replace_file_content), so they follow tool_content."""
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         stdin_payload = {
             "conversationId": "c1",
@@ -772,13 +772,14 @@ class TestRedaction:
         )
         attrs = _get_span_attrs(tool_payload)
         assert "redacted" in attrs["output.value"]["stringValue"]
-        assert "redacted" not in attrs["input.value"]["stringValue"]
-        assert "redacted" not in attrs["tool.description"]["stringValue"]
+        assert "redacted" in attrs["input.value"]["stringValue"]
+        assert attrs["tool.description"]["stringValue"] == "codecov.yml"
+        assert attrs["tool.query"]["stringValue"] == "codecov.yml"
 
-    def test_tool_details_redacts_inputs_only(
+    def test_tool_details_redacts_description_only(
         self, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
     ):
-        """tool_details gates tool *inputs* (args, description); outputs stay visible."""
+        """tool_details gates the description and promoted fields; arguments and outputs follow tool_content."""
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         stdin_payload = {
             "conversationId": "c1",
@@ -797,8 +798,9 @@ class TestRedaction:
             )
         )
         attrs = _get_span_attrs(tool_payload)
-        assert "redacted" in attrs["input.value"]["stringValue"]
+        assert "redacted" not in attrs["input.value"]["stringValue"]
         assert "redacted" in attrs["tool.description"]["stringValue"]
+        assert "redacted" in attrs["tool.query"]["stringValue"]
         assert "redacted" not in attrs["output.value"]["stringValue"]
 
 

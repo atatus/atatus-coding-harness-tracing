@@ -465,6 +465,32 @@ class TestTurnLifecycle:
         assert _attrs(spans["User Prompt"][0])["user.id"]["stringValue"] == "later@example.com"
         assert _attrs(spans["Agent Response"][0])["user.id"]["stringValue"] == "later@example.com"
 
+    def test_ide_turn_root_carries_the_cursor_version(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        common = {"conversation_id": "conv-1", "generation_id": "gen-1", "cursor_version": "2.0.77"}
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
+            _dispatch("sessionStart", {"hook_event_name": "sessionStart", **common})
+            _dispatch(
+                "beforeSubmitPrompt",
+                {"hook_event_name": "beforeSubmitPrompt", "prompt": "p", **common},
+            )
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
+            _dispatch("stop", {"hook_event_name": "stop", **common})
+        spans = _spans_by_name(captured_spans)
+        assert "Session Start" not in spans
+        assert _attrs(spans["User Prompt"][0])["cursor.version"]["stringValue"] == "2.0.77"
+
+    def test_turn_root_omits_the_cursor_version_when_absent(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
+            _dispatch(
+                "beforeSubmitPrompt",
+                {"conversation_id": "conv-1", "generation_id": "gen-1", "prompt": "p"},
+            )
+        with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=2000):
+            _dispatch("stop", {"conversation_id": "conv-1", "generation_id": "gen-1"})
+        assert "cursor.version" not in _attrs(_spans_by_name(captured_spans)["User Prompt"][0])
+
     def test_session_end_flushes_pending_root(self, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
         with mock.patch("tracing.cursor.hooks.handlers.get_timestamp_ms", return_value=1000):
