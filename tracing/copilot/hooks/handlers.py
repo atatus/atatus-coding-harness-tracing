@@ -20,6 +20,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    tool_detail_attributes,
 )
 from core.event_model import TurnEndReason
 from core.turn_lifecycle import turn_end_attributes, turn_status
@@ -486,7 +487,8 @@ def _handle_permission_request(input_json: dict) -> None:
         "openinference.span.kind": "CHAIN",
         "permission.type": permission,
         "permission.tool": tool_name,
-        "input.value": redact_content(env.log_tool_details, tool_input),
+        "input.value": redact_content(env.log_tool_content, tool_input),
+        **tool_detail_attributes(tool_input_raw),
     }
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""

@@ -15,6 +15,7 @@ import pytest
 from core.common import StateManager
 from tracing.copilot.hooks.handlers import (
     _ensure_turn,
+    _handle_permission_request,
     _handle_post_tool_use,
     _handle_post_tool_use_failure,
     _handle_pre_tool_use,
@@ -687,6 +688,15 @@ class TestPostToolUseFailure:
         with mock.patch("tracing.copilot.hooks.handlers.resolve_session", return_value=state):
             _handle_post_tool_use_failure({"tool_name": "bash", "error": "boom"})
         assert len(captured_spans) == 0
+
+
+class TestPermissionRequest:
+    def test_tool_content_off_redacts_arguments_but_keeps_command(self, mock_resolve, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        _handle_permission_request({"tool_name": "bash", "tool_args": {"command": "git push"}, "permission": "shell"})
+        attrs = _get_span_attrs(captured_spans[-1])
+        assert attrs["input.value"]["stringValue"].startswith("<redacted (")
+        assert attrs["tool.command"]["stringValue"] == "git push"
 
 
 # ---------------------------------------------------------------------------

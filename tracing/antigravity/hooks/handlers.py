@@ -261,7 +261,7 @@ def _build_tool_span(
         {
             "openinference.span.kind": "TOOL",
             "tool.name": tool_name,
-            "input.value": redact_content(env.log_tool_details, args_json),
+            "input.value": redact_content(env.log_tool_content, args_json),
             "output.value": redact_content(env.log_tool_content, output_text),
             "tool.description": redact_content(env.log_tool_details, _tool_description(tool_name, args, args_json)),
             "tracing.parentage": parentage,

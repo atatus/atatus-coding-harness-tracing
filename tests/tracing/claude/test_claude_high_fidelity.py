@@ -690,6 +690,53 @@ class TestStopMarksTheExportBeforeSending:
         assert state.get("trace_count") == "2"
 
 
+def _run_hook_in_flight(entry, state, payload, captured):
+    """Sends are captured but never acknowledged, as while the detached POST is still running."""
+    with (
+        mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+        mock.patch.object(handlers, "send_span_async", lambda span, **kwargs: captured.append(span)),
+        mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+        mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+    ):
+        entry()
+
+
+class TestATurnRootIsSentOnce:
+    """Stop clears the turn only once its detached POST lands. Anything that closes the turn
+    inside that window must not send the same root again: two rows under one span id make the
+    turn flip between failed and passed, and its token and cost totals move."""
+
+    def _stop_in_flight(self, tmp_path, captured):
+        transcript = _write(tmp_path / "t.jsonl", _WORK)
+        state = _live_turn_state(tmp_path)
+        _run_hook_in_flight(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        assert len(captured) == 1
+        return state, transcript
+
+    def test_stop_failure_after_stop_does_not_resend_the_root(self, tmp_path):
+        captured = []
+        state, transcript = self._stop_in_flight(tmp_path, captured)
+        payload = {"session_id": "s1", "error": "rate_limit", "transcript_path": str(transcript)}
+        _run_hook_in_flight(handlers.stop_failure, state, payload, captured)
+        assert len(captured) == 1
+        assert state.get("current_trace_id") == "a" * 32, "left for the in-flight Stop to acknowledge"
+
+    def test_a_second_stop_does_not_resend_the_root(self, tmp_path):
+        captured = []
+        state, transcript = self._stop_in_flight(tmp_path, captured)
+        _run_hook_in_flight(handlers.stop, state, {"session_id": "s1", "transcript_path": str(transcript)}, captured)
+        assert len(captured) == 1
+
+    def test_stop_failure_alone_still_reports_the_failed_turn(self, tmp_path):
+        captured = []
+        state = _live_turn_state(tmp_path)
+        _run_hook_in_flight(handlers.stop_failure, state, {"session_id": "s1", "error": "rate_limit"}, captured)
+        root = _root_span(_spans(captured[0]))
+        assert root["spanId"] == "b" * 16
+        assert root["status"]["code"] == 2
+        assert state.get("current_trace_id") is None
+
+
 class TestStopAckSurvivesTheDetachedSender:
     """Without fork() the POST runs in ``core.sender``, which cannot carry the
     ``_settle`` closure. Stop therefore also hands over an importable reference;

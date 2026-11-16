@@ -288,8 +288,12 @@ class TestABackgroundAgentIsExportedOnce:
         _hold_launching_turn(session)
         transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
         _grow(transcript, 1)
-        with mock.patch.object(handlers, "send_span", lambda p: False):
-            _stop(session, transcript)
+        refused = []
+        session.sender = lambda p: refused.append(p) or False
+        _stop(session, transcript)
+        session.sender = None
+        assert refused
+        assert session.payloads == []
         _grow(transcript, 2)
         _stop(session, transcript)
         _stop(session, transcript)

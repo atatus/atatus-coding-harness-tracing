@@ -74,7 +74,7 @@ def ensure_session_initialized(state: StateManager, input_json: dict) -> None:
     session_id = input_json.get("conversationId") or generate_trace_id()
 
     state.set("session_id", session_id)
-    state.set("user_id", env.user_id)
+    state.set("user_id", env.get_user_id(SERVICE_NAME))
     state.set("user_login_id", env.get_user_login_id(SERVICE_NAME))
     state.set("last_emitted_turn", "-1")
     state.set("trace_count", "0")

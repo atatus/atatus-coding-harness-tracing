@@ -1061,14 +1061,20 @@ class TestNotification:
         """Builds CHAIN span with notification attributes."""
         state.set("current_trace_id", "t" * 32)
         state.set("current_trace_span_id", "s" * 16)
-        _handle_notification({"message": "Build succeeded", "title": "CI", "type": "success"})
+        _handle_notification(
+            {
+                "message": "Claude needs your permission",
+                "title": "Permission needed",
+                "notification_type": "permission_prompt",
+            }
+        )
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
         assert attrs["openinference.span.kind"]["stringValue"] == "CHAIN"
-        assert attrs["notification.message"]["stringValue"] == "Build succeeded"
-        assert attrs["notification.title"]["stringValue"] == "CI"
-        assert attrs["notification.type"]["stringValue"] == "success"
+        assert attrs["notification.message"]["stringValue"] == "Claude needs your permission"
+        assert attrs["notification.title"]["stringValue"] == "Permission needed"
+        assert attrs["notification.type"]["stringValue"] == "permission_prompt"
 
     def test_default_notification_type(self, mock_resolve, state, captured_spans):
         """Default notification_type is 'info'."""
@@ -1095,12 +1101,14 @@ class TestPermissionRequest:
         """Builds CHAIN span with permission attributes."""
         state.set("current_trace_id", "t" * 32)
         state.set("current_trace_span_id", "s" * 16)
-        _handle_permission_request({"permission": "allow", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}})
+        _handle_permission_request(
+            {"permission_mode": "auto", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
+        )
         assert len(captured_spans) == 1
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
         assert attrs["openinference.span.kind"]["stringValue"] == "CHAIN"
-        assert attrs["permission.type"]["stringValue"] == "allow"
+        assert attrs["permission.type"]["stringValue"] == "auto"
         assert attrs["permission.tool"]["stringValue"] == "Bash"
         assert "command" in attrs["input.value"]["stringValue"]
 
@@ -1108,13 +1116,13 @@ class TestPermissionRequest:
         """Logs debug input via log()."""
         state.set("current_trace_id", "t" * 32)
         with mock.patch("tracing.claude_code.hooks.handlers.log") as log_mock:
-            _handle_permission_request({"permission": "deny", "tool_name": "Edit"})
+            _handle_permission_request({"permission_mode": "default", "tool_name": "Edit"})
         log_mock.assert_called_once()
         assert "permission_request" in log_mock.call_args[0][0]
 
     def test_no_trace_id_returns_early(self, mock_resolve, state, captured_spans):
         """No current_trace_id → no span sent."""
-        _handle_permission_request({"permission": "allow"})
+        _handle_permission_request({"permission_mode": "default"})
         assert len(captured_spans) == 0
 
 
@@ -1326,15 +1334,30 @@ class TestContentRedaction:
     def test_permission_request_redacts_tool_input(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")
-        _handle_permission_request({"permission": "ask", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}})
+        _handle_permission_request(
+            {"permission_mode": "default", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
+        )
         attrs = _attrs(captured_spans[0])
         assert attrs["input.value"]["stringValue"].startswith("<redacted (")
+
+    def test_permission_request_keeps_file_body_out_with_tool_details_on(
+        self, mock_resolve, state, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_permission_request(
+            {"permission": "ask", "tool_name": "Write", "tool_input": {"file_path": "/repo/.env", "content": "KEY=1"}}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "KEY=1" not in attrs["input.value"]["stringValue"]
+        assert attrs["tool.file_path"]["stringValue"] == "/repo/.env"
 
     def test_notification_redacts_message_when_prompts_off(self, mock_resolve, state, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")
-        _handle_notification({"message": "hi", "title": "alert", "type": "info"})
+        _handle_notification({"message": "hi", "title": "alert", "notification_type": "idle_prompt"})
         attrs = _attrs(captured_spans[0])
         assert attrs["notification.message"]["stringValue"].startswith("<redacted (")
         assert attrs["notification.title"]["stringValue"].startswith("<redacted (")

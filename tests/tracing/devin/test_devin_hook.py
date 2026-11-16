@@ -207,8 +207,7 @@ class TestEmitInteraction:
         tool = next(s for s in captured_spans if _kind(s) == "TOOL")
         assert _span_obj(tool)["parentSpanId"] == _span_obj(llm)["spanId"]
 
-    def test_tool_input_gated_by_tool_details_flag(self, captured_spans, monkeypatch):
-        """Arguments are what the tool was asked to do -> ATATUS_LOG_TOOL_DETAILS."""
+    def test_tool_command_gated_by_tool_details_flag(self, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
         env.invalidate_caches()
@@ -219,25 +218,31 @@ class TestEmitInteraction:
         self._emit(captured_spans, steps)
 
         tool = _span_attrs(next(s for s in captured_spans if _kind(s) == "TOOL"))
-        assert "secret" not in tool["input.value"]
-        assert tool["input.value"].startswith("<redacted (")
+        assert tool["tool.command"].startswith("<redacted (")
+        assert json.loads(tool["input.value"]) == {"cmd": "secret"}
         assert tool["output.value"] == "out"
 
-    def test_tool_output_gated_by_tool_content_flag(self, captured_spans, monkeypatch):
-        """Results are what the tool returned -> ATATUS_LOG_TOOL_CONTENT."""
+    def test_tool_arguments_and_output_gated_by_tool_content_flag(self, captured_spans, monkeypatch):
+        """Arguments can carry whole file bodies, so they follow tool content like the result does."""
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         env.invalidate_caches()
         steps = [
             _step(
-                "A", content="c", prompt=1, completion=1, tools=[ToolCall("t", "bash", {"cmd": "ls"}, "file contents")]
+                "A",
+                content="c",
+                prompt=1,
+                completion=1,
+                tools=[ToolCall("t", "write", {"file_path": "/repo/a.py", "content": "SECRET=1"}, "file contents")],
             )
         ]
 
         self._emit(captured_spans, steps)
 
         tool = _span_attrs(next(s for s in captured_spans if _kind(s) == "TOOL"))
-        assert json.loads(tool["input.value"]) == {"cmd": "ls"}
+        assert "SECRET" not in tool["input.value"]
+        assert tool["input.value"].startswith("<redacted (")
+        assert tool["tool.file_path"] == "/repo/a.py"
         assert "file contents" not in tool["output.value"]
         assert tool["output.value"].startswith("<redacted (")
 
@@ -287,6 +292,41 @@ class TestEmitInteraction:
     def test_no_steps_emits_nothing(self, captured_spans):
         handlers.emit_interaction("sess-1", [], "prompt", {})
         assert captured_spans == []
+
+    def _emit_with_tool(self, captured):
+        steps = [
+            _step("A", content="a", prompt=1, completion=1, tools=[ToolCall("t1", "grep", {"q": "x"}, "")]),
+            _step("B", content="b", prompt=1, completion=1),
+        ]
+        return self._emit(captured, steps)
+
+    def test_every_span_carries_user_id(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_USER_ID", "dev-1")
+        monkeypatch.setattr(env, "get_user_login_id", lambda service_name="": "")
+        self._emit_with_tool(captured_spans)
+        assert sorted(_kind(s) for s in captured_spans) == ["AGENT", "LLM", "LLM", "TOOL"]
+        assert all(_span_attrs(s).get("user.id") == "dev-1" for s in captured_spans)
+
+    def test_every_span_carries_detected_login_id(self, captured_spans, monkeypatch):
+        asked: list[str] = []
+
+        def fake_login_id(service_name=""):
+            asked.append(service_name)
+            return "dev@example.com" if service_name == "devin" else ""
+
+        monkeypatch.setattr(env, "get_user_login_id", fake_login_id)
+        self._emit_with_tool(captured_spans)
+        assert len(captured_spans) == 4
+        assert all(_span_attrs(s).get("user.login_id") == "dev@example.com" for s in captured_spans)
+        assert asked == ["devin"]
+
+    def test_identity_omitted_when_unknown(self, captured_spans, monkeypatch):
+        monkeypatch.setattr(env, "get_user_login_id", lambda service_name="": "")
+        self._emit_with_tool(captured_spans)
+        for span in captured_spans:
+            attrs = _span_attrs(span)
+            assert "user.id" not in attrs
+            assert "user.login_id" not in attrs
 
 
 # ===========================================================================
