@@ -31,12 +31,13 @@ class Session:
         self.state.set("session_id", "s1")
         self.state.set("trace_count", "1")
         self.payloads: list[dict] = []
+        self.sender = None
 
     def hook(self, entry, payload: dict) -> None:
         payload = {"session_id": "s1", **payload}
         with (
             mock.patch.object(handlers, "resolve_session", lambda *a, **k: self.state),
-            mock.patch.object(handlers, "send_span", lambda p: self.payloads.append(p) or True),
+            mock.patch.object(handlers, "send_span", self.sender or (lambda p: self.payloads.append(p) or True)),
             mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
             mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
         ):
@@ -287,8 +288,12 @@ class TestABackgroundAgentIsExportedOnce:
         _hold_launching_turn(session)
         transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
         _grow(transcript, 1)
-        with mock.patch.object(handlers, "send_span", lambda p: False):
-            _stop(session, transcript)
+        refused = []
+        session.sender = lambda p: refused.append(p) or False
+        _stop(session, transcript)
+        session.sender = None
+        assert refused
+        assert session.payloads == []
         _grow(transcript, 2)
         _stop(session, transcript)
         _stop(session, transcript)
