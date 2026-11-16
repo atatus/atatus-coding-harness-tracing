@@ -76,3 +76,28 @@ class TestTokensAreNotDuplicatedOntoTheRoot:
             "token counts must not be attached to a trace root — range sums would "
             "double-count the turn:\n" + "\n".join(offenders)
         )
+
+
+class TestToolArgumentsFollowToolContent:
+    """Tool arguments carry file bodies, patches and generated code, so `input.value` on a
+    tool or permission span must follow tool content (off by default), never tool details.
+    Small fields that say what ran (command, path, URL, query) stay under tool details."""
+
+    ARGS_UNDER_DETAILS = re.compile(
+        r'"input\.value":\s*redact_content\(env\.log_tool_details'
+        r"|redact_content\(env\.log_tool_details,\s*(?:json\.dumps\(|args_|tool_input\b|input_)"
+    )
+
+    @pytest.mark.parametrize("harness", HARNESSES)
+    def test_no_tool_arguments_are_gated_by_tool_details(self, harness):
+        offenders = []
+        for name, path, source in _handler_sources():
+            if name != harness:
+                continue
+            for lineno, line in enumerate(source.splitlines(), 1):
+                if self.ARGS_UNDER_DETAILS.search(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "tool arguments must be redacted with env.log_tool_content; promote the command, "
+            "path or URL with tool_detail_attributes instead:\n" + "\n".join(offenders)
+        )

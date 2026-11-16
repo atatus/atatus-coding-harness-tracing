@@ -36,6 +36,7 @@ from core.common import (
     restore_stderr_from_log_file,
     send_span,
     send_span_async,
+    tool_detail_attributes,
 )
 
 
@@ -981,6 +982,33 @@ class TestRedactedPlaceholder:
         }
         assert "input.value" not in attrs
         assert attrs["output.value"] == "real output"
+
+
+class TestToolDetailAttributes:
+    @pytest.fixture(autouse=True)
+    def _details_on(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+
+    def test_picks_the_small_fields_and_never_the_body(self):
+        attrs = tool_detail_attributes({"file_path": "/repo/a.py", "content": "SECRET=1"})
+        assert attrs == {"tool.file_path": "/repo/a.py"}
+
+    def test_reads_json_text_and_joins_an_argv_command(self):
+        assert tool_detail_attributes('{"command": ["bash", "-lc", "ls"]}') == {"tool.command": "bash -lc ls"}
+
+    def test_first_matching_key_wins(self):
+        attrs = tool_detail_attributes({"cmd": "ls", "url": "https://example.com", "pattern": "TODO"})
+        assert attrs == {"tool.command": "ls", "tool.url": "https://example.com", "tool.query": "TODO"}
+
+    @pytest.mark.parametrize(
+        "tool_input", [None, "", "*** Begin Patch", "[1, 2]", ["ls"], {"command": ""}, {"path": 3}]
+    )
+    def test_anything_else_gives_nothing(self, tool_input):
+        assert tool_detail_attributes(tool_input) == {}
+
+    def test_follows_the_tool_details_flag(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert tool_detail_attributes({"command": "ls"}) == {"tool.command": "<redacted (2 chars)>"}
 
 
 # ── EnvConfig property tests ──────────────────────────────────────────────

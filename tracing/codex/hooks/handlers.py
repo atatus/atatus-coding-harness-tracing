@@ -45,7 +45,10 @@ from core.common import (
     redact_content,
 )
 from core.common import send_span as send_span_to_backend
-from core.common import send_span_async
+from core.common import (
+    send_span_async,
+    tool_detail_attributes,
+)
 from core.constants import MODEL_FAMILY_SYSTEMS
 from core.event_model import TurnEndReason
 from core.turn_lifecycle import turn_end_attributes, turn_status
@@ -61,6 +64,8 @@ def _send_span_async(span_dict: dict, on_success=None) -> None:
 
 # Root of Codex's per-session rollout transcripts, when CODEX_HOME is unset.
 _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
+
+_WEB_TOOL_TARGET_KEYS = {"web_search": "query", "open_page": "url"}
 
 
 # ---------------------------------------------------------------------------
@@ -611,10 +616,13 @@ def _build_and_send_spans(
         tool_attrs: dict = {
             "openinference.span.kind": "TOOL",
             "tool.name": tool_name,
-            "input.value": redact_content(env.log_tool_details, args_raw),
+            "input.value": redact_content(env.log_tool_content, args_raw),
             "output.value": redact_content(env.log_tool_content, output_raw),
             "session.id": thread_id,
+            **tool_detail_attributes(args_raw),
         }
+        if tool_name in _WEB_TOOL_TARGET_KEYS:
+            tool_attrs.update(tool_detail_attributes({_WEB_TOOL_TARGET_KEYS[tool_name]: args_raw}))
         if cwd:
             tool_attrs["codex.cwd"] = cwd
         if workspace:

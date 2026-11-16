@@ -207,8 +207,7 @@ class TestEmitInteraction:
         tool = next(s for s in captured_spans if _kind(s) == "TOOL")
         assert _span_obj(tool)["parentSpanId"] == _span_obj(llm)["spanId"]
 
-    def test_tool_input_gated_by_tool_details_flag(self, captured_spans, monkeypatch):
-        """Arguments are what the tool was asked to do -> ATATUS_LOG_TOOL_DETAILS."""
+    def test_tool_command_gated_by_tool_details_flag(self, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
         env.invalidate_caches()
@@ -219,25 +218,31 @@ class TestEmitInteraction:
         self._emit(captured_spans, steps)
 
         tool = _span_attrs(next(s for s in captured_spans if _kind(s) == "TOOL"))
-        assert "secret" not in tool["input.value"]
-        assert tool["input.value"].startswith("<redacted (")
+        assert tool["tool.command"].startswith("<redacted (")
+        assert json.loads(tool["input.value"]) == {"cmd": "secret"}
         assert tool["output.value"] == "out"
 
-    def test_tool_output_gated_by_tool_content_flag(self, captured_spans, monkeypatch):
-        """Results are what the tool returned -> ATATUS_LOG_TOOL_CONTENT."""
+    def test_tool_arguments_and_output_gated_by_tool_content_flag(self, captured_spans, monkeypatch):
+        """Arguments can carry whole file bodies, so they follow tool content like the result does."""
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         env.invalidate_caches()
         steps = [
             _step(
-                "A", content="c", prompt=1, completion=1, tools=[ToolCall("t", "bash", {"cmd": "ls"}, "file contents")]
+                "A",
+                content="c",
+                prompt=1,
+                completion=1,
+                tools=[ToolCall("t", "write", {"file_path": "/repo/a.py", "content": "SECRET=1"}, "file contents")],
             )
         ]
 
         self._emit(captured_spans, steps)
 
         tool = _span_attrs(next(s for s in captured_spans if _kind(s) == "TOOL"))
-        assert json.loads(tool["input.value"]) == {"cmd": "ls"}
+        assert "SECRET" not in tool["input.value"]
+        assert tool["input.value"].startswith("<redacted (")
+        assert tool["tool.file_path"] == "/repo/a.py"
         assert "file contents" not in tool["output.value"]
         assert tool["output.value"].startswith("<redacted (")
 

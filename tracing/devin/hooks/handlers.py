@@ -32,6 +32,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    tool_detail_attributes,
 )
 from tracing.devin.constants import SCOPE_NAME, SERVICE_NAME, SESSIONS_DB
 from tracing.devin.hooks.adapter import already_emitted, check_requirements, mark_emitted
@@ -171,10 +172,9 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
                 "session.id": session_id,
                 "openinference.span.kind": "TOOL",
                 "tool.name": tc.name,
-                # Arguments are what the tool was asked to do -> tool_details;
-                # the result is what it returned -> tool_content.
-                "input.value": redact_content(env.log_tool_details, json.dumps(tc.arguments)),
+                "input.value": redact_content(env.log_tool_content, json.dumps(tc.arguments)),
                 "output.value": redact_content(env.log_tool_content, tc.result),
+                **tool_detail_attributes(tc.arguments),
             }
             tool_span = build_span(
                 f"Tool: {tc.name}",

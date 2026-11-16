@@ -30,6 +30,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    tool_detail_attributes,
 )
 from core.event_model import (
     AgentEvent,
@@ -2461,7 +2462,7 @@ def _handle_permission_request(input_json: dict) -> None:
     session_id = state.get("session_id")
     permission = input_json.get("permission", "")
     tool_name = input_json.get("tool_name", "")
-    tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
+    tool_input = redact_content(env.log_tool_content, json.dumps(input_json.get("tool_input", {})))
 
     attrs = {
         "session.id": session_id,
@@ -2470,6 +2471,7 @@ def _handle_permission_request(input_json: dict) -> None:
         "permission.type": permission,
         "permission.tool": tool_name,
         "input.value": tool_input,
+        **tool_detail_attributes(input_json.get("tool_input")),
     }
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
@@ -2504,7 +2506,7 @@ def _handle_permission_denied(input_json: dict) -> None:
     session_id = state.get("session_id")
     permission = input_json.get("permission", "")
     tool_name = input_json.get("tool_name", "")
-    tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
+    tool_input = redact_content(env.log_tool_content, json.dumps(input_json.get("tool_input", {})))
 
     attrs = {
         "session.id": session_id,
@@ -2514,6 +2516,7 @@ def _handle_permission_denied(input_json: dict) -> None:
         "permission.tool": tool_name,
         "permission.denied": "true",
         "input.value": tool_input,
+        **tool_detail_attributes(input_json.get("tool_input")),
     }
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""
