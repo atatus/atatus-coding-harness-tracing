@@ -62,6 +62,8 @@ def _send_span_async(span_dict: dict, on_success=None) -> None:
 # Root of Codex's per-session rollout transcripts, when CODEX_HOME is unset.
 _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 
+_CODE_MODE_TOOL_ITEMS = {"CommandExecution", "FileChange", "McpToolCall", "WebSearch", "ImageView", "Extension"}
+
 
 # ---------------------------------------------------------------------------
 # Payload helpers (notify payload from Codex)
@@ -155,13 +157,28 @@ def _message_text(content) -> str:
     return "\n".join(parts)
 
 
+def _attach_code_mode_items(wrappers: list, items: list, call_ids: set) -> None:
+    # Items never name their exec call, and a yielded cell's items land after later calls, so pair by start time.
+    for child in items:
+        if child["item"].get("id") in call_ids:
+            continue
+        owner = None
+        for wrapper in wrappers:
+            started = wrapper["start_ts"]
+            if 0 < started <= child["start_ts"] and (owner is None or started >= owner["start_ts"]):
+                owner = wrapper
+        if owner is not None:
+            owner.setdefault("children", []).append(child)
+
+
 def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None":
     """Walk the rollout JSONL and extract everything for one turn.
 
     Returns a dict with: ``trace_count``, ``turn_start_ms``, ``turn_end_ms``,
     ``duration_ms``, ``user_prompt``, ``assistant_output``, ``model``, ``cwd``,
     ``permission_mode``, ``sandbox_mode``, ``token_usage`` (or None), and
-    ``tool_calls`` (a list of ``{tool, args, output, call_id, start_ts, end_ts}``).
+    ``tool_calls`` (a list of ``{tool, args, output, call_id, start_ts, end_ts}``;
+    a Code Mode ``exec``/``wait`` that ran tools also has ``children``).
 
     Returns None if the turn isn't found.
     """
@@ -201,6 +218,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     pending_func: dict = {}  # call_id -> entry being filled
     pending_custom: dict = {}  # call_id -> Code Mode entry being filled
     pending_search_end: "dict | None" = None  # most recent unmatched web_search_end
+    code_mode_wrappers: list = []
+    code_mode_items: list = []
+    call_ids: set = set()
 
     try:
         with open(rollout_path, "r", encoding="utf-8") as f:
@@ -343,6 +363,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     tool_calls.append(entry)
                     if call_id:
                         pending_func[call_id] = entry
+                        call_ids.add(call_id)
+                    if entry["tool"] == "wait":
+                        code_mode_wrappers.append(entry)
                     continue
 
                 if outer == "response_item" and ptype == "function_call_output":
@@ -370,6 +393,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     tool_calls.append(entry)
                     if call_id:
                         pending_custom[call_id] = entry
+                        call_ids.add(call_id)
+                    if entry["tool"] == "exec":
+                        code_mode_wrappers.append(entry)
                     continue
 
                 if outer == "response_item" and ptype == "custom_tool_call_output":
@@ -378,6 +404,20 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     if pending is not None:
                         pending["output"] = payload.get("output") or ""
                         pending["end_ts"] = ts_ms or pending["end_ts"]
+                    continue
+
+                if outer == "event_msg" and ptype == "item_completed":
+                    item = payload.get("item")
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") in _CODE_MODE_TOOL_ITEMS
+                        and payload.get("turn_id") in (None, "", turn_id)
+                    ):
+                        completed_ms = payload.get("completed_at_ms")
+                        end_ts = completed_ms if isinstance(completed_ms, int) else ts_ms
+                        started_ms = payload.get("started_at_ms")
+                        start_ts = started_ms if isinstance(started_ms, int) else end_ts
+                        code_mode_items.append({"item": item, "start_ts": start_ts, "end_ts": end_ts})
                     continue
 
                 # Web search: web_search_end (event_msg, has call_id) is paired with
@@ -390,6 +430,8 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                     continue
 
                 if outer == "response_item" and ptype == "web_search_call":
+                    if payload.get("id"):
+                        call_ids.add(payload["id"])
                     action = payload.get("action") or {}
                     action_type = action.get("type") or "search"
                     if action_type == "open_page":
@@ -421,6 +463,8 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
 
     if not in_turn:
         return None
+
+    _attach_code_mode_items(code_mode_wrappers, code_mode_items, call_ids)
 
     if not turn_end_ms:
         candidates = [e["end_ts"] for e in tool_calls if e.get("end_ts")]
@@ -526,6 +570,91 @@ def _put_indexed_message(attrs: dict, prefix: str, role: str, content: str) -> N
     attrs[f"{prefix}.0.message.content"] = content
 
 
+def _identity_attrs() -> dict:
+    attrs: dict = {}
+    user_id = env.get_user_id(SERVICE_NAME)
+    login_id = env.get_user_login_id(SERVICE_NAME)
+    if user_id:
+        attrs["user.id"] = user_id
+    if login_id:
+        attrs["user.login_id"] = login_id
+    return attrs
+
+
+def _json_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def _command_text(command: object) -> str:
+    if isinstance(command, str):
+        return command
+    if not isinstance(command, list):
+        return ""
+    parts = [str(part) for part in command]
+    if len(parts) == 3 and parts[1] in ("-c", "-lc"):
+        return parts[2]
+    return " ".join(parts)
+
+
+def _code_mode_tool(item: dict) -> "tuple[str, dict]":
+    details = env.log_tool_details
+    content = env.log_tool_content
+    item_type = item.get("type")
+    if item_type == "CommandExecution":
+        command = _command_text(item.get("command"))
+        return "exec_command", {
+            "input.value": redact_content(content, command),
+            "output.value": redact_content(content, _json_text(item.get("aggregated_output"))),
+            "tool.command": redact_content(details, command),
+        }
+    if item_type == "FileChange":
+        changes = item.get("changes")
+        if not isinstance(changes, dict):
+            changes = {}
+        return "apply_patch", {
+            "input.value": redact_content(content, _json_text(changes)),
+            "output.value": redact_content(content, _json_text(item.get("stdout") or item.get("stderr"))),
+            "tool.file_path": redact_content(details, ", ".join(changes)),
+        }
+    if item_type == "McpToolCall":
+        server = item.get("server")
+        tool = item.get("tool")
+        return f"mcp__{server}__{tool}" if details and server and tool else "mcp", {
+            "input.value": redact_content(content, _json_text(item.get("arguments"))),
+            "output.value": redact_content(content, _json_text(item.get("result") or item.get("error"))),
+        }
+    if item_type == "ImageView":
+        path = _json_text(item.get("path"))
+        return "view_image", {
+            "input.value": redact_content(content, path),
+            "output.value": redact_content(content, ""),
+            "tool.file_path": redact_content(details, path),
+        }
+    action = item.get("action")
+    if not isinstance(action, dict):
+        action = {}
+    results = redact_content(content, _json_text(item.get("results")))
+    if item_type == "WebSearch" or item.get("kind") == "web.search":
+        if action.get("type") in ("open_page", "openPage"):
+            name, key, target = "open_page", "tool.url", action.get("url")
+        else:
+            name, key, target = "web_search", "tool.query", action.get("query") or item.get("query")
+        target_text = _json_text(target)
+        return name, {
+            "input.value": redact_content(content, target_text),
+            "output.value": results,
+            key: redact_content(details, target_text),
+        }
+    return str(item.get("kind") or "extension"), {
+        "input.value": redact_content(content, _json_text(action)),
+        "output.value": results,
+    }
+
+
 def _build_and_send_spans(
     thread_id: str, turn_id: str, turn: dict, reason: TurnEndReason = TurnEndReason.COMPLETED
 ) -> None:
@@ -534,8 +663,7 @@ def _build_and_send_spans(
     ``reason`` defaults to COMPLETED for a normal notify-driven turn; the
     Interrupt hook passes INTERRUPTED for a turn the user cancelled.
     """
-    user_id = env.get_user_id(SERVICE_NAME) or ""
-    login_id = env.get_user_login_id(SERVICE_NAME) or ""
+    identity = _identity_attrs()
 
     trace_id = generate_trace_id()
     parent_span_id = generate_span_id()
@@ -560,10 +688,7 @@ def _build_and_send_spans(
         attrs["codex.workspace"] = workspace
     if turn_id:
         attrs["codex.turn_id"] = turn_id
-    if user_id:
-        attrs["user.id"] = user_id
-    if login_id:
-        attrs["user.login_id"] = login_id
+    attrs.update(identity)
     if turn.get("model"):
         attrs["llm.model_name"] = turn["model"]
     if turn.get("effort"):
@@ -603,6 +728,12 @@ def _build_and_send_spans(
     if usage:
         attrs["codex.token_usage"] = json.dumps(usage)
 
+    location: dict = {}
+    if cwd:
+        location["codex.cwd"] = cwd
+    if workspace:
+        location["codex.workspace"] = workspace
+
     child_spans: list = []
     for entry in turn.get("tool_calls") or []:
         tool_name = entry.get("tool") or "unknown_tool"
@@ -615,19 +746,25 @@ def _build_and_send_spans(
             "output.value": redact_content(env.log_tool_content, output_raw),
             "session.id": thread_id,
         }
-        if cwd:
-            tool_attrs["codex.cwd"] = cwd
-        if workspace:
-            tool_attrs["codex.workspace"] = workspace
+        tool_attrs.update(location)
         if entry.get("call_id"):
             tool_attrs["tool.id"] = entry["call_id"]
             tool_attrs["codex.tool.call_id"] = entry["call_id"]
+        tool_attrs.update(identity)
+        kind = "TOOL"
+        children = entry.get("children") or []
+        if children:
+            kind = "CHAIN"
+            tool_attrs["openinference.span.kind"] = kind
+            del tool_attrs["tool.name"]
+            tool_attrs.pop("tool.id", None)
+        tool_span_id = generate_span_id()
         child_start = entry.get("start_ts") or turn["turn_start_ms"]
         child_end = entry.get("end_ts") or child_start
         child = build_span(
             tool_name,
-            "TOOL",
-            generate_span_id(),
+            kind,
+            tool_span_id,
             trace_id,
             parent_span_id,
             child_start,
@@ -637,6 +774,32 @@ def _build_and_send_spans(
             SCOPE_NAME,
         )
         child_spans.append(child)
+
+        for code_mode_child in children:
+            item = code_mode_child["item"]
+            item_name, item_fields = _code_mode_tool(item)
+            item_attrs: dict = {"openinference.span.kind": "TOOL", "tool.name": item_name}
+            item_attrs.update(item_fields)
+            item_attrs["session.id"] = thread_id
+            item_attrs.update(location)
+            if item.get("id"):
+                item_attrs["tool.id"] = item["id"]
+            item_attrs.update(identity)
+            item_start = code_mode_child.get("start_ts") or child_start
+            child_spans.append(
+                build_span(
+                    item_name,
+                    "TOOL",
+                    generate_span_id(),
+                    trace_id,
+                    tool_span_id,
+                    item_start,
+                    code_mode_child.get("end_ts") or item_start,
+                    item_attrs,
+                    SERVICE_NAME,
+                    SCOPE_NAME,
+                )
+            )
 
     attrs.update(turn_end_attributes(reason))
     status_code, status_message = turn_status(reason)
@@ -723,12 +886,7 @@ def _send_legacy_single_span(thread_id: str, turn_id: str, input_json: dict) -> 
         # No rollout here, so the real model/provider is unknown.
         "llm.system": "codex",
     }
-    user_id = env.get_user_id(SERVICE_NAME)
-    login_id = env.get_user_login_id(SERVICE_NAME)
-    if user_id:
-        attrs["user.id"] = user_id
-    if login_id:
-        attrs["user.login_id"] = login_id
+    attrs.update(_identity_attrs())
     _put_indexed_message(attrs, "llm.input_messages", "user", user_prompt)
     _put_indexed_message(attrs, "llm.output_messages", "assistant", assistant_output)
 
@@ -840,7 +998,7 @@ def _handle_session_end(input_json: dict) -> None:
         "",
         start_time,
         end_time,
-        {"session.id": thread_id, "openinference.span.kind": "CHAIN"},
+        {"session.id": thread_id, "openinference.span.kind": "CHAIN", **_identity_attrs()},
         SERVICE_NAME,
         SCOPE_NAME,
     )
