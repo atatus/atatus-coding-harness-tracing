@@ -1076,3 +1076,59 @@ class TestTheFinalMessageIsWaitedFor:
 
         assert not handlers._wait_for_transcript_flush(transcript, 0, expected_text="bye")
         assert time.monotonic() - began < 1.0
+
+
+def _subagent_failure(session, agent_id="wfa1"):
+    session.hook(
+        handlers.stop_failure,
+        {
+            "hook_event_name": "StopFailure",
+            "agent_id": agent_id,
+            "agent_type": "workflow-subagent",
+            "error": "model_not_found",
+            "last_assistant_message": "There's an issue with the selected model.",
+        },
+    )
+
+
+class TestASubagentFailureLeavesTheMainTurnAlone:
+    """A failed subagent fires StopFailure with its agent_id while the main turn is still live."""
+
+    def _turn(self, session) -> Path:
+        main = _write(
+            session.dir / "proj" / "s1.jsonl",
+            [
+                _human("h1", "go", 0),
+                _assistant("m1", "msg_launch", [_tool_use("toolu_bash")], ts=_ts(1)),
+                _tool_result("m2", "toolu_bash", ts=_ts(2)),
+                _assistant("m3", "msg_final", [{"type": "text", "text": "done"}], ts=_ts(3)),
+            ],
+        )
+        _open_turn(session, main)
+        return main
+
+    def test_no_failed_turn_is_sent_and_the_turn_stays_open(self, session):
+        self._turn(session)
+        _subagent_failure(session)
+
+        assert session.spans() == []
+        assert session.state.get("current_trace_id") == TRACE
+        assert session.state.get("current_trace_span_id") == ROOT
+
+    def test_the_main_stop_still_exports_the_turns_own_work(self, session):
+        main = self._turn(session)
+        _subagent_failure(session)
+        _main_stop(session, main)
+
+        roots = [s for s in session.spans() if not s.get("parentSpanId")]
+        assert [r["name"] for r in roots] == ["Turn 1"]
+        assert roots[0]["spanId"] == ROOT
+        assert {"msg_launch", "msg_final"} <= _llm_ids(session)
+        assert "toolu_bash" in {_attrs(s).get("tool.call.id") for s in session.spans()}
+
+    def test_a_main_thread_failure_still_ends_the_turn(self, session):
+        self._turn(session)
+        session.hook(handlers.stop_failure, {"hook_event_name": "StopFailure", "error": "rate_limit"})
+
+        assert [s["name"] for s in session.spans()] == ["Turn 1 (failed)"]
+        assert session.state.get("current_trace_id") is None

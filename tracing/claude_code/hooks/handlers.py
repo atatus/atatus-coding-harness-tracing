@@ -2263,7 +2263,10 @@ def _handle_subagent_stop(input_json: dict) -> None:
 
 
 def _handle_stop_failure(input_json: dict) -> None:
-    """Handle StopFailure: emit a span describing the failed turn so it doesn't disappear silently."""
+    """Handle StopFailure: emit a span describing the failed turn so it doesn't disappear silently.
+    A subagent's failure carries its agent_id and leaves the main turn running."""
+    if input_json.get("agent_id"):
+        return
     state = resolve_session(input_json)
     session_id = state.get("session_id")
     trace_id = state.get("current_trace_id")
