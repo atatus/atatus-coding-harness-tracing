@@ -2326,7 +2326,7 @@ def _handle_notification(input_json: dict) -> None:
     session_id = state.get("session_id")
     message = redact_content(env.log_prompts, input_json.get("message", ""))
     title = redact_content(env.log_prompts, input_json.get("title", ""))
-    notification_type = input_json.get("type", "info")
+    notification_type = input_json.get("notification_type", "info")
 
     attrs = {
         "session.id": session_id,
@@ -2459,7 +2459,7 @@ def _handle_permission_request(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id")
-    permission = input_json.get("permission", "")
+    permission = input_json.get("permission_mode", "")
     tool_name = input_json.get("tool_name", "")
     tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
 
@@ -2502,7 +2502,7 @@ def _handle_permission_denied(input_json: dict) -> None:
         return
 
     session_id = state.get("session_id")
-    permission = input_json.get("permission", "")
+    permission = input_json.get("permission_mode", "")
     tool_name = input_json.get("tool_name", "")
     tool_input = redact_content(env.log_tool_details, json.dumps(input_json.get("tool_input", {})))
 
@@ -2521,6 +2521,12 @@ def _handle_permission_denied(input_json: dict) -> None:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    reason = input_json.get("reason", "")
+    if reason:
+        attrs["permission.denial_reason"] = reason
+    tool_use_id = input_json.get("tool_use_id", "")
+    if tool_use_id:
+        attrs["tool.call.id"] = tool_use_id
 
     now = str(get_timestamp_ms())
     span = build_span(

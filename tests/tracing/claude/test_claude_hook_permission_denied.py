@@ -52,8 +52,11 @@ def _base_input():
         "transcript_path": "/tmp/transcript.jsonl",
         "cwd": "/home/user/project",
         "permission_mode": "auto",
+        "hook_event_name": "PermissionDenied",
         "tool_name": "Bash",
         "tool_input": {"command": "rm -rf /"},
+        "tool_use_id": "toolu_01ABC123",
+        "reason": "[Irreversible Local Destruction]",
     }
 
 
@@ -92,16 +95,30 @@ class TestPermissionDenied:
         attrs = _span_attrs(captured_spans[0])
         assert attrs["permission.tool"] == "Bash"
 
-    def test_sets_permission_type_when_present(self, mock_resolve, captured_spans, state):
-        """When the payload carries a `permission` field, surface it as
-        `permission.type` (mirrors _handle_permission_request)."""
+    def test_sets_permission_type_from_the_permission_mode(self, mock_resolve, captured_spans, state):
+        state.set("current_trace_id", "trace-1")
+        state.set("current_trace_span_id", "1111111111111111")
+        _handle_permission_denied(_base_input())
+        attrs = _span_attrs(captured_spans[0])
+        assert attrs["permission.type"] == "auto"
+
+    def test_records_the_denial_reason_and_tool_call_id(self, mock_resolve, captured_spans, state):
+        state.set("current_trace_id", "trace-1")
+        state.set("current_trace_span_id", "1111111111111111")
+        _handle_permission_denied(_base_input())
+        attrs = _span_attrs(captured_spans[0])
+        assert attrs["permission.denial_reason"] == "[Irreversible Local Destruction]"
+        assert attrs["tool.call.id"] == "toolu_01ABC123"
+
+    def test_omits_the_denial_reason_and_tool_call_id_when_absent(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
         state.set("current_trace_span_id", "1111111111111111")
         payload = _base_input()
-        payload["permission"] = "execute"
+        del payload["reason"], payload["tool_use_id"]
         _handle_permission_denied(payload)
         attrs = _span_attrs(captured_spans[0])
-        assert attrs["permission.type"] == "execute"
+        assert "permission.denial_reason" not in attrs
+        assert "tool.call.id" not in attrs
 
     def test_sets_input_value_from_tool_input(self, mock_resolve, captured_spans, state):
         state.set("current_trace_id", "trace-1")
