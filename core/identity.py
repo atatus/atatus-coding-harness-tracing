@@ -22,16 +22,37 @@ import json
 import os
 import re
 import shlex
+import sqlite3
 import subprocess
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
 
+from tracing.copilot.constants import copilot_home
+
 _SUBPROCESS_TIMEOUT = 1.5
+_SQLITE_TIMEOUT = 0.25
+
+_JSONC_STRING_OR_COMMENT = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.DOTALL)
+
+_OPENCODE_ACCOUNT_QUERIES = (
+    "SELECT a.email FROM account_state s JOIN account a ON a.id = s.active_account_id "
+    "WHERE a.email <> '' ORDER BY s.id LIMIT 1",
+    "SELECT email FROM control_account WHERE active AND email <> '' ORDER BY time_updated DESC LIMIT 1",
+)
 
 
 def _read_json(path: Path) -> dict:
     with open(path, "r") as f:
         data = json.load(f)
+    return data if isinstance(data, dict) else {}
+
+
+def _read_jsonc(path: Path) -> dict:
+    with open(path, "r") as f:
+        text = f.read()
+    stripped = _JSONC_STRING_OR_COMMENT.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", text)
+    data = json.loads(stripped)
     return data if isinstance(data, dict) else {}
 
 
@@ -113,9 +134,10 @@ def detect_copilot_login_id() -> str:
 
     GitHub logins are usernames, never emails — Copilot has no local email
     surface at all, so this attribute holds a username for this harness only.
+    Copilot writes config.json with a `//` comment header, so it is read as JSONC.
     """
     try:
-        data = _read_json(Path.home() / ".copilot" / "config.json")
+        data = _read_jsonc(copilot_home() / "config.json")
         return str(data.get("lastLoggedInUser", {}).get("login", "") or "")
     except Exception:
         return ""
@@ -172,14 +194,38 @@ def read_kiro_login_probe(dest_path: Path) -> Optional[str]:
     return _parse_kiro_whoami(text)
 
 
-def detect_opencode_login_id() -> str:
-    """Email of an OAuth-based provider in ~/.local/share/opencode/auth.json.
-
-    Only OAuth-style providers carry an email; an API-key provider (all this
-    was verified against) has none, which is a real product state, not a bug.
-    """
+def _opencode_db_login_id(db_path: Path) -> str:
     try:
-        data = _read_json(Path.home() / ".local" / "share" / "opencode" / "auth.json")
+        if not db_path.is_file():
+            return ""
+        with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=_SQLITE_TIMEOUT)) as con:
+            for query in _OPENCODE_ACCOUNT_QUERIES:
+                try:
+                    row = con.execute(query).fetchone()
+                except sqlite3.Error:
+                    continue
+                if row and row[0]:
+                    return str(row[0])
+    except Exception:
+        pass
+    return ""
+
+
+def detect_opencode_login_id() -> str:
+    """Email of the signed-in opencode account, else of an OAuth provider.
+
+    The account lives in ~/.local/share/opencode/opencode.db (the
+    account_state-selected account, then the legacy active control_account).
+    Without one, auth.json is the fallback: only OAuth-style providers carry an
+    email there; an API-key provider has none, which is a real product state,
+    not a bug.
+    """
+    data_dir = Path.home() / ".local" / "share" / "opencode"
+    email = _opencode_db_login_id(data_dir / "opencode.db")
+    if email:
+        return email
+    try:
+        data = _read_json(data_dir / "auth.json")
         for entry in data.values():
             if isinstance(entry, dict) and entry.get("email"):
                 return str(entry["email"])
