@@ -65,6 +65,8 @@ def _send_span_async(span_dict: dict, on_success=None) -> None:
 # Root of Codex's per-session rollout transcripts, when CODEX_HOME is unset.
 _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 
+_WEB_TOOL_TARGET_KEYS = {"web_search": "query", "open_page": "url"}
+
 
 # ---------------------------------------------------------------------------
 # Payload helpers (notify payload from Codex)
@@ -619,6 +621,8 @@ def _build_and_send_spans(
             "session.id": thread_id,
             **tool_detail_attributes(args_raw),
         }
+        if tool_name in _WEB_TOOL_TARGET_KEYS:
+            tool_attrs.update(tool_detail_attributes({_WEB_TOOL_TARGET_KEYS[tool_name]: args_raw}))
         if cwd:
             tool_attrs["codex.cwd"] = cwd
         if workspace:

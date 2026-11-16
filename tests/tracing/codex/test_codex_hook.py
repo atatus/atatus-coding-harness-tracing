@@ -638,6 +638,8 @@ class TestBuildAndSendSpans:
             "tool_calls": [
                 {"tool": "apply_patch", "args": "*** Begin Patch\n+SECRET=1\n*** End Patch", "output": "ok"},
                 {"tool": "exec_command", "args": '{"cmd":"pytest -q"}', "output": "1 passed"},
+                {"tool": "web_search", "args": "retry policy", "output": ""},
+                {"tool": "open_page", "args": "https://example.com/docs", "output": ""},
             ],
         }
 
@@ -646,11 +648,14 @@ class TestBuildAndSendSpans:
             _build_and_send_spans("sess-1", "turn-1", turn)
 
         spans = sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
-        patch_attrs, exec_attrs = _attrs_of_span(spans[1]), _attrs_of_span(spans[2])
+        patch_attrs, exec_attrs, search_attrs, page_attrs = (_attrs_of_span(s) for s in spans[1:5])
         assert "SECRET" not in patch_attrs["input.value"]["stringValue"]
         assert "tool.command" not in patch_attrs
         assert exec_attrs["input.value"]["stringValue"].startswith("<redacted (")
         assert exec_attrs["tool.command"]["stringValue"] == "pytest -q"
+        assert search_attrs["input.value"]["stringValue"].startswith("<redacted (")
+        assert search_attrs["tool.query"]["stringValue"] == "retry policy"
+        assert page_attrs["tool.url"]["stringValue"] == "https://example.com/docs"
 
     def test_single_span_when_no_tool_calls(self):
         turn = {
