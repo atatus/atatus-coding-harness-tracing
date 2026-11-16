@@ -110,13 +110,22 @@ class TestPermissionDenied:
         attrs = _span_attrs(captured_spans[0])
         assert '"command": "rm -rf /"' in attrs["input.value"]
 
-    def test_redacts_tool_input_when_disabled(self, mock_resolve, captured_spans, state, monkeypatch):
-        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+    def test_tool_content_off_redacts_input_but_keeps_command(self, mock_resolve, captured_spans, state, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         state.set("current_trace_id", "trace-1")
         state.set("current_trace_span_id", "1111111111111111")
         _handle_permission_denied(_base_input())
         attrs = _span_attrs(captured_spans[0])
         assert "<redacted" in attrs["input.value"]
+        assert attrs["tool.command"] == "rm -rf /"
+
+    def test_tool_details_off_redacts_command(self, mock_resolve, captured_spans, state, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-1")
+        state.set("current_trace_span_id", "1111111111111111")
+        _handle_permission_denied(_base_input())
+        attrs = _span_attrs(captured_spans[0])
+        assert "<redacted" in attrs["tool.command"]
 
     def test_no_trace_id_returns_early(self, mock_resolve, captured_spans, state):
         state.delete("current_trace_id")

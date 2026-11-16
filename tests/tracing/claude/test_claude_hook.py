@@ -1330,6 +1330,19 @@ class TestContentRedaction:
         attrs = _attrs(captured_spans[0])
         assert attrs["input.value"]["stringValue"].startswith("<redacted (")
 
+    def test_permission_request_keeps_file_body_out_with_tool_details_on(
+        self, mock_resolve, state, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_permission_request(
+            {"permission": "ask", "tool_name": "Write", "tool_input": {"file_path": "/repo/.env", "content": "KEY=1"}}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "KEY=1" not in attrs["input.value"]["stringValue"]
+        assert attrs["tool.file_path"]["stringValue"] == "/repo/.env"
+
     def test_notification_redacts_message_when_prompts_off(self, mock_resolve, state, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_PROMPTS", "false")
         state.set("current_trace_id", "trace-abc")

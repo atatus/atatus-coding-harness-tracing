@@ -623,6 +623,34 @@ class TestBuildAndSendSpans:
         assert child_attrs["codex.workspace"]["stringValue"] == "workspace"
         assert child_attrs["input.value"]["stringValue"] == '{"cmd":"ls"}'
         assert child_attrs["output.value"]["stringValue"] == "ok"
+        assert child_attrs["tool.command"]["stringValue"] == "ls"
+
+    def test_tool_content_off_redacts_patch_but_keeps_command(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        turn = {
+            "trace_count": 1,
+            "turn_start_ms": 1000,
+            "turn_end_ms": 2000,
+            "duration_ms": 1000,
+            "user_prompt": "hi",
+            "assistant_output": "hello",
+            "model": "gpt-5.5",
+            "tool_calls": [
+                {"tool": "apply_patch", "args": "*** Begin Patch\n+SECRET=1\n*** End Patch", "output": "ok"},
+                {"tool": "exec_command", "args": '{"cmd":"pytest -q"}', "output": "1 passed"},
+            ],
+        }
+
+        sent, patcher = self._send_capture()
+        with patcher:
+            _build_and_send_spans("sess-1", "turn-1", turn)
+
+        spans = sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        patch_attrs, exec_attrs = _attrs_of_span(spans[1]), _attrs_of_span(spans[2])
+        assert "SECRET" not in patch_attrs["input.value"]["stringValue"]
+        assert "tool.command" not in patch_attrs
+        assert exec_attrs["input.value"]["stringValue"].startswith("<redacted (")
+        assert exec_attrs["tool.command"]["stringValue"] == "pytest -q"
 
     def test_single_span_when_no_tool_calls(self):
         turn = {
