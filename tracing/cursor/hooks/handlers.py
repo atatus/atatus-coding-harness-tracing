@@ -134,6 +134,10 @@ def _resolve_user_login_id(input_json: dict) -> str:
     return _jq_str(input_json, "user_email")
 
 
+def _cursor_version(input_json: dict) -> str:
+    return _jq_str(input_json, "cursor_version", "cursorVersion", "version")
+
+
 def _to_int(v) -> "int | None":
     if v is None:
         return None
@@ -265,6 +269,7 @@ def _emit_closed_turn(turn: dict, end_ms: int, token_attrs: "dict | None" = None
     model = turn.get("model", "")
     effort = turn.get("effort", "")
     thinking = turn.get("thinking", False)
+    cursor_version = turn.get("cursor_version", "")
 
     root_attrs = {
         "openinference.span.kind": "CHAIN",
@@ -274,6 +279,8 @@ def _emit_closed_turn(turn: dict, end_ms: int, token_attrs: "dict | None" = None
     }
     if conversation_id:
         root_attrs["cursor.conversation.id"] = conversation_id
+    if cursor_version:
+        root_attrs["cursor.version"] = cursor_version
     if user_id:
         root_attrs["user.id"] = user_id
     if login_id:
@@ -449,6 +456,7 @@ def _handle_before_submit_prompt(input_json, conversation_id, gen_id, trace_id, 
         "login_id": login_id,
         "effort": effort,
         "thinking": thinking,
+        "cursor_version": _cursor_version(input_json),
         "thought_hashes": [],
         "responses": [],
         "generation_aliases": [],
@@ -1201,7 +1209,7 @@ def _handle_session_start(input_json, conversation_id, gen_id, trace_id, now_ms)
     if conversation_id:
         attrs["cursor.conversation.id"] = conversation_id
 
-    cursor_version = _jq_str(input_json, "cursor_version", "cursorVersion", "version")
+    cursor_version = _cursor_version(input_json)
     if cursor_version:
         attrs["cursor.version"] = cursor_version
 
