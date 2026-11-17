@@ -195,6 +195,7 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_LOG_FILE` | per-harness | Path the harness writes its log to. Adapters default to `~/.atatus/harness/logs/<harness>.log`. |
 | `ATATUS_TRACE_DEBUG` | `false` | Dump raw hook payloads as JSON under `~/.atatus/harness/state/<harness>/debug/`. Codex hooks use this for span-tree inspection. |
 | `ATATUS_TRANSCRIPT_WAIT_MS` | `300` | How long a Stop hook waits for the harness to flush its transcript before reading model and token counts. Those two live only in the transcript, and the hook can fire before the write lands — losing that race emits a span with no model and zero tokens. `0` disables the wait. |
+| `ATATUS_TRACE_WORKFLOWS` | `true` | Claude Code only. Set to `false` to stop following `Workflow` tool runs: their launches are not registered, their agents are not exported, and no workflow or phase spans are sent. |
 | `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
 | `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture what each tool was asked to do: tool names, commands, file paths, URLs and queries. |
 | `ATATUS_LOG_TOOL_CONTENT` | **`false`** | Capture full tool arguments and *output* — file bodies being written, patches, shell stdout, search results. Off by default: this is the broadest of the three, and it is where file contents and anything pasted into a session end up. Opt in explicitly. |
