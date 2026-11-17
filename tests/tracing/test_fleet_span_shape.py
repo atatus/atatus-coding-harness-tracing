@@ -101,3 +101,17 @@ class TestToolArgumentsFollowToolContent:
             "tool arguments must be redacted with env.log_tool_content; promote the command, "
             "path or URL with tool_detail_attributes instead:\n" + "\n".join(offenders)
         )
+
+    @pytest.mark.parametrize("harness", HARNESSES)
+    def test_llm_tool_call_arguments_follow_tool_content(self, harness):
+        offenders = []
+        for name, path, source in _handler_sources():
+            if name != harness:
+                continue
+            for lineno, line in enumerate(source.splitlines(), 1):
+                if '"tool_call.function"' in line and '"arguments"' in line and "log_tool_content" not in line:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "tool call arguments in llm.output_messages are gated only by prompts; redact them with "
+            "env.log_tool_content:\n" + "\n".join(offenders)
+        )
