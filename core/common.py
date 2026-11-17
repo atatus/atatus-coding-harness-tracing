@@ -381,7 +381,7 @@ def skill_command_attributes(command: Any) -> Dict[str, str]:
 
 
 def invoked_skill_attributes(names: Any) -> Dict[str, str]:
-    """Skills the user named for the turn; several are comma-joined, which skill names never contain."""
+    """Comma-joined: skill names are lowercase letters, digits and hyphens, so a comma never belongs to one."""
     if not env.log_tool_details or not isinstance(names, (list, tuple)):
         return {}
     unique = list(dict.fromkeys(name for name in names if isinstance(name, str) and name))
@@ -404,7 +404,6 @@ _SKILL_URI_RE = re.compile(r"^skill://([^/\\:\s]+)(?:/SKILL\.md)?(?::.*)?$")
 
 
 def skill_from_path(path: Any) -> Optional[str]:
-    """The skill a path names: ``…/skills/<name>/SKILL.md`` or ``skill://<name>[/SKILL.md][:selector]``."""
     if not isinstance(path, str) or not path:
         return None
     match = _SKILL_URI_RE.match(path) or _SKILL_FILE_RE.search(path.replace("\\", "/"))
@@ -499,7 +498,6 @@ def _skill_from_shell_command(command: str, depth: int) -> Optional[str]:
 
 
 def skill_from_shell_command(command: Any) -> Optional[str]:
-    """The skill a shell command reads (``cat``/``sed -n``/``Get-Content`` … ``SKILL.md``) or runs a script of."""
     if not isinstance(command, str) or not command:
         return None
     return _skill_from_shell_command(command, 0)

@@ -102,10 +102,7 @@ def _extract_user_input(content: str) -> str:
 
 
 def _extract_invoked_skills(content: str) -> list[str]:
-    """Skills the user invoked, from the markers Antigravity appends after the request block.
-
-    Only after ``</USER_REQUEST>``: inside it the same words are something the user typed.
-    """
+    """Only after ``</USER_REQUEST>``: inside it the same words are something the user typed."""
     _, closed, appended = content.partition("</USER_REQUEST>")
     if not closed:
         return []

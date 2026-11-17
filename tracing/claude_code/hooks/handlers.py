@@ -773,10 +773,7 @@ def _scan_transcript_for_usage(
 
 
 def _unanimous_active_skill(transcript: Path, start_line: int, start_offset: "int | None" = None) -> str:
-    """The skill every model call in the window ran under; "" when any call had another or none.
-
-    One flat span carries the whole turn's tokens, so a skill only names it when it owns all of them.
-    """
+    """One flat span holds the whole turn's tokens, so a skill names it only when every call ran under it."""
     skills_by_call: dict = {}
     for line_index, line in transcript_window(transcript, start_line, start_offset):
         try:

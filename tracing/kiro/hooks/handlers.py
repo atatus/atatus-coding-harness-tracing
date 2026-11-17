@@ -88,7 +88,7 @@ def _handle_pre_tool_use(input_json: dict, state: StateManager) -> None:
 
 
 def _disclosed_skill(name: Any, cwd: Any) -> str:
-    """disclose_context loads a skill or a steering file by name; only a skills folder makes it a skill."""
+    """disclose_context also loads steering files by name; only a skills folder makes the name a skill."""
     if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\\" in name:
         return ""
     roots = [Path.home() / ".kiro" / "skills"]

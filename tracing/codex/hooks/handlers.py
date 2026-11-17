@@ -74,7 +74,6 @@ _CODE_MODE_TOOL_ITEMS = {"CommandExecution", "FileChange", "McpToolCall", "WebSe
 
 _SHELL_TOOLS = frozenset({"exec_command", "shell", "shell_command", "local_shell"})
 
-# `cmd` of each tools.exec_command({...}) in a Code Mode script, quoted key or not.
 _CODE_MODE_CMD_RE = re.compile(r"""(?:"cmd"|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)""")
 
 _SELECTED_SKILL_KIND = "skills.selected_skill_instructions"
@@ -174,7 +173,6 @@ def _message_text(content) -> str:
 
 
 def _selected_skills(payload: dict) -> list:
-    """Skills the user named for the turn; Codex injects each one's instructions as a user-role part."""
     content = payload.get("content")
     if not isinstance(content, list):
         return []
@@ -651,7 +649,6 @@ def _js_string(literal: str) -> str:
 
 
 def _shell_command_text(tool_name: str, args: object) -> str:
-    """The shell command(s) a tool call ran, one per line; "" for any other tool."""
     if not isinstance(args, str):
         return ""
     if tool_name == "exec":

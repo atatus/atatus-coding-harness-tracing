@@ -1176,7 +1176,6 @@ class TestBuildAndSendSpans:
 
 
 def _selected_skill(name, kinds=True):
-    """The user-role message Codex injects for a skill the user named (`$name` or the skill picker)."""
     text = f"<skill>\n<name>{name}</name>\n<path>/repo/.agents/skills/{name}/SKILL.md</path>\nskill body\n</skill>"
     payload = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
     if kinds:

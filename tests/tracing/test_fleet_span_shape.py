@@ -79,9 +79,7 @@ class TestTokensAreNotDuplicatedOntoTheRoot:
 
 
 class TestSkillAttributesFollowToolDetails:
-    """Skill attributes are tool details, left out (not redacted) when tool details are off: a
-    placeholder would read as a skill name. The gate lives in the core helpers, so a hook that
-    writes a skill key itself would send it whatever the setting says."""
+    """The tool-details gate lives in the core skill helpers; a hook writing a skill key itself bypasses it."""
 
     SKILL_KEY = re.compile(r"""["'](?:tool\.skill_name|skill\.(?:trigger|name|active))["']""")
     HELPER_CALLS = {

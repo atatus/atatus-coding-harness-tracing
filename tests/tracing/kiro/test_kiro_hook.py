@@ -313,8 +313,6 @@ class TestToolFlow:
 
 
 class TestDiscloseContext:
-    """disclose_context loads a skill or a steering file by name; only a skills folder makes it a skill."""
-
     @pytest.fixture
     def workspace(self, tmp_path, monkeypatch):
         home = tmp_path / "home"

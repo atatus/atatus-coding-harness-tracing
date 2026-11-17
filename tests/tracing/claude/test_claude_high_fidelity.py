@@ -1532,8 +1532,6 @@ def _unidentified(record):
 
 
 class TestActiveSkill:
-    """The skill Claude Code attributes a model call to rides on the assistant record."""
-
     def _calls(self, tmp_path, records):
         graph = parse_claude_transcript(_write(tmp_path / "t.jsonl", records), _root())
         return [e for e in graph.events if isinstance(e, ModelCallEvent)]

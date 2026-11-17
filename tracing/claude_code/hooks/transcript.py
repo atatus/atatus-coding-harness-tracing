@@ -389,7 +389,6 @@ def is_conversation_record(entry: dict[str, Any]) -> bool:
 
 
 def active_skill_of(entry: dict[str, Any]) -> str:
-    """The skill Claude Code attributes an assistant record's model call to."""
     return _string(entry.get("attributionSkill")) if entry.get("type") == "assistant" else ""
 
 
