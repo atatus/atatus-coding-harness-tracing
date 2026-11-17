@@ -942,6 +942,38 @@ class TestAfterTool:
         assert "tool.url" not in attrs
         assert "tool.query" not in attrs
 
+    _MCP_TOOL = {
+        "tool_name": "mcp_docs_search_pages",
+        "tool_input": {"q": "retry policy"},
+        "mcp_context": {"server_name": "docs", "tool_name": "search_pages", "command": "docs-server"},
+        "tool_response": {"llmContent": "found"},
+    }
+
+    def test_mcp_tool_names_its_server_and_tool_from_mcp_context(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(self._MCP_TOOL)
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(self._MCP_TOOL)
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_mcp_like_name_without_mcp_context_is_not_split(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": "mcp_docs_search_pages", "tool_input": {}, "tool_response": "found"})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
     # -- Redaction tests --
 
     def test_redacts_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):

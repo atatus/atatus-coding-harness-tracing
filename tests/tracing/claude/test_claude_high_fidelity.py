@@ -1654,3 +1654,43 @@ class TestFlattenedTurnIsMarked:
         transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
         root = _root_span(_export_on_stop(tmp_path, transcript))
         assert "turn.flattened" not in _attrs(root)
+
+
+def _render_tool(tool_name, tool_input):
+    from core.event_model import EventGraph
+    from tracing.claude_code.hooks.span_renderer import render_event_graph
+
+    tool = ToolEvent(
+        event_id="tool:1",
+        session_id="s1",
+        turn_id="1",
+        sequence=1,
+        started_at_ms=0,
+        ended_at_ms=0,
+        status=EventStatus.COMPLETED,
+        parent_event_id="turn:1",
+        input=tool_input,
+        output="ok",
+        tool_call_id="toolu_1",
+        tool_name=tool_name,
+    )
+    spans = _spans(render_event_graph(EventGraph([_root(), tool]), trace_id="t" * 32))
+    return _attrs(next(s for s in spans if _attrs(s)["openinference.span.kind"] == "TOOL"))
+
+
+class TestRenderedToolIdentity:
+    def test_mcp_tool_names_its_server_and_tool(self):
+        attrs = _render_tool("mcp__docs__search_pages", {"q": "retry policy"})
+        assert attrs["mcp.server.name"] == "docs"
+        assert attrs["mcp.tool.name"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _render_tool("mcp__docs__search_pages", {"q": "retry policy"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_builtin_tool_has_no_mcp_names(self):
+        attrs = _render_tool("Bash", {"command": "ls"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs

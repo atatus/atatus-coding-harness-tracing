@@ -19,6 +19,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    mcp_tool_attributes,
     read_stdin_text,
     redact_content,
     send_span,
@@ -612,6 +613,9 @@ def _handle_after_tool(input_json: dict) -> None:
         attrs["tool.url"] = tool_url
     if tool_query:
         attrs["tool.query"] = tool_query
+    mcp_context = _get_robust(input_json, "mcp_context")
+    if isinstance(mcp_context, dict):
+        attrs.update(mcp_tool_attributes(mcp_context.get("server_name"), mcp_context.get("tool_name")))
 
     span = build_span(
         tool_name,

@@ -238,6 +238,52 @@ class TestPostToolUse:
         # Description is the JSON serialization of tool_input, truncated
         assert "hello" in desc
 
+    def test_mcp_tool_names_its_server_and_tool(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "mcp__docs__search_pages",
+                "tool_use_id": "t6",
+                "tool_input": {"q": "retry policy"},
+                "tool_response": "found",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "mcp__docs__search_pages", "tool_use_id": "t6", "tool_input": {}, "tool_response": ""}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_failed_mcp_tool_names_its_server_and_tool(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "mcp__docs__search_pages", "tool_use_id": "t6", "tool_input": {}, "error": "timeout"}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_builtin_tool_has_no_mcp_names(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Bash", "tool_use_id": "t7", "tool_input": {"command": "ls"}, "tool_response": ""}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
     def test_uses_pre_tool_start_time(self, mock_resolve, state, captured_spans):
         """Timing uses pre_tool_use start time if available in state."""
         state.set("current_trace_id", "trace-abc")

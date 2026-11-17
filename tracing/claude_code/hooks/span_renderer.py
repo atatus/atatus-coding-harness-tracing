@@ -13,6 +13,7 @@ from core.common import (
     build_span,
     env,
     generate_span_id,
+    mcp_attributes_from_tool_name,
     redact_content,
 )
 from core.event_model import (
@@ -236,6 +237,7 @@ def _put_tool_details(attrs: dict[str, Any], event: ToolEvent) -> None:
     for key, value in details.items():
         if value is not None:
             attrs[key] = redact_content(env.log_tool_details, _content_string(value))
+    attrs.update(mcp_attributes_from_tool_name(event.tool_name))
 
 
 def _turn_input(event: TurnEvent) -> Any:

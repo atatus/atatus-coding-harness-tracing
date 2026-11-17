@@ -53,6 +53,7 @@ from core.common import (
     generate_span_id,
     generate_trace_id,
     log,
+    mcp_tool_attributes,
     redact_content,
     send_span,
     send_span_async,
@@ -274,6 +275,8 @@ def _build_tool_span(
         value = args.get(arg_key)
         if isinstance(value, str) and value:
             attrs[attr_name] = redact_content(env.log_tool_details, value)
+    if tool_name == "call_mcp_tool" and isinstance(args, dict):
+        attrs.update(mcp_tool_attributes(args.get("ServerName"), args.get("ToolName")))
 
     exit_code = tool.get("exit_code")
     if isinstance(exit_code, int):

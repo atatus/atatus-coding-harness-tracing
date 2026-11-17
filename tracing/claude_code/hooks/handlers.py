@@ -25,6 +25,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    mcp_attributes_from_tool_name,
     normalize_effort,
     read_stdin_text,
     redact_content,
@@ -303,6 +304,7 @@ def _handle_post_tool_use(input_json: dict) -> None:
         "input.value": tool_input,
         "output.value": tool_response,
         "tool.description": tool_description,
+        **mcp_attributes_from_tool_name(tool_name),
     }
     if user_id:
         attrs["user.id"] = user_id
@@ -446,6 +448,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         "tool.description": tool_description,
         "error.type": "tool_failure",
         "error.message": redacted_error,
+        **mcp_attributes_from_tool_name(tool_name),
     }
     if user_id:
         attrs["user.id"] = user_id

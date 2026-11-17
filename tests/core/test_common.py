@@ -32,6 +32,8 @@ from core.common import (
     get_hostname,
     get_target,
     log,
+    mcp_attributes_from_tool_name,
+    mcp_tool_attributes,
     redirect_stderr_to_log_file,
     resolve_backend,
     restore_stderr_from_log_file,
@@ -1010,6 +1012,41 @@ class TestToolDetailAttributes:
     def test_follows_the_tool_details_flag(self, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         assert tool_detail_attributes({"command": "ls"}) == {"tool.command": "<redacted (2 chars)>"}
+
+
+class TestMcpToolAttributes:
+    @pytest.fixture(autouse=True)
+    def _details_on(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+
+    def test_names_the_server_and_the_tool(self):
+        assert mcp_tool_attributes("docs", "search") == {"mcp.server.name": "docs", "mcp.tool.name": "search"}
+
+    @pytest.mark.parametrize("server, tool", [("", "search"), (None, "search"), (3, "search")])
+    def test_a_missing_server_still_names_the_tool(self, server, tool):
+        assert mcp_tool_attributes(server, tool) == {"mcp.tool.name": "search"}
+
+    def test_nothing_known_gives_nothing(self):
+        assert mcp_tool_attributes(None, "") == {}
+
+    def test_left_out_rather_than_redacted_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert mcp_tool_attributes("docs", "search") == {}
+
+    @pytest.mark.parametrize(
+        "name, server, tool",
+        [
+            ("mcp__docs__search", "docs", "search"),
+            ("mcp__plugin_kit_kit__get__page", "plugin_kit_kit", "get__page"),
+            ("mcp__team-tracker__list_issues", "team-tracker", "list_issues"),
+        ],
+    )
+    def test_splits_an_mcp_tool_name_at_the_first_separator(self, name, server, tool):
+        assert mcp_attributes_from_tool_name(name) == {"mcp.server.name": server, "mcp.tool.name": tool}
+
+    @pytest.mark.parametrize("name", [None, "", "Bash", "mcp_docs_search", "mcp__docs", "mcp__docs__", "mcp____search"])
+    def test_anything_else_is_not_an_mcp_tool(self, name):
+        assert mcp_attributes_from_tool_name(name) == {}
 
 
 # ── EnvConfig property tests ──────────────────────────────────────────────

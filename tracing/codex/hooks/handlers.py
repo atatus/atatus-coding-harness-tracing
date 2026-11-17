@@ -40,6 +40,7 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    mcp_tool_attributes,
     normalize_effort,
     read_stdin_text,
     redact_content,
@@ -631,6 +632,7 @@ def _code_mode_tool(item: dict) -> "tuple[str, dict]":
         return f"mcp__{server}__{tool}" if details and server and tool else "mcp", {
             "input.value": redact_content(content, _json_text(item.get("arguments"))),
             "output.value": redact_content(content, _json_text(item.get("result") or item.get("error"))),
+            **mcp_tool_attributes(server, tool),
         }
     if item_type == "ImageView":
         path = _json_text(item.get("path"))

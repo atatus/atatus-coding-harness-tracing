@@ -464,6 +464,68 @@ class TestToolDescription:
         assert len(desc) == 200
 
 
+def _single_tool_attrs(tmp_path, captured_spans, name: str, args: dict) -> dict:
+    transcript = tmp_path / "transcript.jsonl"
+    _write_jsonl(
+        transcript,
+        [
+            {
+                "step_index": 0,
+                "type": "USER_INPUT",
+                "created_at": "2026-06-09T16:00:00Z",
+                "content": "<USER_REQUEST>hi</USER_REQUEST>",
+            },
+            {
+                "step_index": 1,
+                "type": "PLANNER_RESPONSE",
+                "created_at": "2026-06-09T16:00:01Z",
+                "content": "calling",
+                "tool_calls": [{"name": name, "args": args}],
+            },
+            {"step_index": 2, "type": "GENERIC", "created_at": "2026-06-09T16:00:02Z", "content": "ok"},
+        ],
+    )
+    stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+    with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+        stop()
+    (tool,) = _by_kind(captured_spans, "TOOL")
+    return {key: value.get("stringValue") for key, value in _get_span_attrs(tool).items()}
+
+
+_MCP_CALL_ARGS = {
+    "Arguments": {"q": "retry policy"},
+    "ServerName": "docs",
+    "ToolName": "search_pages",
+    "toolAction": "Searching",
+    "toolSummary": "Search docs",
+}
+
+
+class TestMcpToolCall:
+    def test_names_the_server_and_tool(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "call_mcp_tool", _MCP_CALL_ARGS)
+        assert attrs["tool.name"] == "call_mcp_tool"
+        assert attrs["mcp.server.name"] == "docs"
+        assert attrs["mcp.tool.name"] == "search_pages"
+
+    def test_names_are_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "call_mcp_tool", _MCP_CALL_ARGS)
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_other_tools_carry_no_mcp_names(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "manage_task", {"ServerName": "docs", "ToolName": "x"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+
 # ---------------------------------------------------------------------------
 # High-water-mark dedup: re-running Stop emits nothing the second time
 # ---------------------------------------------------------------------------

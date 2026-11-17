@@ -335,6 +335,28 @@ def tool_detail_attributes(tool_input: Any) -> Dict[str, str]:
     return attrs
 
 
+def mcp_tool_attributes(server: Any, tool: Any) -> Dict[str, str]:
+    """MCP server and tool name. Omitted, not redacted, without tool details: a placeholder would pose as a name."""
+    if not env.log_tool_details:
+        return {}
+    attrs: Dict[str, str] = {}
+    if isinstance(server, str) and server:
+        attrs["mcp.server.name"] = server
+    if isinstance(tool, str) and tool:
+        attrs["mcp.tool.name"] = tool
+    return attrs
+
+
+def mcp_attributes_from_tool_name(tool_name: Any) -> Dict[str, str]:
+    """MCP server and tool name from an ``mcp__<server>__<tool>`` tool name."""
+    if not isinstance(tool_name, str) or not tool_name.startswith("mcp__"):
+        return {}
+    server, _, tool = tool_name[len("mcp__") :].partition("__")
+    if not server or not tool:
+        return {}
+    return mcp_tool_attributes(server, tool)
+
+
 # ---------------------------------------------------------------------------
 # Hook stdin
 # ---------------------------------------------------------------------------

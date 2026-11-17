@@ -1125,6 +1125,14 @@ class TestBuildAndSendSpans:
         assert page["input.value"].startswith("<redacted")
         assert page["output.value"].startswith("<redacted")
 
+    def test_code_mode_mcp_call_names_its_server_and_tool(self):
+        spans = self._spans_for(self._code_mode_turn())
+        command, _, mcp, *_ = (_string_attrs(s) for s in spans[2:8])
+
+        assert mcp["mcp.server.name"] == "docs"
+        assert mcp["mcp.tool.name"] == "search"
+        assert "mcp.server.name" not in command
+
     def test_code_mode_tool_bodies_are_kept_with_tool_content(self):
         spans = self._spans_for(self._code_mode_turn())
         command, patch, mcp, _, _, page = (_string_attrs(s) for s in spans[2:8])
@@ -1146,6 +1154,8 @@ class TestBuildAndSendSpans:
         assert patch["tool.file_path"].startswith("<redacted")
         assert mcp["tool.name"] == "mcp"
         assert spans[4]["name"] == "mcp"
+        assert "mcp.server.name" not in mcp
+        assert "mcp.tool.name" not in mcp
         assert image["tool.file_path"].startswith("<redacted")
         assert search["tool.query"].startswith("<redacted")
         assert page["tool.url"].startswith("<redacted")

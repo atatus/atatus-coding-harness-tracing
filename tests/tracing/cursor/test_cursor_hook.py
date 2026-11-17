@@ -933,6 +933,7 @@ class TestHandleBeforeMcpExecution:
                     "tool_name": "search",
                     "tool_input": '{"query": "test"}',
                     "url": "http://localhost:3000",
+                    "mcp_server_name": "docs",
                 },
             )
 
@@ -941,6 +942,7 @@ class TestHandleBeforeMcpExecution:
         assert "gen-1" in key or "gen_1" in key
         assert value["tool_name"] == "search"
         assert value["tool_input"] == '{"query": "test"}'
+        assert value["mcp_server_name"] == "docs"
         assert value["start_ms"] == "1500"
 
     def test_no_gen_id_returns_early(self, monkeypatch):
@@ -1017,6 +1019,35 @@ class TestHandleAfterMcpExecution:
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
         assert attrs["tool.name"]["stringValue"] == "list_repos"
         assert span["name"] == "MCP: list_repos"
+
+    def _mcp_attrs(self, captured_spans, payload, popped=None):
+        with (
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
+            mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=popped),
+        ):
+            _dispatch("afterMCPExecution", {"conversation_id": "c1", "generation_id": "g1", **payload})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        return {a["key"]: a["value"].get("stringValue") for a in span["attributes"]}
+
+    def test_names_the_server_from_the_payload(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "list_repos", "mcp_server_name": "code-host"})
+        assert attrs["mcp.server.name"] == "code-host"
+        assert attrs["mcp.tool.name"] == "list_repos"
+
+    def test_names_the_server_from_the_before_state(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        popped = {"tool_name": "list_repos", "mcp_server_name": "code-host", "start_ms": "1000"}
+        attrs = self._mcp_attrs(captured_spans, {}, popped=popped)
+        assert attrs["mcp.server.name"] == "code-host"
+        assert attrs["mcp.tool.name"] == "list_repos"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "list_repos", "mcp_server_name": "code-host"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
 
 
 # ---------------------------------------------------------------------------
