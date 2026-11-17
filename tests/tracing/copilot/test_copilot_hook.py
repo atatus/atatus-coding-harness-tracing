@@ -710,6 +710,15 @@ class TestPostToolUseFailure:
         _handle_post_tool_use_failure({"session_id": "sess-1", "tool_name": "bash", "error": message})
         assert _get_span(captured_spans[0])["status"]["message"] == "x" * 200
 
+    def test_error_text_follows_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        """Tool errors echo commands, paths and output, so the status message is tool content too."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure({"session_id": "sess-1", "tool_name": "bash", "error": "TOKEN=s3cr3t-value"})
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert _get_span(captured_spans[0])["status"]["message"] == "<redacted (18 chars)>"
+
     def test_empty_error_still_emits_an_error_span(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")

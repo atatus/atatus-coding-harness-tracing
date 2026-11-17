@@ -286,6 +286,26 @@ class TestPostToolUse:
         assert attrs["mcp.server.name"]["stringValue"] == "docs"
         assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
 
+    def test_failed_tool_error_text_follows_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        """Tool errors echo commands, paths and output, so the status message is tool content too."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Bash", "tool_use_id": "t9", "tool_input": {}, "error": "TOKEN=s3cr3t-value"}
+        )
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert span["status"] == {"code": 2, "message": "<redacted (18 chars)>"}
+
+    def test_failed_tool_without_error_text_says_tool_failure(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure({"tool_name": "Bash", "tool_use_id": "t10", "tool_input": {}})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        assert span["status"]["message"] == "tool_failure"
+
     def test_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")

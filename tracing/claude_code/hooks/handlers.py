@@ -474,7 +474,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
         status_code=2,
-        status_message=error_text or "tool_failure",
+        status_message=redacted_error if error_text else "tool_failure",
     )
     _send_span_async(span)
 

@@ -273,7 +273,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     never cleared, so the session state grows one dead key per failed tool.
     """
     message = str(payload_get(input_json, "error", default=""))
-    _emit_tool_span(input_json, output=message, status_code=2, status_message=message[:200])
+    status_message = redact_content(env.log_tool_content, message)[:200] if message else ""
+    _emit_tool_span(input_json, output=message, status_code=2, status_message=status_message)
 
 
 def _handle_stop(input_json: dict, reason: TurnEndReason = TurnEndReason.COMPLETED) -> None:
