@@ -312,6 +312,65 @@ class TestToolFlow:
         assert tool_span.get("parentSpanId") == turn_span_id
 
 
+class TestDiscloseContext:
+    """disclose_context loads a skill or a steering file by name; only a skills folder makes it a skill."""
+
+    @pytest.fixture
+    def workspace(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / ".kiro" / "skills" / "user-skill").mkdir(parents=True)
+        (home / ".kiro" / "steering").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        project = tmp_path / "project"
+        (project / ".kiro" / "skills" / "release-notes").mkdir(parents=True)
+        (project / ".kiro" / "steering" / "release-notes-style").mkdir(parents=True)
+        return project
+
+    def _disclose(self, captured_spans, cwd, name):
+        payload = {
+            "session_id": SESSION_1,
+            "cwd": str(cwd),
+            "tool_name": "disclose_context",
+            "tool_input": {"name": name},
+        }
+        _invoke_main({**payload, "hook_event_name": "preToolUse"})
+        _invoke_main({**payload, "hook_event_name": "postToolUse", "tool_response": {"items": []}})
+        return _span_attrs(captured_spans[-1])
+
+    @pytest.mark.parametrize("name", ["release-notes", "user-skill"])
+    def test_a_skill_folder_makes_it_a_model_triggered_skill(self, captured_spans, workspace, name):
+        attrs = self._disclose(captured_spans, workspace, name)
+        assert attrs["tool.skill_name"] == name
+        assert attrs["skill.trigger"] == "model"
+
+    @pytest.mark.parametrize(
+        "name", ["release-notes-style", "unknown", "", "../steering", "..", "skills/release-notes"]
+    )
+    def test_steering_or_anything_else_is_not_a_skill(self, captured_spans, workspace, name):
+        attrs = self._disclose(captured_spans, workspace, name)
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_without_a_cwd_only_the_home_folder_counts(self, captured_spans, workspace):
+        payload = {"session_id": SESSION_1, "tool_name": "disclose_context", "tool_input": {"name": "release-notes"}}
+        _invoke_main({**payload, "hook_event_name": "postToolUse", "tool_response": {}})
+        assert "tool.skill_name" not in _span_attrs(captured_spans[-1])
+        _invoke_main({**payload, "tool_input": {"name": "user-skill"}, "hook_event_name": "postToolUse"})
+        assert _span_attrs(captured_spans[-1])["tool.skill_name"] == "user-skill"
+
+    def test_a_power_is_not_a_skill(self, captured_spans, workspace):
+        payload = {"session_id": SESSION_1, "cwd": str(workspace), "tool_name": "kiro_powers"}
+        _invoke_main({**payload, "tool_input": {"name": "release-notes"}, "hook_event_name": "postToolUse"})
+        assert "tool.skill_name" not in _span_attrs(captured_spans[-1])
+
+    def test_left_out_without_tool_details(self, captured_spans, workspace, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._disclose(captured_spans, workspace, "release-notes")
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
 # ---------------------------------------------------------------------------
 # TestStop
 # ---------------------------------------------------------------------------
