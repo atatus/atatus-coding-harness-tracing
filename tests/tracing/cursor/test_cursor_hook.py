@@ -1049,6 +1049,49 @@ class TestHandleAfterMcpExecution:
         assert "mcp.server.name" not in attrs
         assert "mcp.tool.name" not in attrs
 
+    def test_launch_command_follows_tool_content(self, captured_spans, monkeypatch):
+        """A server's launch arguments can hold an API key, so they are tool content, not a tool detail."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "command": "npx srv --api-key s3cr3t-value"})
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert attrs["mcp.command"] == "<redacted (30 chars)>"
+
+    def test_launch_command_from_the_before_state_follows_tool_content(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        with mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock:
+            _dispatch(
+                "beforeMCPExecution",
+                {
+                    "conversation_id": "c1",
+                    "generation_id": "gen-1",
+                    "tool_name": "search",
+                    "command": "npx srv --api-key s3cr3t-value",
+                },
+            )
+        _, value = push_mock.call_args[0]
+        assert value["command"] == "<redacted (30 chars)>"
+
+    def test_no_launch_command_sends_no_placeholder(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search"})
+        assert "mcp.command" not in attrs
+
+    def test_launch_command_sent_with_tool_content(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "command": "npx srv --api-key s3cr3t-value"})
+        assert attrs["mcp.command"] == "npx srv --api-key s3cr3t-value"
+
+    @pytest.mark.parametrize("result_json", ['{"items": 3}', {"items": 3}])
+    def test_reads_the_result_from_result_json(self, captured_spans, monkeypatch, result_json):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "result_json": result_json})
+        assert json.loads(attrs["output.value"]) == {"items": 3}
+
 
 # ---------------------------------------------------------------------------
 # _handle_before_read_file tests
