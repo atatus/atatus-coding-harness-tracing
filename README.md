@@ -165,7 +165,7 @@ The skill's arguments and the file's body are tool content and stay in `input.va
 |---|---|---|
 | `tool.skill_name` | TOOL | the skill this call activated |
 | `skill.trigger` | TOOL | `model` — a dedicated skill tool; `implicit` — the model read the skill's `SKILL.md` (or ran one of its scripts) |
-| `skill.name` + `skill.trigger=user` | turn root | skills the user invoked for the turn; several are comma-joined in order (skill names never contain a comma) |
+| `skill.name` + `skill.trigger=user` | turn root | skills the user invoked for the turn; several are comma-joined in order (skill names are lowercase letters, digits and hyphens) |
 | `skill.active` | LLM | the skill active while that model call ran |
 
 | Harness | `skill.trigger=model` | `skill.trigger=implicit` | turn root `skill.name` | LLM `skill.active` |
@@ -181,8 +181,9 @@ The skill's arguments and the file's body are tool content and stay in `input.va
 | Antigravity | — | `view_file`, `read_file` or `run_command` reading a `SKILL.md` | the `<SKILL>` notice after the request | — |
 | omp | — | `read` of a `skill://<name>` URI or a `SKILL.md` path | — | — |
 
-A `SKILL.md` read is only an activation where reading the file is how the harness loads a skill;
-where a skill tool exists, it is someone editing the skill.
+A `SKILL.md` read is an activation only where reading the file can be how the model loads a
+skill. Claude Code, Gemini CLI, opencode, Kiro and Devin load skills only through their skill
+tool, so a `SKILL.md` read there is someone editing the skill and is not counted.
 
 #### 4. Content logging
 
