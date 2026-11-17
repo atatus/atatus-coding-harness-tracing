@@ -52,10 +52,14 @@ from core.common import (
     error,
     generate_span_id,
     generate_trace_id,
+    invoked_skill_attributes,
     log,
+    mcp_tool_attributes,
     redact_content,
     send_span,
     send_span_async,
+    skill_command_attributes,
+    skill_read_attributes,
 )
 from tracing.antigravity.hooks.adapter import (
     SCOPE_NAME,
@@ -203,15 +207,15 @@ def _resolve_model(state, turn: dict, conversation_id: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _tool_description(name: str, args: dict, args_json: str) -> str:
+def _tool_description(args: dict) -> str:
     """Build a short, scannable description from the most informative argument."""
     if not isinstance(args, dict):
-        return args_json[:200]
+        return ""
     for key in _DESCRIPTION_ARG_KEYS:
         val = args.get(key)
         if isinstance(val, str) and val:
             return val[:200]
-    return args_json[:200]
+    return ""
 
 
 def _output_messages(content: str, tool_calls: list) -> str:
@@ -266,10 +270,12 @@ def _build_tool_span(
             "tool.name": tool_name,
             "input.value": redact_content(env.log_tool_content, args_json),
             "output.value": redact_content(env.log_tool_content, output_text),
-            "tool.description": redact_content(env.log_tool_details, _tool_description(tool_name, args, args_json)),
             "tracing.parentage": parentage,
         }
     )
+    description = _tool_description(args)
+    if description:
+        attrs["tool.description"] = redact_content(env.log_tool_details, description)
 
     promoted = _TOOL_ATTR_KEYS.get(tool_name)
     if promoted and isinstance(args, dict):
@@ -277,6 +283,15 @@ def _build_tool_span(
         value = args.get(arg_key)
         if isinstance(value, str) and value:
             attrs[attr_name] = redact_content(env.log_tool_details, value)
+    if tool_name == "call_mcp_tool" and isinstance(args, dict):
+        attrs.update(mcp_tool_attributes(args.get("ServerName"), args.get("ToolName")))
+    if isinstance(args, dict):
+        if tool_name == "view_file":
+            attrs.update(skill_read_attributes(args.get("AbsolutePath")))
+        elif tool_name == "read_file":
+            attrs.update(skill_read_attributes(args.get("Path")))
+        elif tool_name == "run_command":
+            attrs.update(skill_command_attributes(args.get("CommandLine")))
 
     exit_code = tool.get("exit_code")
     if isinstance(exit_code, int):
@@ -371,6 +386,7 @@ def _build_turn_spans(
         )
     if model_label and model_label != model_id:
         root_attrs["antigravity.model_label"] = model_label
+    root_attrs.update(invoked_skill_attributes(turn.get("invoked_skills") or []))
     effort, thinking = effort_from_label(model_label)
     if effort:
         root_attrs[LLM_EFFORT_ATTR] = effort

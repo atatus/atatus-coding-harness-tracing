@@ -27,6 +27,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_read_attributes,
 )
 from tracing.omp.hooks.adapter import (
     SCOPE_NAME,
@@ -324,6 +325,8 @@ def _emit_tool_span(state: StateManager, tool_result: dict, calls: dict, llm_spa
     }
     for key, value in _per_tool_attrs(tool_name, arguments).items():
         attrs[key] = redact_content(env.log_tool_details, value)
+    if tool_name == "read":
+        attrs.update(skill_read_attributes(arguments.get("path") or arguments.get("filePath")))
 
     user_id = state.get("user_id") or ""
     login_id = state.get("user_login_id") or ""

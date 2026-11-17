@@ -10,7 +10,7 @@ One trace per **turn** (one user prompt → the assistant's response → `sessio
 |------|------|-------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt; `output.value` is the assistant's final text. |
 | `LLM: <model>` | LLM | Child of `Turn` (or of a child subagent's `AGENT`). Carries `llm.message_id`, `llm.model_name`, `llm.reasoning_effort` (the message's model variant, when set), `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. One per assistant message. |
-| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. One per completed `callID`. Records `tool.name`, redacted input/output, and tool-specific attributes (`tool.command`, `tool.file_path`, `tool.query`, `tool.url`). |
+| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. One per completed `callID`. Records `tool.name`, redacted input/output, and tool-specific attributes (`tool.command`, `tool.file_path`, `tool.query`, `tool.url`, and `tool.skill_name` with `skill.trigger=model` on the `skill` tool). |
 | `Agent: <name>` | AGENT | Child of a `task` TOOL when the SDK child session reports a matching `Session.parentID`; that child session's LLM and TOOL spans nest beneath it. |
 
 Timestamps come from opencode's own millisecond clocks (`message.time.created` / `time.completed`, `toolPart.state.time.start` / `.end`) rather than wall-clock time on the tracing process.

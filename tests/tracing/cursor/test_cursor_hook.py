@@ -933,6 +933,7 @@ class TestHandleBeforeMcpExecution:
                     "tool_name": "search",
                     "tool_input": '{"query": "test"}',
                     "url": "http://localhost:3000",
+                    "mcp_server_name": "docs",
                 },
             )
 
@@ -941,6 +942,7 @@ class TestHandleBeforeMcpExecution:
         assert "gen-1" in key or "gen_1" in key
         assert value["tool_name"] == "search"
         assert value["tool_input"] == '{"query": "test"}'
+        assert value["mcp_server_name"] == "docs"
         assert value["start_ms"] == "1500"
 
     def test_no_gen_id_returns_early(self, monkeypatch):
@@ -1018,6 +1020,78 @@ class TestHandleAfterMcpExecution:
         assert attrs["tool.name"]["stringValue"] == "list_repos"
         assert span["name"] == "MCP: list_repos"
 
+    def _mcp_attrs(self, captured_spans, payload, popped=None):
+        with (
+            mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a" * 16),
+            mock.patch("tracing.cursor.hooks.handlers.state_pop", return_value=popped),
+        ):
+            _dispatch("afterMCPExecution", {"conversation_id": "c1", "generation_id": "g1", **payload})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        return {a["key"]: a["value"].get("stringValue") for a in span["attributes"]}
+
+    def test_names_the_server_from_the_payload(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "list_repos", "mcp_server_name": "code-host"})
+        assert attrs["mcp.server.name"] == "code-host"
+        assert attrs["mcp.tool.name"] == "list_repos"
+
+    def test_names_the_server_from_the_before_state(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        popped = {"tool_name": "list_repos", "mcp_server_name": "code-host", "start_ms": "1000"}
+        attrs = self._mcp_attrs(captured_spans, {}, popped=popped)
+        assert attrs["mcp.server.name"] == "code-host"
+        assert attrs["mcp.tool.name"] == "list_repos"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "list_repos", "mcp_server_name": "code-host"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_launch_command_follows_tool_content(self, captured_spans, monkeypatch):
+        """A server's launch arguments can hold an API key, so they are tool content, not a tool detail."""
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "command": "npx srv --api-key s3cr3t-value"})
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert attrs["mcp.command"] == "<redacted (30 chars)>"
+
+    def test_launch_command_from_the_before_state_follows_tool_content(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        with mock.patch("tracing.cursor.hooks.handlers.state_push") as push_mock:
+            _dispatch(
+                "beforeMCPExecution",
+                {
+                    "conversation_id": "c1",
+                    "generation_id": "gen-1",
+                    "tool_name": "search",
+                    "command": "npx srv --api-key s3cr3t-value",
+                },
+            )
+        _, value = push_mock.call_args[0]
+        assert value["command"] == "<redacted (30 chars)>"
+
+    def test_no_launch_command_sends_no_placeholder(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search"})
+        assert "mcp.command" not in attrs
+
+    def test_launch_command_sent_with_tool_content(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "command": "npx srv --api-key s3cr3t-value"})
+        assert attrs["mcp.command"] == "npx srv --api-key s3cr3t-value"
+
+    @pytest.mark.parametrize("result_json", ['{"items": 3}', {"items": 3}])
+    def test_reads_the_result_from_result_json(self, captured_spans, monkeypatch, result_json):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        attrs = self._mcp_attrs(captured_spans, {"tool_name": "search", "result_json": result_json})
+        assert json.loads(attrs["output.value"]) == {"items": 3}
+
 
 # ---------------------------------------------------------------------------
 # _handle_before_read_file tests
@@ -1047,6 +1121,36 @@ class TestHandleBeforeReadFile:
         assert attrs["input.value"]["stringValue"] == "/foo/bar.py"
         assert span["name"] == "Read File"
         assert span["parentSpanId"] == "a7e64b1d8f42e11c"
+
+    def _read(self, captured_spans, event, file_path):
+        with mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"):
+            _dispatch(event, {"conversation_id": "conv-1", "generation_id": "gen-1", "file_path": file_path})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        return {a["key"]: a["value"] for a in span["attributes"]}
+
+    def test_reading_a_skill_file_is_an_implicit_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["skill.trigger"]["stringValue"] == "implicit"
+
+    def test_reading_another_file_is_not_an_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/references/a.md")
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_activation_is_left_out_without_tool_details(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_a_tab_read_is_not_an_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeTabFileRead", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert "tool.skill_name" not in attrs
 
 
 # ---------------------------------------------------------------------------

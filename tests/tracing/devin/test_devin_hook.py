@@ -222,6 +222,33 @@ class TestEmitInteraction:
         assert json.loads(tool["input.value"]) == {"cmd": "secret"}
         assert tool["output.value"] == "out"
 
+    def _tool_attrs(self, captured_spans, name, arguments):
+        tools = [ToolCall("t", name, arguments, "")]
+        self._emit(captured_spans, [_step("A", content="c", prompt=1, completion=1, tools=tools)])
+        return _span_attrs(next(s for s in captured_spans if _kind(s) == "TOOL"))
+
+    @pytest.mark.parametrize("arguments", [{"name": "release-notes"}, {"skill": "release-notes"}])
+    def test_skill_tool_names_its_skill_as_a_model_trigger(self, captured_spans, arguments):
+        tool = self._tool_attrs(captured_spans, "skill", arguments)
+        assert tool["tool.skill_name"] == "release-notes"
+        assert tool["skill.trigger"] == "model"
+
+    def test_only_the_skill_tool_names_a_skill(self, captured_spans):
+        tool = self._tool_attrs(captured_spans, "read", {"name": "release-notes"})
+        assert "tool.skill_name" not in tool
+        assert "skill.trigger" not in tool
+
+    def test_reading_a_skill_file_is_not_an_activation(self, captured_spans):
+        tool = self._tool_attrs(captured_spans, "read", {"file_path": "/home/dev/.devin/skills/release-notes/SKILL.md"})
+        assert "tool.skill_name" not in tool
+
+    def test_skill_name_is_left_out_without_tool_details(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        env.invalidate_caches()
+        tool = self._tool_attrs(captured_spans, "skill", {"name": "release-notes"})
+        assert "tool.skill_name" not in tool
+        assert "skill.trigger" not in tool
+
     def test_tool_arguments_and_output_gated_by_tool_content_flag(self, captured_spans, monkeypatch):
         """Arguments can carry whole file bodies, so they follow tool content like the result does."""
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")

@@ -9,11 +9,15 @@ from typing import Any
 
 from core.common import (
     LLM_EFFORT_ATTR,
+    SKILL_TRIGGER_MODEL,
+    active_skill_attributes,
     build_multi_span,
     build_span,
     env,
     generate_span_id,
+    mcp_attributes_from_tool_name,
     redact_content,
+    skill_name_attributes,
 )
 from core.event_model import (
     AgentEvent,
@@ -170,6 +174,7 @@ def _span_fields(event: BaseEvent, model_call_number: int, prompt_number: int) -
             _put_content(attrs, "llm.reasoning", event.reasoning, env.log_prompts)
         if event.agent_id:
             attrs["subagent.id"] = event.agent_id
+        attrs.update(active_skill_attributes(event.active_skill))
         if event.usage is not None and not event.usage.is_empty():
             prompt_tokens = event.usage.prompt_tokens
             completion_tokens = event.usage.output_tokens
@@ -239,6 +244,14 @@ def _put_tool_details(attrs: dict[str, Any], event: ToolEvent) -> None:
     for key, value in details.items():
         if value is not None:
             attrs[key] = redact_content(env.log_tool_details, _content_string(value))
+    attrs.update(tool_identity_attributes(event.tool_name, tool_input))
+
+
+def tool_identity_attributes(tool_name: Any, tool_input: Any) -> dict[str, str]:
+    attrs = mcp_attributes_from_tool_name(tool_name)
+    if tool_name == "Skill" and isinstance(tool_input, dict):
+        attrs.update(skill_name_attributes(tool_input.get("skill"), trigger=SKILL_TRIGGER_MODEL))
+    return attrs
 
 
 def _turn_input(event: TurnEvent) -> Any:
@@ -349,4 +362,4 @@ def _safe_parent_event_ids(events: list[BaseEvent]) -> list[str | None]:
     ]
 
 
-__all__ = ["render_event_graph"]
+__all__ = ["render_event_graph", "tool_identity_attributes"]

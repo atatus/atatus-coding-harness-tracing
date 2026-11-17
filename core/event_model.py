@@ -154,6 +154,7 @@ class ModelCallEvent(BaseEvent):
     effort: Optional[str] = None
     reasoning: Optional[str] = None
     usage: Optional[Usage] = None
+    active_skill: Optional[str] = None
 
     event_type: ClassVar[str] = "model_call"
 

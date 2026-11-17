@@ -1497,6 +1497,157 @@ class TestReasoningEffort:
         assert handlers._payload_effort({}) == ""
 
 
+def _with_skill(record, skill):
+    return {**record, "attributionSkill": skill}
+
+
+def _stop_on(tmp_path, records):
+    transcript = _write(tmp_path / "t.jsonl", records)
+    state = StateManager(tmp_path, tmp_path / "s.json", tmp_path / "s.lock")
+    state.init_state()
+    for key, value in {
+        "session_id": "s1",
+        "trace_count": "1",
+        "current_trace_id": "a" * 32,
+        "current_trace_span_id": "b" * 16,
+        "current_trace_start_time": "1",
+        "current_trace_prompt": "go",
+        "trace_start_line": "0",
+    }.items():
+        state.set(key, value)
+    captured = []
+    payload = {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)}
+    with (
+        mock.patch.object(handlers, "resolve_session", lambda *a, **k: state),
+        mock.patch.object(handlers, "send_span", lambda p: captured.append(p) or True),
+        mock.patch.object(handlers, "gc_stale_state_files", lambda *a, **k: None),
+        mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(payload))),
+    ):
+        handlers.stop()
+    spans = captured[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    return [{a["key"]: list(a["value"].values())[0] for a in span["attributes"]} for span in spans]
+
+
+def _unidentified(record):
+    return {key: value for key, value in record.items() if key != "uuid"}
+
+
+class TestActiveSkill:
+    def _calls(self, tmp_path, records):
+        graph = parse_claude_transcript(_write(tmp_path / "t.jsonl", records), _root())
+        return [e for e in graph.events if isinstance(e, ModelCallEvent)]
+
+    def test_read_off_the_assistant_record(self, tmp_path):
+        calls = self._calls(
+            tmp_path, [_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes")]
+        )
+        assert calls[0].active_skill == "release-notes"
+
+    def test_a_plugin_skill_keeps_its_plugin_prefix(self, tmp_path):
+        calls = self._calls(
+            tmp_path, [_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "docs:release-notes")]
+        )
+        assert calls[0].active_skill == "docs:release-notes"
+
+    def test_one_response_split_across_records_has_one_skill(self, tmp_path):
+        calls = self._calls(
+            tmp_path,
+            [
+                _assistant("u1", "msg_A", [{"type": "thinking", "thinking": "hmm"}]),
+                _with_skill(_assistant("u2", "msg_A", [{"type": "text", "text": "a"}]), "release-notes"),
+                _with_skill(_assistant("u3", "msg_A", [_tool_use_block("toolu_1")]), "release-notes"),
+            ],
+        )
+        assert [call.active_skill for call in calls] == ["release-notes"]
+
+    def test_a_call_with_no_skill_has_none(self, tmp_path):
+        calls = self._calls(
+            tmp_path,
+            [
+                _with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes"),
+                _assistant("u2", "msg_B", [{"type": "text", "text": "b"}]),
+            ],
+        )
+        assert [call.active_skill for call in calls] == ["release-notes", None]
+
+    def test_only_an_assistant_record_names_it(self, tmp_path):
+        untyped = _with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes")
+        del untyped["type"]
+        assert self._calls(tmp_path, [untyped])[0].active_skill is None
+
+    def test_skill_attachments_are_not_an_active_skill(self, tmp_path):
+        calls = self._calls(
+            tmp_path,
+            [
+                {
+                    "type": "attachment",
+                    "uuid": f"att-{kind}",
+                    "attachment": {"type": kind, "skills": [{"name": "release-notes"}], "name": "release-notes"},
+                }
+                for kind in ("invoked_skills", "skill_mention", "skill_listing", "dynamic_skill")
+            ]
+            + [_assistant("u1", "msg_A", [{"type": "text", "text": "a"}])],
+        )
+        assert [call.active_skill for call in calls] == [None]
+
+    def test_lands_on_its_llm_span(self, tmp_path):
+        spans = _stop_on(
+            tmp_path,
+            [
+                _with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes"),
+                _assistant("u2", "msg_B", [{"type": "text", "text": "b"}]),
+            ],
+        )
+        llms = {a["llm.message.id"]: a for a in spans if a["openinference.span.kind"] == "LLM"}
+        assert llms["msg_A"]["skill.active"] == "release-notes"
+        assert "skill.active" not in llms["msg_B"]
+        assert not any("skill.active" in a for a in spans if a["openinference.span.kind"] != "LLM")
+
+    def test_left_out_without_tool_details(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        spans = _stop_on(
+            tmp_path, [_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes")]
+        )
+        assert not any("skill.active" in a for a in spans)
+
+    def test_a_flat_turn_names_the_skill_every_call_ran_under(self, tmp_path):
+        spans = _stop_on(
+            tmp_path,
+            [
+                _unidentified(_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes")),
+                _unidentified(_with_skill(_assistant("u2", "msg_B", [{"type": "text", "text": "b"}]), "release-notes")),
+            ],
+        )
+        [flat] = spans
+        assert flat["turn.flattened"] == "true"
+        assert flat["skill.active"] == "release-notes"
+
+    @pytest.mark.parametrize("second", [None, "changelog"])
+    def test_a_flat_turn_with_mixed_skills_names_none(self, tmp_path, second):
+        later = _unidentified(_assistant("u2", "msg_B", [{"type": "text", "text": "b"}]))
+        spans = _stop_on(
+            tmp_path,
+            [
+                _unidentified(_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes")),
+                _with_skill(later, second) if second else later,
+            ],
+        )
+        [flat] = spans
+        assert "skill.active" not in flat
+
+    def test_a_flat_turn_leaves_it_out_without_tool_details(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        spans = _stop_on(
+            tmp_path,
+            [_unidentified(_with_skill(_assistant("u1", "msg_A", [{"type": "text", "text": "a"}]), "release-notes"))],
+        )
+        assert "skill.active" not in spans[0]
+
+
+def _tool_use_block(call_id):
+    return {"type": "tool_use", "id": call_id, "name": "Bash", "input": {"command": "ls"}}
+
+
 def _request_replay(role, blocks):
     return {"type": "api-request-blob", "hash": "h", "sessionId": "s1", "message": {"role": role, "content": blocks}}
 
@@ -1655,3 +1806,72 @@ class TestFlattenedTurnIsMarked:
         transcript = _write(tmp_path / "t.jsonl", _request_bookkeeping_turn())
         root = _root_span(_export_on_stop(tmp_path, transcript))
         assert "turn.flattened" not in _attrs(root)
+
+
+def _render_tool(tool_name, tool_input):
+    from core.event_model import EventGraph
+    from tracing.claude_code.hooks.span_renderer import render_event_graph
+
+    tool = ToolEvent(
+        event_id="tool:1",
+        session_id="s1",
+        turn_id="1",
+        sequence=1,
+        started_at_ms=0,
+        ended_at_ms=0,
+        status=EventStatus.COMPLETED,
+        parent_event_id="turn:1",
+        input=tool_input,
+        output="ok",
+        tool_call_id="toolu_1",
+        tool_name=tool_name,
+    )
+    spans = _spans(render_event_graph(EventGraph([_root(), tool]), trace_id="t" * 32))
+    return _attrs(next(s for s in spans if _attrs(s)["openinference.span.kind"] == "TOOL"))
+
+
+class TestRenderedToolIdentity:
+    def test_mcp_tool_names_its_server_and_tool(self):
+        attrs = _render_tool("mcp__docs__search_pages", {"q": "retry policy"})
+        assert attrs["mcp.server.name"] == "docs"
+        assert attrs["mcp.tool.name"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _render_tool("mcp__docs__search_pages", {"q": "retry policy"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_builtin_tool_has_no_mcp_names(self):
+        attrs = _render_tool("Bash", {"command": "ls"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_skill_tool_names_its_skill(self):
+        attrs = _render_tool("Skill", {"skill": "release-notes", "args": "draft v2 notes"})
+        assert attrs["tool.skill_name"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert "tool.skill_name" not in _render_tool("Skill", {"skill": "release-notes"})
+
+    def test_skill_tool_is_a_model_trigger(self):
+        assert _render_tool("Skill", {"skill": "release-notes"})["skill.trigger"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert "skill.trigger" not in _render_tool("Skill", {"skill": "release-notes"})
+
+    def test_reading_a_skill_file_is_not_an_activation(self):
+        attrs = _render_tool("Read", {"file_path": "/home/dev/.claude/skills/release-notes/SKILL.md"})
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_args_stay_behind_tool_content(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = _render_tool("Skill", {"skill": "release-notes", "args": "draft v2 notes"})
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert not any("draft v2 notes" in str(value) for value in attrs.values())
+
+    def test_only_the_skill_tool_has_a_skill_name(self):
+        assert "tool.skill_name" not in _render_tool("Read", {"skill": "release-notes", "file_path": "/x"})

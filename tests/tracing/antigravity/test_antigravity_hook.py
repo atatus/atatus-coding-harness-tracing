@@ -381,6 +381,43 @@ class TestStopSingleTurnFixture:
                 assert not attr["key"].startswith("llm.token_count"), f"unexpected token attr emitted: {attr['key']}"
 
 
+def _single_tool_attrs(tmp_path, captured_spans, name: str, args: dict) -> dict:
+    transcript = tmp_path / "transcript.jsonl"
+    _write_jsonl(
+        transcript,
+        [
+            {
+                "step_index": 0,
+                "type": "USER_INPUT",
+                "created_at": "2026-06-09T16:00:00Z",
+                "content": "<USER_REQUEST>hi</USER_REQUEST>",
+            },
+            {
+                "step_index": 1,
+                "type": "PLANNER_RESPONSE",
+                "created_at": "2026-06-09T16:00:01Z",
+                "content": "calling",
+                "tool_calls": [{"name": name, "args": args}],
+            },
+            {"step_index": 2, "type": "GENERIC", "created_at": "2026-06-09T16:00:02Z", "content": "ok"},
+        ],
+    )
+    stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+    with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+        stop()
+    (tool,) = _by_kind(captured_spans, "TOOL")
+    return {key: value.get("stringValue") for key, value in _get_span_attrs(tool).items()}
+
+
+_MCP_CALL_ARGS = {
+    "Arguments": {"q": "retry policy"},
+    "ServerName": "docs",
+    "ToolName": "search_pages",
+    "toolAction": "Searching",
+    "toolSummary": "Search docs",
+}
+
+
 # ---------------------------------------------------------------------------
 # Tool descriptions come from Antigravity's PascalCase arg keys
 # ---------------------------------------------------------------------------
@@ -393,7 +430,7 @@ class TestToolDescription:
             span = _get_span(p)
             attrs = {a["key"]: a["value"] for a in span["attributes"]}
             kind = attrs.get("openinference.span.kind", {}).get("stringValue", "")
-            if kind == "TOOL":
+            if kind == "TOOL" and "tool.description" in attrs:
                 out[span["name"]] = attrs["tool.description"]["stringValue"]
         return out
 
@@ -427,41 +464,144 @@ class TestToolDescription:
             "codecov yml validation schema spec comment layout behavior require_changes"
         )
 
-    def test_unknown_args_fall_back_to_truncated_json_blob(
+    def test_unknown_args_give_no_description(
         self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
     ):
-        transcript = tmp_path / "transcript.jsonl"
-        args = {"SomethingElse": "z" * 300}
-        _write_jsonl(
-            transcript,
-            [
-                {
-                    "step_index": 0,
-                    "type": "USER_INPUT",
-                    "created_at": "2026-06-09T16:00:00Z",
-                    "content": "<USER_REQUEST>hi</USER_REQUEST>",
-                },
-                {
-                    "step_index": 1,
-                    "type": "PLANNER_RESPONSE",
-                    "created_at": "2026-06-09T16:00:01Z",
-                    "content": "calling",
-                    "tool_calls": [{"name": "mystery_tool", "args": args}],
-                },
-                {
-                    "step_index": 2,
-                    "type": "MYSTERY_TOOL",
-                    "created_at": "2026-06-09T16:00:02Z",
-                    "content": "ok",
-                },
-            ],
-        )
-        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
-        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
-            stop()
-        desc = self._tool_descriptions(captured_spans)["mystery_tool"]
-        assert desc == json.dumps(args)[:200]
-        assert len(desc) == 200
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "mystery_tool", {"SomethingElse": "z" * 300})
+        assert "tool.description" not in attrs
+        assert attrs["input.value"] == json.dumps({"SomethingElse": "z" * 300})
+
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("call_mcp_tool", {**_MCP_CALL_ARGS, "Arguments": {"q": "SECRET-ARG"}}),
+            ("mystery_tool", {"SomethingElse": "SECRET-ARG"}),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch, name, args
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert "SECRET-ARG" not in json.dumps(attrs)
+
+
+class TestMcpToolCall:
+    def test_names_the_server_and_tool(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "call_mcp_tool", _MCP_CALL_ARGS)
+        assert attrs["tool.name"] == "call_mcp_tool"
+        assert attrs["mcp.server.name"] == "docs"
+        assert attrs["mcp.tool.name"] == "search_pages"
+
+    def test_names_are_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "call_mcp_tool", _MCP_CALL_ARGS)
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_other_tools_carry_no_mcp_names(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "manage_task", {"ServerName": "docs", "ToolName": "x"})
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+
+_INVOKED = (
+    "<USER_REQUEST>draft the notes</USER_REQUEST>\n<ADDITIONAL_METADATA>\n<SKILL>The user has explicitly invoked "
+    "the (release-notes) skill. You must strictly follow the instructions in this skill to proceed.</SKILL>\n"
+    "</ADDITIONAL_METADATA>"
+)
+
+
+def _turn_root_attrs(tmp_path, captured_spans, user_content: str) -> dict:
+    transcript = tmp_path / "transcript.jsonl"
+    _write_jsonl(
+        transcript,
+        [
+            {"step_index": 0, "type": "USER_INPUT", "created_at": "2026-06-09T16:00:00Z", "content": user_content},
+            {"step_index": 1, "type": "PLANNER_RESPONSE", "created_at": "2026-06-09T16:00:01Z", "content": "done"},
+        ],
+    )
+    stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+    with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+        stop()
+    (root,) = _by_kind(captured_spans, "CHAIN")
+    return {key: value.get("stringValue") for key, value in _get_span_attrs(root).items()}
+
+
+class TestUserInvokedSkill:
+    def test_the_turn_root_names_the_skill_and_the_user_trigger(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _turn_root_attrs(tmp_path, captured_spans, _INVOKED)
+        assert attrs["skill.name"] == "release-notes"
+        assert attrs["skill.trigger"] == "user"
+
+    def test_a_plain_turn_has_no_skill(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _turn_root_attrs(tmp_path, captured_spans, "<USER_REQUEST>go</USER_REQUEST>")
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _turn_root_attrs(tmp_path, captured_spans, _INVOKED)
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
+_SKILL_FILE = "/home/dev/.gemini/antigravity/skills/release-notes/SKILL.md"
+
+
+class TestSkillFileReads:
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("view_file", {"AbsolutePath": _SKILL_FILE, "toolAction": "Viewing", "toolSummary": "skill"}),
+            ("view_file", {"AbsolutePath": _SKILL_FILE, "StartLine": 1, "EndLine": 80}),
+            ("read_file", {"Path": _SKILL_FILE}),
+            ("run_command", {"CommandLine": f"cat {_SKILL_FILE}", "Cwd": "/w"}),
+        ],
+    )
+    def test_reading_a_skill_file_is_an_implicit_activation(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, name, args
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert attrs["skill.trigger"] == "implicit"
+
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("view_file", {"AbsolutePath": "/home/dev/.gemini/antigravity/skills/release-notes/references/a.md"}),
+            ("read_file", {"Path": "/w/SKILL.md"}),
+            ("run_command", {"CommandLine": f"grep name {_SKILL_FILE}"}),
+            ("write_to_file", {"AbsolutePath": _SKILL_FILE}),
+            ("list_dir", {"DirectoryPath": "/home/dev/.gemini/antigravity/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, name, args
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "view_file", {"AbsolutePath": _SKILL_FILE})
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
 
 
 # ---------------------------------------------------------------------------

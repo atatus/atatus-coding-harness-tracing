@@ -24,6 +24,7 @@ import sys
 from typing import Any
 
 from core.common import (
+    SKILL_TRIGGER_MODEL,
     build_span,
     env,
     generate_span_id,
@@ -32,6 +33,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
     tool_detail_attributes,
 )
 from tracing.devin.constants import SCOPE_NAME, SERVICE_NAME, SESSIONS_DB
@@ -182,6 +184,9 @@ def emit_interaction(session_id: str, steps: list[LlmStep], user_prompt: str, me
                 "output.value": redact_content(env.log_tool_content, tc.result),
                 **tool_detail_attributes(tc.arguments),
             }
+            if tc.name == "skill" and isinstance(tc.arguments, dict):
+                skill = tc.arguments.get("name") or tc.arguments.get("skill")
+                tool_attrs.update(skill_name_attributes(skill, trigger=SKILL_TRIGGER_MODEL))
             tool_attrs.update(identity_attrs)
             tool_span = build_span(
                 f"Tool: {tc.name}",

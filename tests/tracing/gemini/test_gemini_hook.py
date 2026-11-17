@@ -929,18 +929,95 @@ class TestAfterTool:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "rust tutorial"
 
-    def test_unknown_tool_description(self, mock_resolve, state, captured_spans):
-        """Unknown tool gets description from input_value[:200]."""
+    def test_unknown_tool_has_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool({"tool_name": "custom_tool", "tool_args": {"key": "value"}, "tool_result": "result"})
         attrs = _get_span_attrs(captured_spans[0])
-        assert "tool.description" in attrs
+        assert "tool.description" not in attrs
         # Should not have tool-specific attributes
         assert "tool.command" not in attrs
         assert "tool.file_path" not in attrs
         assert "tool.url" not in attrs
         assert "tool.query" not in attrs
+
+    _MCP_TOOL = {
+        "tool_name": "mcp_docs_search_pages",
+        "tool_input": {"q": "retry policy"},
+        "mcp_context": {"server_name": "docs", "tool_name": "search_pages", "command": "docs-server"},
+        "tool_response": {"llmContent": "found"},
+    }
+
+    def test_mcp_tool_names_its_server_and_tool_from_mcp_context(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(self._MCP_TOOL)
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(self._MCP_TOOL)
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_mcp_like_name_without_mcp_context_is_not_split(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": "mcp_docs_search_pages", "tool_input": {}, "tool_response": "found"})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_activate_skill_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    def test_activate_skill_leaves_the_trigger_out(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert "skill.trigger" not in attrs
+
+    def test_reading_a_skill_file_is_not_an_activation(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {
+                "tool_name": "read_file",
+                "tool_input": {"file_path": "/home/dev/.gemini/skills/release-notes/SKILL.md"},
+                "tool_response": "",
+            }
+        )
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    def test_only_activate_skill_has_a_skill_name(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": "custom_tool", "tool_input": {"name": "release-notes"}, "tool_response": ""})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
 
     # -- Redaction tests --
 
@@ -1464,13 +1541,30 @@ class TestAfterModelEdgeCases:
 
 
 class TestAfterToolEdgeCases:
-    def test_non_dict_tool_args_uses_str_description(self, mock_resolve, state, captured_spans):
-        """Non-dict tool_args are stringified into the tool description."""
+    def test_non_dict_tool_args_give_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool({"tool_name": "raw_string_tool", "tool_input": "not-a-dict-arg", "tool_response": "result"})
         attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["tool.description"]["stringValue"] == "not-a-dict-arg"
+        assert "tool.description" not in attrs
+        assert attrs["input.value"]["stringValue"] == "not-a-dict-arg"
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_input",
+        [
+            ("mcp_docs_search_pages", {"q": "SECRET-ARG"}),
+            ("custom_tool", {"body": "SECRET-ARG"}),
+            ("raw_string_tool", "SECRET-ARG"),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, tool_name, tool_input
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": tool_name, "tool_input": tool_input, "tool_response": "ok"})
+        assert "SECRET-ARG" not in json.dumps(_get_span_attrs(captured_spans[0]))
 
 
 # ---------------------------------------------------------------------------

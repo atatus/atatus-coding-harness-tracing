@@ -13,11 +13,13 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    mcp_tool_attributes,
     normalize_effort,
     read_stdin_text,
     redact_content,
     send_span,
     send_span_async,
+    skill_read_attributes,
 )
 from tracing.cursor.hooks.adapter import (
     SCOPE_NAME,
@@ -710,6 +712,11 @@ def _handle_after_shell_execution(input_json, conversation_id, gen_id, trace_id,
     log(f"afterShellExecution: span {sid} (merged)")
 
 
+def _mcp_launch_command(command: str) -> str:
+    # The server's launch arguments can carry an API key, so they are tool content.
+    return redact_content(env.log_tool_content, command) if command else ""
+
+
 def _handle_before_mcp_execution(input_json, conversation_id, gen_id, trace_id, now_ms):
     """State push only, no span. Replaces bash lines 237-257."""
     resolved_trace, _, canonical_gen, _ = _resolve_turn(conversation_id, gen_id, trace_id, now_ms)
@@ -727,7 +734,8 @@ def _handle_before_mcp_execution(input_json, conversation_id, gen_id, trace_id, 
             "tool_name": tool_name,
             "tool_input": redact_content(env.log_tool_content, tool_input),
             "url": redact_content(env.log_tool_details, mcp_url),
-            "command": redact_content(env.log_tool_details, mcp_cmd),
+            "command": _mcp_launch_command(mcp_cmd),
+            "mcp_server_name": _jq_str(input_json, "mcp_server_name"),
             "start_ms": str(now_ms),
             "trace_id": resolved_trace,
             "conversation_id": conversation_id,
@@ -754,19 +762,23 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
         tool_input = popped.get("tool_input", "")
         mcp_url = popped.get("url", "")
         mcp_cmd = popped.get("command", "")
+        mcp_server = popped.get("mcp_server_name", "")
     else:
         start_ms = now_ms
         tool_name = _jq_str(input_json, "tool_name", "toolName", "name")
         tool_input = redact_content(env.log_tool_content, _jq_str(input_json, "tool_input", "toolInput", "input"))
         mcp_url = redact_content(env.log_tool_details, _jq_str(input_json, "url"))
-        mcp_cmd = redact_content(env.log_tool_details, _jq_str(input_json, "command"))
+        mcp_cmd = _mcp_launch_command(_jq_str(input_json, "command"))
+        mcp_server = ""
 
     after_tool = _jq_str(input_json, "tool_name", "toolName", "name")
     if after_tool:
         tool_name = after_tool
+    mcp_server = _jq_str(input_json, "mcp_server_name") or mcp_server
+    mcp_names = mcp_tool_attributes(mcp_server, tool_name)
     tool_name = tool_name or "unknown"
 
-    result = redact_content(env.log_tool_content, _jq_str(input_json, "result", "output", "response"))
+    result = redact_content(env.log_tool_content, _jq_str(input_json, "result_json", "result", "output", "response"))
 
     user_id = _resolve_user_id(input_json)
     login_id = _resolve_user_login_id(input_json)
@@ -788,6 +800,7 @@ def _handle_after_mcp_execution(input_json, conversation_id, gen_id, trace_id, n
         attrs["mcp.url"] = mcp_url
     if mcp_cmd:
         attrs["mcp.command"] = mcp_cmd
+    attrs.update(mcp_names)
 
     span = build_span(
         f"MCP: {tool_name}",
@@ -813,7 +826,8 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         log("cursor: no root span for this generation - span dropped")
         return
 
-    file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
+    raw_path = _jq_str(input_json, "file_path", "filePath", "path")
+    file_path = redact_content(env.log_tool_details, raw_path)
 
     user_id = _resolve_user_id(input_json)
     login_id = _resolve_user_login_id(input_json)
@@ -823,6 +837,7 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         "tool.name": "read_file",
         "input.value": file_path,
         "session.id": conversation_id,
+        **skill_read_attributes(raw_path),
     }
     if conversation_id:
         attrs["cursor.conversation.id"] = conversation_id

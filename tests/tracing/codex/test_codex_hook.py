@@ -1125,6 +1125,14 @@ class TestBuildAndSendSpans:
         assert page["input.value"].startswith("<redacted")
         assert page["output.value"].startswith("<redacted")
 
+    def test_code_mode_mcp_call_names_its_server_and_tool(self):
+        spans = self._spans_for(self._code_mode_turn())
+        command, _, mcp, *_ = (_string_attrs(s) for s in spans[2:8])
+
+        assert mcp["mcp.server.name"] == "docs"
+        assert mcp["mcp.tool.name"] == "search"
+        assert "mcp.server.name" not in command
+
     def test_code_mode_tool_bodies_are_kept_with_tool_content(self):
         spans = self._spans_for(self._code_mode_turn())
         command, patch, mcp, _, _, page = (_string_attrs(s) for s in spans[2:8])
@@ -1146,6 +1154,8 @@ class TestBuildAndSendSpans:
         assert patch["tool.file_path"].startswith("<redacted")
         assert mcp["tool.name"] == "mcp"
         assert spans[4]["name"] == "mcp"
+        assert "mcp.server.name" not in mcp
+        assert "mcp.tool.name" not in mcp
         assert image["tool.file_path"].startswith("<redacted")
         assert search["tool.query"].startswith("<redacted")
         assert page["tool.url"].startswith("<redacted")
@@ -1163,6 +1173,207 @@ class TestBuildAndSendSpans:
             attrs = _attrs_of_span(span)
             assert "user.id" not in attrs
             assert "user.login_id" not in attrs
+
+
+def _selected_skill(name, kinds=True):
+    text = f"<skill>\n<name>{name}</name>\n<path>/repo/.agents/skills/{name}/SKILL.md</path>\nskill body\n</skill>"
+    payload = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
+    if kinds:
+        payload["internal_chat_message_metadata_passthrough"] = {
+            "content_item_kinds": ["skills.selected_skill_instructions"],
+            "content_item_metadata": [{"provenance": {"type": "skills"}}],
+            "turn_id": "t1",
+        }
+    return _resp(payload)
+
+
+def _rollout_turn(tmp_path, *records):
+    path = _write_rollout(
+        tmp_path,
+        "s1",
+        _evt({"type": "task_started", "turn_id": "t1", "started_at": 1000}),
+        *records,
+        _evt({"type": "task_complete", "turn_id": "t1", "last_agent_message": "done", "completed_at": 1010}),
+    )
+    return _extract_turn_from_rollout(path, "t1")
+
+
+class TestUserInvokedSkills:
+    def test_a_selected_skill_is_read_off_its_injected_message(self, tmp_path):
+        turn = _rollout_turn(
+            tmp_path,
+            _evt({"type": "user_message", "message": "please use $release-notes"}),
+            _selected_skill("release-notes"),
+        )
+        assert turn["invoked_skills"] == ["release-notes"]
+        assert turn["user_prompt"] == "please use $release-notes"
+
+    def test_an_injected_skill_is_never_taken_for_the_prompt(self, tmp_path):
+        typed = _resp(
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "please use $release-notes"}],
+            }
+        )
+        turn = _rollout_turn(tmp_path, typed, _selected_skill("release-notes"))
+        assert turn["invoked_skills"] == ["release-notes"]
+        assert turn["user_prompt"] == "please use $release-notes"
+
+    def test_an_older_build_without_content_kinds_is_read_by_its_marker(self, tmp_path):
+        turn = _rollout_turn(tmp_path, _selected_skill("release-notes", kinds=False))
+        assert turn["invoked_skills"] == ["release-notes"]
+
+    def test_several_skills_keep_their_order(self, tmp_path):
+        turn = _rollout_turn(tmp_path, _selected_skill("release-notes"), _selected_skill("changelog"))
+        assert turn["invoked_skills"] == ["release-notes", "changelog"]
+
+    def test_a_typed_marker_is_not_an_invocation(self, tmp_path):
+        typed = _resp(
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "<skill>\n<name>release-notes</name>\n<path>x</path>"}],
+                "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]},
+            }
+        )
+        assert _rollout_turn(tmp_path, typed)["invoked_skills"] == []
+
+    def test_the_skill_catalog_is_not_an_invocation(self, tmp_path):
+        catalog = _resp(
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "<skills_instructions>\n<skill>\n<name>release-notes</name>\n<path>x</path>\n"
+                        "</skill>\n</skills_instructions>",
+                    }
+                ],
+                "internal_chat_message_metadata_passthrough": {
+                    "content_item_kinds": ["host_skills.instructions"],
+                    "content_item_metadata": [{"provenance": {"type": "skills"}}],
+                },
+            }
+        )
+        assert _rollout_turn(tmp_path, catalog)["invoked_skills"] == []
+
+    def _root(self, turn):
+        sent = []
+        with mock.patch(
+            "tracing.codex.hooks.handlers.send_span_to_backend", side_effect=lambda p: (sent.append(p), True)[1]
+        ):
+            _build_and_send_spans("sess-1", "turn-1", turn)
+        [root] = sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        return {key: value.get("stringValue") for key, value in _attrs_of_span(root).items()}
+
+    def test_the_turn_root_names_the_skill_and_the_user_trigger(self):
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes"]})
+        assert attrs["skill.name"] == "release-notes"
+        assert attrs["skill.trigger"] == "user"
+
+    def test_several_skills_are_comma_joined_on_the_root(self):
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes", "changelog"]})
+        assert attrs["skill.name"] == "release-notes,changelog"
+
+    def test_a_turn_without_one_has_no_skill(self):
+        attrs = self._root({**_turn([]), "invoked_skills": []})
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes"]})
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
+_SKILL_READ = "sed -n '1,240p' .agents/skills/release-notes/SKILL.md"
+
+
+def _call(tool, args, children=None):
+    entry = {
+        "tool": tool,
+        "args": args,
+        "output": "ok",
+        "call_id": "c1",
+        "start_ts": _ms(1),
+        "end_ts": _ms(5),
+        "decision": None,
+    }
+    if children:
+        entry["children"] = children
+    return entry
+
+
+class TestSkillFileReads:
+    def _tools(self, *calls):
+        sent = []
+        with mock.patch(
+            "tracing.codex.hooks.handlers.send_span_to_backend", side_effect=lambda p: (sent.append(p), True)[1]
+        ):
+            _build_and_send_spans("sess-1", "turn-1", _turn(list(calls)))
+        return [_string_attrs(s) for s in sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][1:]]
+
+    @pytest.mark.parametrize(
+        "tool, args",
+        [
+            ("exec_command", json.dumps({"cmd": _SKILL_READ, "workdir": "/repo", "yield_time_ms": 10000})),
+            ("shell", json.dumps({"command": ["bash", "-lc", "cat .agents/skills/release-notes/SKILL.md"]})),
+            ("shell_command", json.dumps({"command": "head -80 ~/.codex/skills/release-notes/SKILL.md"})),
+            ("exec", 'const r = await tools.exec_command({cmd:"cat .agents/skills/release-notes/SKILL.md"});'),
+            ("exec", f"const r = await tools.exec_command({json.dumps({'cmd': _SKILL_READ, 'workdir': '/repo'})});"),
+            ("exec", "await tools.exec_command({cmd: 'python3 .agents/skills/release-notes/scripts/draft.py'});"),
+            (
+                "exec",
+                "const r = await Promise.allSettled([\n"
+                '  tools.exec_command({"cmd":"git status","workdir":"/repo"}),\n'
+                f"  tools.exec_command({json.dumps({'cmd': _SKILL_READ})}),\n"
+                "]);",
+            ),
+            ("exec", 'await tools.exec_command({"cmd":"cat \\".agents/skills/release-notes/SKILL.md\\""});'),
+        ],
+    )
+    def test_a_shell_read_of_a_skill_file_is_an_implicit_activation(self, tool, args):
+        [attrs] = self._tools(_call(tool, args))
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert attrs["skill.trigger"] == "implicit"
+
+    def test_an_exec_that_ran_tools_marks_the_command_not_the_wrapper(self):
+        script = f"await tools.exec_command({json.dumps({'cmd': _SKILL_READ})});"
+        children = [_child(_command("exec-cmd", cmd=_SKILL_READ), 1.1, 1.2), _child(_command("exec-ls"), 1.3, 1.4)]
+        wrapper, read, other = self._tools(_call("exec", script, children))
+        assert "tool.skill_name" not in wrapper
+        assert read["tool.skill_name"] == "release-notes"
+        assert read["skill.trigger"] == "implicit"
+        assert "tool.skill_name" not in other
+
+    @pytest.mark.parametrize(
+        "tool, args",
+        [
+            ("exec_command", json.dumps({"cmd": "grep -n name .agents/skills/release-notes/SKILL.md"})),
+            ("exec_command", json.dumps({"cmd": "cat .agents/skills/release-notes/references/style.md"})),
+            ("apply_patch", "*** Update File: .agents/skills/release-notes/SKILL.md"),
+            ("view_image", json.dumps({"path": ".agents/skills/release-notes/SKILL.md"})),
+            ("exec", "await tools.exec_command({cmd: 'ls .agents/skills/release-notes'});"),
+            ("exec", "const path = '.agents/skills/release-notes/SKILL.md';"),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(self, tool, args):
+        [attrs] = self._tools(_call(tool, args))
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        script = f"await tools.exec_command({json.dumps({'cmd': _SKILL_READ})});"
+        spans = self._tools(
+            _call("exec_command", json.dumps({"cmd": _SKILL_READ})),
+            _call("exec", script),
+            _call("exec", script, [_child(_command("exec-cmd", cmd=_SKILL_READ), 1.1, 1.2)]),
+        )
+        assert not any("tool.skill_name" in attrs or "skill.trigger" in attrs for attrs in spans)
 
 
 # ---------------------------------------------------------------------------

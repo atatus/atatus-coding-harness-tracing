@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from core.common import (
+    SKILL_TRIGGER_MODEL,
     StateManager,
     build_span,
     env,
@@ -28,6 +30,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
 )
 from tracing.kiro.hooks.adapter import (
     SCOPE_NAME,
@@ -84,6 +87,16 @@ def _handle_pre_tool_use(input_json: dict, state: StateManager) -> None:
     state.set(slot + "_tool_input", json.dumps(input_json.get("tool_input", {})))
 
 
+def _disclosed_skill(name: Any, cwd: Any) -> str:
+    """disclose_context also loads steering files by name; only a skills folder makes the name a skill."""
+    if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\\" in name:
+        return ""
+    roots = [Path.home() / ".kiro" / "skills"]
+    if isinstance(cwd, str) and cwd:
+        roots.insert(0, Path(cwd) / ".kiro" / "skills")
+    return name if any((root / name).is_dir() for root in roots) else ""
+
+
 def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
     ensure_session_initialized(state, input_json)
     tool_count = state.get("tool_count") or "0"
@@ -128,6 +141,9 @@ def _handle_post_tool_use(input_json: dict, state: StateManager) -> None:
         # emitted verbatim, so a user with tool details disabled still had Kiro's
         # __tool_use_purpose text sent.
         attrs["tool.description"] = redact_content(env.log_tool_details, description)
+    if tool_name == "disclose_context" and isinstance(tool_input_raw, dict):
+        skill = _disclosed_skill(tool_input_raw.get("name"), input_json.get("cwd"))
+        attrs.update(skill_name_attributes(skill, trigger=SKILL_TRIGGER_MODEL))
     user_id = state.get("user_id") or ""
     if user_id:
         attrs["user.id"] = user_id

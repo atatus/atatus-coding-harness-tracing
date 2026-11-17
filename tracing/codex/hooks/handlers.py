@@ -39,7 +39,9 @@ from core.common import (
     generate_span_id,
     generate_trace_id,
     get_timestamp_ms,
+    invoked_skill_attributes,
     log,
+    mcp_tool_attributes,
     normalize_effort,
     read_stdin_text,
     redact_content,
@@ -47,6 +49,7 @@ from core.common import (
 from core.common import send_span as send_span_to_backend
 from core.common import (
     send_span_async,
+    skill_command_attributes,
     tool_detail_attributes,
 )
 from core.constants import MODEL_FAMILY_SYSTEMS
@@ -68,6 +71,13 @@ _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 _WEB_TOOL_TARGET_KEYS = {"web_search": "query", "open_page": "url"}
 
 _CODE_MODE_TOOL_ITEMS = {"CommandExecution", "FileChange", "McpToolCall", "WebSearch", "ImageView", "Extension"}
+
+_SHELL_TOOLS = frozenset({"exec_command", "shell", "shell_command", "local_shell"})
+
+_CODE_MODE_CMD_RE = re.compile(r"""(?:"cmd"|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)""")
+
+_SELECTED_SKILL_KIND = "skills.selected_skill_instructions"
+_SELECTED_SKILL_RE = re.compile(r"^\s*<skill>\s*<name>([^<\n]+)</name>\s*<path>")
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +172,25 @@ def _message_text(content) -> str:
     return "\n".join(parts)
 
 
+def _selected_skills(payload: dict) -> list:
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return []
+    metadata = payload.get("internal_chat_message_metadata_passthrough")
+    kinds = metadata.get("content_item_kinds") if isinstance(metadata, dict) else None
+    names = []
+    for index, part in enumerate(content):
+        text = part.get("text") if isinstance(part, dict) else None
+        if not isinstance(text, str):
+            continue
+        if isinstance(kinds, list) and (index >= len(kinds) or kinds[index] != _SELECTED_SKILL_KIND):
+            continue
+        match = _SELECTED_SKILL_RE.match(text)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
 def _attach_code_mode_items(wrappers: list, items: list, call_ids: set) -> None:
     # Items never name their exec call, and a yielded cell's items land after later calls, so pair by start time.
     for child in items:
@@ -211,6 +240,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     # Fallback prompt source, used only when no user_message event arrives. See the
     # response_item/message branch below for why it is collected separately.
     user_messages: list = []
+    invoked_skills: list = []
     assistant_output = ""
     model = ""
     effort = ""
@@ -324,7 +354,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 # Collected rather than assigned so a user_message event, when present, still wins.
                 if outer == "response_item" and ptype == "message":
                     if payload.get("role") == "user":
-                        text = _message_text(payload.get("content"))
+                        selected = _selected_skills(payload)
+                        invoked_skills.extend(selected)
+                        text = "" if selected else _message_text(payload.get("content"))
                         if text and not text.lstrip().startswith("<environment_context>"):
                             user_messages.append(text)
                     continue
@@ -517,6 +549,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
         "sandbox_mode": sandbox_mode,
         "token_usage": token_usage,
         "tool_calls": tool_calls,
+        "invoked_skills": invoked_skills,
     }
 
 
@@ -605,6 +638,33 @@ def _command_text(command: object) -> str:
     return " ".join(parts)
 
 
+def _js_string(literal: str) -> str:
+    if literal.startswith('"'):
+        try:
+            value = json.loads(literal)
+        except ValueError:
+            return literal[1:-1]
+        return value if isinstance(value, str) else ""
+    quote = literal[0]
+    return literal[1:-1].replace("\\" + quote, quote)
+
+
+def _shell_command_text(tool_name: str, args: object) -> str:
+    if not isinstance(args, str):
+        return ""
+    if tool_name == "exec":
+        return "\n".join(_js_string(literal) for literal in _CODE_MODE_CMD_RE.findall(args))
+    if tool_name not in _SHELL_TOOLS:
+        return ""
+    try:
+        parsed = json.loads(args)
+    except ValueError:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    return _command_text(parsed.get("cmd") or parsed.get("command"))
+
+
 def _code_mode_tool(item: dict) -> "tuple[str, dict]":
     details = env.log_tool_details
     content = env.log_tool_content
@@ -615,6 +675,7 @@ def _code_mode_tool(item: dict) -> "tuple[str, dict]":
             "input.value": redact_content(content, command),
             "output.value": redact_content(content, _json_text(item.get("aggregated_output"))),
             "tool.command": redact_content(details, command),
+            **skill_command_attributes(command),
         }
     if item_type == "FileChange":
         changes = item.get("changes")
@@ -631,6 +692,7 @@ def _code_mode_tool(item: dict) -> "tuple[str, dict]":
         return f"mcp__{server}__{tool}" if details and server and tool else "mcp", {
             "input.value": redact_content(content, _json_text(item.get("arguments"))),
             "output.value": redact_content(content, _json_text(item.get("result") or item.get("error"))),
+            **mcp_tool_attributes(server, tool),
         }
     if item_type == "ImageView":
         path = _json_text(item.get("path"))
@@ -704,6 +766,7 @@ def _build_and_send_spans(
         attrs["codex.sandbox_mode"] = turn["sandbox_mode"]
     if turn.get("duration_ms") is not None:
         attrs["codex.turn.duration_ms"] = turn["duration_ms"]
+    attrs.update(invoked_skill_attributes(turn.get("invoked_skills") or []))
 
     llm_system, llm_provider = _llm_identity(turn.get("model"), turn.get("model_provider"))
     attrs["llm.system"] = llm_system
@@ -766,6 +829,8 @@ def _build_and_send_spans(
             tool_attrs["openinference.span.kind"] = kind
             del tool_attrs["tool.name"]
             tool_attrs.pop("tool.id", None)
+        else:
+            tool_attrs.update(skill_command_attributes(_shell_command_text(tool_name, args_raw)))
         tool_span_id = generate_span_id()
         child_start = entry.get("start_ts") or turn["turn_start_ms"]
         child_end = entry.get("end_ts") or child_start

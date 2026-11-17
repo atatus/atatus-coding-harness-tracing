@@ -137,6 +137,8 @@ LLM spans are enriched from the session sidecar at `~/.kiro/sessions/cli/<sessio
 |-----------|-------------|
 | `tool.name` | Tool name (alias form) |
 | `tool.description` | Purpose of the tool call (from `__tool_use_purpose` in tool input) |
+| `tool.skill_name` | On `disclose_context`, the skill it loaded — only when the name is a folder under `<cwd>/.kiro/skills/` or `~/.kiro/skills/` (otherwise it loaded steering). Tool detail, left out when tool details are off |
+| `skill.trigger` | `model`, alongside `tool.skill_name` |
 | `input.value` | Serialized tool input JSON |
 | `output.value` | Serialized tool response JSON |
 

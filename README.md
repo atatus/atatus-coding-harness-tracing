@@ -138,6 +138,53 @@ the harness never exposes the setting.
 | Gemini CLI | not available — the thinking config is stripped before hooks see it | |
 | Devin | not implemented — the tier is only encoded in the model id | |
 
+#### `mcp.server.name` / `mcp.tool.name` — auto-detected, no setup
+
+A tool span for an MCP call names the server and the server's own tool name, so MCP usage can
+be grouped by server. Both are tool details: they follow `ATATUS_LOG_TOOL_DETAILS` and are
+left out, not redacted, when it is off. A harness that does not report the server sends neither.
+
+| Harness | Source |
+|---|---|
+| Claude Code | the tool name, `mcp__<server>__<tool>`, split at the first `__` after the prefix |
+| Codex | Code Mode `McpToolCall` items' `server` and `tool` |
+| Cursor | the MCP hook payload's `mcp_server_name` and `tool_name` |
+| Gemini CLI | the tool hook payload's `mcp_context` |
+| Antigravity | `call_mcp_tool` arguments' `ServerName` and `ToolName` |
+| GitHub Copilot, opencode, Kiro, omp, Devin | not reported — no server field reaches the hooks, and the tool name alone does not separate server from tool reliably |
+
+#### Skill activations — auto-detected, no setup
+
+Spans say which skills were used, and who chose them. All of these are tool details: like the
+MCP names they follow `ATATUS_LOG_TOOL_DETAILS` and are left out, not redacted, when it is off.
+The skill's arguments and the file's body are tool content and stay in `input.value` /
+`output.value`. Names are what the harness reports (Claude Code plugin skills keep
+`plugin:skill`); for a file read it is the folder in `…/skills/<name>/SKILL.md`.
+
+| Attribute | Span | Meaning |
+|---|---|---|
+| `tool.skill_name` | TOOL | the skill this call activated |
+| `skill.trigger` | TOOL | `model` — a dedicated skill tool; `implicit` — the model read the skill's `SKILL.md` (or ran one of its scripts) |
+| `skill.name` + `skill.trigger=user` | turn root | skills the user invoked for the turn; several are comma-joined in order (skill names are lowercase letters, digits and hyphens) |
+| `skill.active` | LLM | the skill active while that model call ran |
+
+| Harness | `skill.trigger=model` | `skill.trigger=implicit` | turn root `skill.name` | LLM `skill.active` |
+|---|---|---|---|---|
+| Claude Code | `Skill` tool, `skill` argument | — | not set; `command.name` / `command.source` say it | the transcript's `attributionSkill`, per model call and in subagents |
+| GitHub Copilot | `skill` tool, `skill` argument | `view` / `read_file` of a `SKILL.md` | — | — |
+| opencode | `skill` tool, `name` argument | — | — | — |
+| Gemini CLI | `activate_skill` names the skill, with no `skill.trigger`: it serves both the model and a user typing `/name` | — | — | — |
+| Kiro | `disclose_context` whose `name` is a folder under `<cwd>/.kiro/skills/` or `~/.kiro/skills/` (otherwise it loaded steering) | — | — | — |
+| Devin | `skill` tool, `name` or `skill` argument | — | — | — |
+| Codex | — | a shell command that reads a `SKILL.md` (`cat`, `sed -n`, `head`, …) or runs a skill's `scripts/` file, on the span carrying the command | the selected-skill instructions Codex injects for `$name` | — |
+| Cursor | — | the agent's file read of a `SKILL.md` | — | — |
+| Antigravity | — | `view_file`, `read_file` or `run_command` reading a `SKILL.md` | the `<SKILL>` notice after the request | — |
+| omp | — | `read` of a `skill://<name>` URI or a `SKILL.md` path | — | — |
+
+A `SKILL.md` read is an activation only where reading the file can be how the model loads a
+skill. Claude Code, Gemini CLI, opencode, Kiro and Devin load skills only through their skill
+tool, so a `SKILL.md` read there is someone editing the skill and is not counted.
+
 #### 4. Content logging
 
 Three questions that apply to **all** harnesses. Press Enter to accept each default:
@@ -197,7 +244,7 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_TRANSCRIPT_WAIT_MS` | `300` | How long a Stop hook waits for the harness to flush its transcript before reading model and token counts. Those two live only in the transcript, and the hook can fire before the write lands — losing that race emits a span with no model and zero tokens. `0` disables the wait. |
 | `ATATUS_TRACE_WORKFLOWS` | `true` | Claude Code only. Set to `false` to stop following `Workflow` tool runs: their launches are not registered, their agents are not exported, and no workflow or phase spans are sent. |
 | `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
-| `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture what each tool was asked to do: tool names, commands, file paths, URLs and queries. |
+| `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture what each tool was asked to do: tool names, commands, file paths, URLs, queries, MCP server names and skill names. |
 | `ATATUS_LOG_TOOL_CONTENT` | **`false`** | Capture full tool arguments and *output* — file bodies being written, patches, shell stdout, search results. Off by default: this is the broadest of the three, and it is where file contents and anything pasted into a session end up. Opt in explicitly. |
 | `ATATUS_DISABLE_FORK` | `false` | Testing only. Hooks normally hand the OTLP POST to a detached background process so the harness is never kept waiting on it; this sends inline instead, which is what makes emitted spans observable to an in-process test. |
 | `ATATUS_OTLP_TIMEOUT` | `5` | Socket timeout in seconds for the OTLP POST. |

@@ -224,19 +224,185 @@ class TestPostToolUse:
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
         assert attrs["tool.url"]["stringValue"] == "https://example.com"
 
-    def test_unknown_tool_description_is_input(self, mock_resolve, state, captured_spans):
-        """Unknown tool_name → description is first 200 chars of input."""
+    def test_unknown_tool_has_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {"tool_name": "CustomTool", "tool_use_id": "t5", "tool_input": {"data": "hello"}, "tool_response": "result"}
         )
+        assert "tool.description" not in _attrs(captured_spans[0])
+
+    @pytest.mark.parametrize("handler", [_handle_post_tool_use, _handle_post_tool_use_failure])
+    @pytest.mark.parametrize(
+        "tool_name, tool_input",
+        [
+            ("Skill", {"skill": "release-notes", "args": "SECRET-ARG"}),
+            ("mcp__docs__search_pages", {"q": "SECRET-ARG"}),
+            ("CustomTool", {"body": "SECRET-ARG"}),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, handler, tool_name, tool_input
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        handler({"tool_name": tool_name, "tool_use_id": "t5", "tool_input": tool_input, "tool_response": "ok"})
+        assert "SECRET-ARG" not in json.dumps(_attrs(captured_spans[0]))
+
+    def test_mcp_tool_names_its_server_and_tool(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "mcp__docs__search_pages",
+                "tool_use_id": "t6",
+                "tool_input": {"q": "retry policy"},
+                "tool_response": "found",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_mcp_names_are_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "mcp__docs__search_pages", "tool_use_id": "t6", "tool_input": {}, "tool_response": ""}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
+
+    def test_failed_mcp_tool_names_its_server_and_tool(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "mcp__docs__search_pages", "tool_use_id": "t6", "tool_input": {}, "error": "timeout"}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["mcp.server.name"]["stringValue"] == "docs"
+        assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
+
+    def test_failed_tool_error_text_follows_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        """Tool errors echo commands, paths and output, so the status message is tool content too."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Bash", "tool_use_id": "t9", "tool_input": {}, "error": "TOKEN=s3cr3t-value"}
+        )
         span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        attrs = {a["key"]: a["value"] for a in span["attributes"]}
-        desc = attrs["tool.description"]["stringValue"]
-        assert len(desc) <= 200
-        # Description is the JSON serialization of tool_input, truncated
-        assert "hello" in desc
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert span["status"] == {"code": 2, "message": "<redacted (18 chars)>"}
+
+    def test_failed_tool_without_error_text_says_tool_failure(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure({"tool_name": "Bash", "tool_use_id": "t10", "tool_input": {}})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        assert span["status"]["message"] == "tool_failure"
+
+    def test_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Skill",
+                "tool_use_id": "t8",
+                "tool_input": {"skill": "release-notes", "args": "draft v2 notes"},
+                "tool_response": "loaded",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_failed_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "error": "unknown"}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_tool_is_a_model_trigger(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert _attrs(captured_spans[0])["skill.trigger"]["stringValue"] == "model"
+
+    def test_failed_skill_tool_is_a_model_trigger(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "error": "unknown"}
+        )
+        assert _attrs(captured_spans[0])["skill.trigger"]["stringValue"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert "skill.trigger" not in _attrs(captured_spans[0])
+
+    def test_reading_a_skill_file_is_not_an_activation(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Read",
+                "tool_use_id": "t9",
+                "tool_input": {"file_path": "/home/dev/.claude/skills/release-notes/SKILL.md"},
+                "tool_response": "",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert "tool.skill_name" not in _attrs(captured_spans[0])
+
+    def test_skill_args_stay_behind_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Skill",
+                "tool_use_id": "t8",
+                "tool_input": {"skill": "release-notes", "args": "draft v2 notes"},
+                "tool_response": "loaded",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["input.value"]["stringValue"].startswith("<redacted (")
+
+    def test_builtin_tool_has_no_mcp_names(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Bash", "tool_use_id": "t7", "tool_input": {"command": "ls"}, "tool_response": ""}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "mcp.server.name" not in attrs
+        assert "mcp.tool.name" not in attrs
 
     def test_uses_pre_tool_start_time(self, mock_resolve, state, captured_spans):
         """Timing uses pre_tool_use start time if available in state."""

@@ -8,6 +8,7 @@ import json
 
 from core.common import (
     LLM_EFFORT_ATTR,
+    SKILL_TRIGGER_MODEL,
     build_span,
     debug_dump,
     env,
@@ -20,6 +21,8 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
+    skill_read_attributes,
     tool_detail_attributes,
 )
 from core.event_model import TurnEndReason
@@ -135,20 +138,15 @@ def _tool_attributes(input_json: dict) -> dict:
             query = tool_input_raw.get("pattern") or tool_input_raw.get("query", "")
             file_path = tool_input_raw.get("path", "")
             description = f"grep: {str(query)[:100]}"
-        else:
-            description = tool_input[:200]
-    else:
-        description = tool_input[:200]
 
     tool_input = redact_content(env.log_tool_content, tool_input)
-    description = redact_content(env.log_tool_details, description)
     attrs = {
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
         "input.value": tool_input,
-        "tool.description": description,
     }
     for key, value in (
+        ("tool.description", description),
         ("tool.command", command),
         ("tool.file_path", file_path),
         ("tool.url", url),
@@ -156,6 +154,14 @@ def _tool_attributes(input_json: dict) -> dict:
     ):
         if value:
             attrs[key] = redact_content(env.log_tool_details, str(value))
+    if tool_name_lc == "skill" and isinstance(tool_input_raw, dict):
+        attrs.update(skill_name_attributes(tool_input_raw.get("skill"), trigger=SKILL_TRIGGER_MODEL))
+    elif tool_name_lc in ("view", "read_file", "read") and isinstance(tool_input_raw, dict):
+        attrs.update(
+            skill_read_attributes(
+                tool_input_raw.get("path") or tool_input_raw.get("filePath") or tool_input_raw.get("file_path")
+            )
+        )
     return {"name": tool_name, "attrs": attrs}
 
 
@@ -275,7 +281,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     never cleared, so the session state grows one dead key per failed tool.
     """
     message = str(payload_get(input_json, "error", default=""))
-    _emit_tool_span(input_json, output=message, status_code=2, status_message=message[:200])
+    status_message = redact_content(env.log_tool_content, message)[:200] if message else ""
+    _emit_tool_span(input_json, output=message, status_code=2, status_message=status_message)
 
 
 def _handle_stop(input_json: dict, reason: TurnEndReason = TurnEndReason.COMPLETED) -> None:

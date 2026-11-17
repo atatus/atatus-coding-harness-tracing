@@ -19,10 +19,12 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
+    mcp_tool_attributes,
     read_stdin_text,
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
 )
 from tracing.gemini.hooks.adapter import (
     SCOPE_NAME,
@@ -570,10 +572,6 @@ def _handle_after_tool(input_json: dict) -> None:
         elif tool_name in ("google_web_search", "web_search"):
             tool_query = _get_robust(tool_args_raw, "query", default="")
             tool_description = tool_query[:200]
-        else:
-            tool_description = tool_input[:200]
-    else:
-        tool_description = tool_input[:200]
 
     start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
     end_time = str(get_timestamp_ms())
@@ -581,7 +579,8 @@ def _handle_after_tool(input_json: dict) -> None:
 
     tool_input = redact_content(env.log_tool_content, tool_input)
     tool_output = redact_content(env.log_tool_content, tool_output)
-    tool_description = redact_content(env.log_tool_details, tool_description)
+    if tool_description:
+        tool_description = redact_content(env.log_tool_details, tool_description)
     if tool_command:
         tool_command = redact_content(env.log_tool_details, tool_command)
     if tool_file_path:
@@ -598,12 +597,13 @@ def _handle_after_tool(input_json: dict) -> None:
         "tracing.parentage": parentage,
         "input.value": tool_input,
         "output.value": tool_output,
-        "tool.description": tool_description,
     }
     if user_id:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    if tool_description:
+        attrs["tool.description"] = tool_description
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -612,6 +612,11 @@ def _handle_after_tool(input_json: dict) -> None:
         attrs["tool.url"] = tool_url
     if tool_query:
         attrs["tool.query"] = tool_query
+    mcp_context = _get_robust(input_json, "mcp_context")
+    if isinstance(mcp_context, dict):
+        attrs.update(mcp_tool_attributes(mcp_context.get("server_name"), mcp_context.get("tool_name")))
+    if tool_name == "activate_skill" and isinstance(tool_args_raw, dict):
+        attrs.update(skill_name_attributes(tool_args_raw.get("name")))
 
     span = build_span(
         tool_name,

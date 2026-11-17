@@ -19,6 +19,7 @@ from core.common import (
     FileLock,
     StateManager,
     _to_otlp_attr_value,
+    active_skill_attributes,
     build_multi_span,
     build_span,
     debug_dump,
@@ -70,9 +71,10 @@ from tracing.claude_code.hooks.adapter import (
     resolve_transcript_path,
     state_dir,
 )
-from tracing.claude_code.hooks.span_renderer import render_event_graph
+from tracing.claude_code.hooks.span_renderer import render_event_graph, tool_identity_attributes
 from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
 from tracing.claude_code.hooks.transcript import (
+    active_skill_of,
     is_conversation_record,
     is_unidentified_model_call,
     parse_claude_transcript,
@@ -294,8 +296,6 @@ def _handle_post_tool_use(input_json: dict) -> None:
         tool_query = input_json.get("tool_input", {}).get("pattern", "")
         tool_file_path = input_json.get("tool_input", {}).get("path", "")
         tool_description = f"grep: {tool_query[:100]}"
-    else:
-        tool_description = tool_input[:200]
 
     # Timing
     start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
@@ -306,7 +306,8 @@ def _handle_post_tool_use(input_json: dict) -> None:
     # tool_command/file_path/url/query/description describe what was requested.
     tool_input = redact_content(env.log_tool_content, tool_input)
     tool_response = redact_content(env.log_tool_content, tool_response)
-    tool_description = redact_content(env.log_tool_details, tool_description)
+    if tool_description:
+        tool_description = redact_content(env.log_tool_details, tool_description)
     if tool_command:
         tool_command = redact_content(env.log_tool_details, tool_command)
     if tool_file_path:
@@ -327,12 +328,14 @@ def _handle_post_tool_use(input_json: dict) -> None:
         **({"tool.call.id": tool_id} if tool_id else {}),
         "input.value": tool_input,
         "output.value": tool_response,
-        "tool.description": tool_description,
+        **tool_identity_attributes(tool_name, input_json.get("tool_input")),
     }
     if user_id:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    if tool_description:
+        attrs["tool.description"] = tool_description
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -432,8 +435,6 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         tool_query = input_json.get("tool_input", {}).get("pattern", "")
         tool_file_path = input_json.get("tool_input", {}).get("path", "")
         tool_description = f"grep: {tool_query[:100]}"
-    else:
-        tool_description = tool_input[:200]
 
     # Timing
     start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
@@ -447,7 +448,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     tool_input = redact_content(env.log_tool_content, tool_input)
     output_value = redact_content(env.log_tool_content, output_value)
     redacted_error = redact_content(env.log_tool_content, error_text)
-    tool_description = redact_content(env.log_tool_details, tool_description)
+    if tool_description:
+        tool_description = redact_content(env.log_tool_details, tool_description)
     if tool_command:
         tool_command = redact_content(env.log_tool_details, tool_command)
     if tool_file_path:
@@ -468,14 +470,16 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         **({"tool.call.id": tool_id} if tool_id else {}),
         "input.value": tool_input,
         "output.value": output_value,
-        "tool.description": tool_description,
         "error.type": "tool_failure",
         "error.message": redacted_error,
+        **tool_identity_attributes(tool_name, input_json.get("tool_input")),
     }
     if user_id:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    if tool_description:
+        attrs["tool.description"] = tool_description
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -497,7 +501,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         SERVICE_NAME,
         SCOPE_NAME,
         status_code=2,
-        status_message=error_text or "tool_failure",
+        status_message=redacted_error if error_text else "tool_failure",
     )
     _send_span_async(span)
 
@@ -797,6 +801,25 @@ def _scan_transcript_for_usage(
         usage_totals.completion += _usage_int(usage, "output_tokens")
 
     return output, usage_totals, model
+
+
+def _unanimous_active_skill(transcript: Path, start_line: int, start_offset: "int | None" = None) -> str:
+    """One flat span holds the whole turn's tokens, so a skill names it only when every call ran under it."""
+    skills_by_call: dict = {}
+    for line_index, line in transcript_window(transcript, start_line, start_offset):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict) or not is_conversation_record(entry):
+            continue
+        msg = entry.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        call = msg.get("id") or f"line-{line_index}"
+        skills_by_call[call] = skills_by_call.get(call) or active_skill_of(entry)
+    skills = set(skills_by_call.values())
+    return skills.pop() if len(skills) == 1 else ""
 
 
 def _payload_effort(input_json: dict) -> str:
@@ -2031,6 +2054,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         "openinference.span.kind": "LLM",
         **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
+        **active_skill_attributes(transcript and _unanimous_active_skill(transcript, start_line, start_offset)),
         "input.value": redacted_prompt,
         "output.value": redacted_output,
         "llm.output_messages": json.dumps(output_messages),

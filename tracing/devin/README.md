@@ -146,6 +146,8 @@ the generation that spent them; the root is a container.
 | `session.id` | Devin session ID |
 | `openinference.span.kind` | `TOOL` |
 | `tool.name` | Tool name from the tool call |
+| `tool.skill_name` | On the `skill` tool, the skill it loaded (its `name` or `skill` argument). Tool detail, left out when tool details are off |
+| `skill.trigger` | `model`, alongside `tool.skill_name` |
 | `input.value` | Serialized tool-call arguments |
 | `output.value` | Tool result, when available in the live DB (often empty — see note) |
 | `user.id` | Optional user identifier |

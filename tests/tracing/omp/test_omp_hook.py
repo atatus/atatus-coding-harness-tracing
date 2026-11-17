@@ -508,6 +508,75 @@ class TestTurnEndToolSpans:
         assert attrs["output.value"]["stringValue"] == "out"
 
 
+def _one_tool_turn(tool_name, arguments):
+    _handle_before_agent_start(_load_fixture("before_agent_start.json"))
+    _handle_turn_end(
+        {
+            "type": "turn_end",
+            "sessionId": "omp_sess_1",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "toolCall", "id": "call_1", "name": tool_name, "arguments": arguments}],
+                "model": "claude-sonnet-4",
+                "provider": "anthropic",
+                "usage": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0},
+                "timestamp": 100,
+            },
+            "toolResults": [
+                {
+                    "role": "toolResult",
+                    "toolCallId": "call_1",
+                    "toolName": tool_name,
+                    "content": [{"type": "text", "text": "out"}],
+                    "isError": False,
+                    "timestamp": 120,
+                }
+            ],
+        }
+    )
+
+
+class TestSkillReads:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "skill://release-notes",
+            "skill://release-notes/SKILL.md",
+            "skill://release-notes:frontmatter",
+            "/home/dev/.omp/agent/skills/release-notes/SKILL.md",
+        ],
+    )
+    def test_reading_a_skill_is_an_implicit_activation(self, mock_resolve, mock_ensure, state, captured_spans, path):
+        _one_tool_turn("read", {"path": path})
+        attrs = _get_attrs(_by_kind(captured_spans, "TOOL")[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["skill.trigger"]["stringValue"] == "implicit"
+
+    @pytest.mark.parametrize(
+        "tool_name, path",
+        [
+            ("read", "skill://release-notes/references/style.md"),
+            ("read", "/w/notes.md"),
+            ("edit", "skill://release-notes/SKILL.md"),
+            ("write", "/home/dev/.omp/agent/skills/release-notes/SKILL.md"),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(
+        self, mock_resolve, mock_ensure, state, captured_spans, tool_name, path
+    ):
+        _one_tool_turn(tool_name, {"path": path})
+        attrs = _get_attrs(_by_kind(captured_spans, "TOOL")[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        _one_tool_turn("read", {"path": "skill://release-notes"})
+        attrs = _get_attrs(_by_kind(captured_spans, "TOOL")[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
 # ---------------------------------------------------------------------------
 # Multiple turn_ends between one before_agent_start and one agent_end
 # ---------------------------------------------------------------------------

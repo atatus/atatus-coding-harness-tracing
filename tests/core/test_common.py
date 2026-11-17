@@ -18,12 +18,15 @@ import pytest
 import core.common as common
 from core.common import (
     DEFAULT_OTLP_ENDPOINT,
+    SKILL_TRIGGER_IMPLICIT,
+    SKILL_TRIGGER_MODEL,
     FileLock,
     StateManager,
     _attrs_to_otlp,
     _resolve_kind,
     _stamp_atatus_identity,
     _to_otlp_attr_value,
+    active_skill_attributes,
     build_multi_span,
     build_span,
     debug_dump,
@@ -31,12 +34,20 @@ from core.common import (
     error,
     get_hostname,
     get_target,
+    invoked_skill_attributes,
     log,
+    mcp_attributes_from_tool_name,
+    mcp_tool_attributes,
     redirect_stderr_to_log_file,
     resolve_backend,
     restore_stderr_from_log_file,
     send_span,
     send_span_async,
+    skill_command_attributes,
+    skill_from_path,
+    skill_from_shell_command,
+    skill_name_attributes,
+    skill_read_attributes,
     split_payload,
     tool_detail_attributes,
 )
@@ -1011,6 +1022,230 @@ class TestToolDetailAttributes:
     def test_follows_the_tool_details_flag(self, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         assert tool_detail_attributes({"command": "ls"}) == {"tool.command": "<redacted (2 chars)>"}
+
+
+class TestMcpToolAttributes:
+    @pytest.fixture(autouse=True)
+    def _details_on(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+
+    def test_names_the_server_and_the_tool(self):
+        assert mcp_tool_attributes("docs", "search") == {"mcp.server.name": "docs", "mcp.tool.name": "search"}
+
+    @pytest.mark.parametrize("server, tool", [("", "search"), (None, "search"), (3, "search")])
+    def test_a_missing_server_still_names_the_tool(self, server, tool):
+        assert mcp_tool_attributes(server, tool) == {"mcp.tool.name": "search"}
+
+    def test_nothing_known_gives_nothing(self):
+        assert mcp_tool_attributes(None, "") == {}
+
+    def test_left_out_rather_than_redacted_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert mcp_tool_attributes("docs", "search") == {}
+
+    @pytest.mark.parametrize(
+        "name, server, tool",
+        [
+            ("mcp__docs__search", "docs", "search"),
+            ("mcp__plugin_kit_kit__get__page", "plugin_kit_kit", "get__page"),
+            ("mcp__team-tracker__list_issues", "team-tracker", "list_issues"),
+        ],
+    )
+    def test_splits_an_mcp_tool_name_at_the_first_separator(self, name, server, tool):
+        assert mcp_attributes_from_tool_name(name) == {"mcp.server.name": server, "mcp.tool.name": tool}
+
+    @pytest.mark.parametrize("name", [None, "", "Bash", "mcp_docs_search", "mcp__docs", "mcp__docs__", "mcp____search"])
+    def test_anything_else_is_not_an_mcp_tool(self, name):
+        assert mcp_attributes_from_tool_name(name) == {}
+
+
+class TestSkillNameAttributes:
+    def test_names_the_skill(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        assert skill_name_attributes("release-notes") == {"tool.skill_name": "release-notes"}
+
+    @pytest.mark.parametrize("skill", [None, "", 3, ["release-notes"]])
+    def test_anything_else_gives_nothing(self, skill):
+        assert skill_name_attributes(skill) == {}
+
+    def test_left_out_rather_than_redacted_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert skill_name_attributes("release-notes") == {}
+
+    @pytest.mark.parametrize("trigger", [SKILL_TRIGGER_MODEL, SKILL_TRIGGER_IMPLICIT])
+    def test_says_what_triggered_the_skill(self, monkeypatch, trigger):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        assert skill_name_attributes("release-notes", trigger=trigger) == {
+            "tool.skill_name": "release-notes",
+            "skill.trigger": trigger,
+        }
+
+    def test_no_trigger_without_a_skill(self):
+        assert skill_name_attributes(None, trigger=SKILL_TRIGGER_MODEL) == {}
+
+    def test_trigger_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert skill_name_attributes("release-notes", trigger=SKILL_TRIGGER_MODEL) == {}
+
+
+class TestSkillFromPath:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/dev/.claude/skills/release-notes/SKILL.md",
+            ".agents/skills/release-notes/SKILL.md",
+            "skills/release-notes/SKILL.md",
+            "C:\\Users\\dev\\.codex\\skills\\release-notes\\SKILL.md",
+            "/home/dev/.codex/skills/.system/release-notes/SKILL.md",
+            "file:///home/dev/.cursor/skills/release-notes/SKILL.md",
+            "skill://release-notes",
+            "skill://release-notes/SKILL.md",
+            "skill://release-notes:frontmatter",
+            "skill://release-notes/SKILL.md:10-40",
+        ],
+    )
+    def test_names_the_skill_folder(self, path):
+        assert skill_from_path(path) == "release-notes"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/dev/.claude/skills/release-notes/references/SKILL.md",
+            "/home/dev/.claude/skills/release-notes/references/style.md",
+            "/home/dev/.claude/skills/release-notes/scripts/draft.py",
+            "/home/dev/.claude/skills/release-notes/README.md",
+            "/home/dev/.claude/skills/SKILL.md",
+            "/home/dev/.claude/skills/.system/SKILL.md",
+            "/home/dev/project/SKILL.md",
+            "/home/dev/docs/release-notes/SKILL.md",
+            "/home/dev/my-skills/release-notes/SKILL.md",
+            "/home/dev/.claude/skills/release-notes/SKILL.md.bak",
+            "skill://release-notes/references/style.md",
+            "skill://",
+            "",
+            None,
+            3,
+        ],
+    )
+    def test_anything_else_is_not_a_skill(self, path):
+        assert skill_from_path(path) is None
+
+
+class TestSkillFromShellCommand:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat ~/.codex/skills/release-notes/SKILL.md",
+            "/bin/cat .agents/skills/release-notes/SKILL.md",
+            "sed -n '1,240p' .agents/skills/release-notes/SKILL.md",
+            "sed -ne '1,40p' .agents/skills/release-notes/SKILL.md",
+            "head -n 50 .agents/skills/release-notes/SKILL.md",
+            "tail -20 .agents/skills/release-notes/SKILL.md",
+            "less .agents/skills/release-notes/SKILL.md",
+            "more .agents/skills/release-notes/SKILL.md",
+            "bat --plain .agents/skills/release-notes/SKILL.md",
+            "type C:\\Users\\dev\\.agents\\skills\\release-notes\\SKILL.md",
+            'Get-Content -Path "C:\\Users\\dev\\.agents\\skills\\release-notes\\SKILL.md"',
+            "cat '/home/dev/my project/.agents/skills/release-notes/SKILL.md'",
+            "cat .agents/skills/release-notes/SKILL.md 2>/dev/null",
+            "cat < .agents/skills/release-notes/SKILL.md",
+            "git status && sed -n '1,110p' .agents/skills/release-notes/SKILL.md && head -25 notes.md",
+            "cd /repo; cat .agents/skills/release-notes/SKILL.md | head -40",
+            "LC_ALL=C cat .agents/skills/release-notes/SKILL.md",
+            "ls .agents/skills\ncat .agents/skills/release-notes/SKILL.md",
+            "bash -lc \"sed -n '1,200p' .agents/skills/release-notes/SKILL.md\"",
+            "python3 .agents/skills/release-notes/scripts/draft.py --since v1",
+            "bash ~/.codex/skills/release-notes/scripts/collect.sh",
+            "/usr/bin/node .agents/skills/release-notes/scripts/lib/render.js",
+            "pwsh.exe C:\\Users\\dev\\.agents\\skills\\release-notes\\scripts\\draft.ps1",
+        ],
+    )
+    def test_names_the_skill_a_command_reads_or_runs(self, command):
+        assert skill_from_shell_command(command) == "release-notes"
+
+    def test_first_skill_wins(self):
+        command = "sed -n '1,9p' .agents/skills/first/SKILL.md && cat .agents/skills/second/SKILL.md"
+        assert skill_from_shell_command(command) == "first"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -n name .agents/skills/release-notes/SKILL.md",
+            "rg description .agents/skills/release-notes/SKILL.md",
+            "ls -la .agents/skills/release-notes/SKILL.md",
+            "find .agents/skills -name SKILL.md",
+            "wc -l .agents/skills/release-notes/SKILL.md",
+            "vim .agents/skills/release-notes/SKILL.md",
+            "sed -i 's/a/b/' .agents/skills/release-notes/SKILL.md",
+            "sed -n -i '1p' .agents/skills/release-notes/SKILL.md",
+            "sed '1,5p' .agents/skills/release-notes/SKILL.md",
+            "cat draft.md > .agents/skills/release-notes/SKILL.md",
+            "cat >> .agents/skills/release-notes/SKILL.md",
+            "echo name > .agents/skills/release-notes/SKILL.md",
+            "cat <<EOF > .agents/skills/release-notes/SKILL.md",
+            "tee .agents/skills/release-notes/SKILL.md",
+            "cat .agents/skills/release-notes/references/style.md",
+            "python3 .agents/skills/release-notes/draft.py",
+            "python3 -m pytest .agents/skills/release-notes/scripts/test_draft.py",
+            "python3 .agents/skills/release-notes/scripts/README.md",
+            "echo '.agents/skills/release-notes/SKILL.md'",
+            "",
+            None,
+            ["cat", ".agents/skills/release-notes/SKILL.md"],
+        ],
+    )
+    def test_anything_else_is_not_a_skill_read(self, command):
+        assert skill_from_shell_command(command) is None
+
+
+class TestSkillActivationAttributes:
+    def test_read_of_a_skill_file_is_an_implicit_activation(self):
+        assert skill_read_attributes(".agents/skills/release-notes/SKILL.md") == {
+            "tool.skill_name": "release-notes",
+            "skill.trigger": "implicit",
+        }
+
+    def test_read_of_another_file_is_not_an_activation(self):
+        assert skill_read_attributes("notes.md") == {}
+
+    def test_command_reading_a_skill_file_is_an_implicit_activation(self):
+        assert skill_command_attributes("cat .agents/skills/release-notes/SKILL.md") == {
+            "tool.skill_name": "release-notes",
+            "skill.trigger": "implicit",
+        }
+
+    def test_user_invoked_skill(self):
+        assert invoked_skill_attributes(["release-notes"]) == {"skill.name": "release-notes", "skill.trigger": "user"}
+
+    def test_several_user_invoked_skills_are_joined_in_order_once_each(self):
+        assert invoked_skill_attributes(["release-notes", "changelog", "release-notes"]) == {
+            "skill.name": "release-notes,changelog",
+            "skill.trigger": "user",
+        }
+
+    @pytest.mark.parametrize("names", [[], [""], [None], "release-notes", None])
+    def test_no_user_invoked_skill(self, names):
+        assert invoked_skill_attributes(names) == {}
+
+    def test_active_skill(self):
+        assert active_skill_attributes("release-notes") == {"skill.active": "release-notes"}
+
+    @pytest.mark.parametrize("name", [None, "", 3])
+    def test_no_active_skill(self, name):
+        assert active_skill_attributes(name) == {}
+
+    @pytest.mark.parametrize(
+        "attributes",
+        [
+            lambda: skill_read_attributes(".agents/skills/release-notes/SKILL.md"),
+            lambda: skill_command_attributes("cat .agents/skills/release-notes/SKILL.md"),
+            lambda: invoked_skill_attributes(["release-notes"]),
+            lambda: active_skill_attributes("release-notes"),
+        ],
+    )
+    def test_left_out_rather_than_redacted_without_tool_details(self, monkeypatch, attributes):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert attributes() == {}
 
 
 # ── EnvConfig property tests ──────────────────────────────────────────────

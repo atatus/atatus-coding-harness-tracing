@@ -465,7 +465,25 @@ class TestPostToolUse:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.name"]["stringValue"] == "report_intent"
         assert attrs["output.value"]["stringValue"] == "ack"
-        assert attrs["tool.description"]["stringValue"]  # non-empty
+        assert "tool.description" not in attrs
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("skill", {"skill": "release-notes", "args": "SECRET-ARG"}),
+            ("github-mcp-server-get_file_contents", {"path": "SECRET-ARG"}),
+            ("report_intent", {"intent": "SECRET-ARG"}),
+            ("report_intent", '{"intent": "SECRET-ARG"}'),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, tool_name, tool_args
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        assert "SECRET-ARG" not in json.dumps(_get_span_attrs(captured_spans[0]))
 
     def test_extracts_text_result_for_llm(self, mock_resolve, state, captured_spans):
         """Extracts text_result_for_llm from tool_result."""
@@ -498,6 +516,85 @@ class TestPostToolUse:
         _handle_post_tool_use(inp)
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.result_type"]["stringValue"] == "failure"
+
+    def test_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    def test_skill_tool_is_a_model_trigger(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert _get_span_attrs(captured_spans[0])["skill.trigger"]["stringValue"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert "skill.trigger" not in _get_span_attrs(captured_spans[0])
+
+    def test_only_the_skill_tool_has_a_skill_name(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "report_intent", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("view", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md", "view_range": [1, 80]}),
+            ("read_file", {"filePath": "/home/dev/.github/skills/release-notes/SKILL.md"}),
+            ("read", {"file_path": "/home/dev/.github/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_reading_a_skill_file_is_an_implicit_activation(
+        self, mock_resolve, state, captured_spans, tool_name, tool_args
+    ):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["skill.trigger"]["stringValue"] == "implicit"
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("view", {"path": "/home/dev/.copilot/skills/release-notes/references/style.md"}),
+            ("view", {"path": "/w/SKILL.md"}),
+            ("edit", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}),
+            ("create", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(self, mock_resolve, state, captured_spans, tool_name, tool_args):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_file_read_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"toolName": "view", "toolArgs": {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
 
     def test_no_result_type_when_empty(self, mock_resolve, state, captured_spans):
         """Does not set tool.result_type when result_type is empty."""
@@ -671,6 +768,15 @@ class TestPostToolUseFailure:
         message = "x" * 500
         _handle_post_tool_use_failure({"session_id": "sess-1", "tool_name": "bash", "error": message})
         assert _get_span(captured_spans[0])["status"]["message"] == "x" * 200
+
+    def test_error_text_follows_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        """Tool errors echo commands, paths and output, so the status message is tool content too."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure({"session_id": "sess-1", "tool_name": "bash", "error": "TOKEN=s3cr3t-value"})
+        assert "s3cr3t-value" not in json.dumps(captured_spans[0])
+        assert _get_span(captured_spans[0])["status"]["message"] == "<redacted (18 chars)>"
 
     def test_empty_error_still_emits_an_error_span(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
