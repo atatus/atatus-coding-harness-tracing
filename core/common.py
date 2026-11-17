@@ -357,11 +357,152 @@ def mcp_attributes_from_tool_name(tool_name: Any) -> Dict[str, str]:
     return mcp_tool_attributes(server, tool)
 
 
-def skill_name_attributes(skill: Any) -> Dict[str, str]:
+SKILL_TRIGGER_MODEL = "model"
+SKILL_TRIGGER_IMPLICIT = "implicit"
+SKILL_TRIGGER_USER = "user"
+
+
+def skill_name_attributes(skill: Any, trigger: Optional[str] = None) -> Dict[str, str]:
     """Omitted, not redacted, without tool details: a placeholder would pose as a skill name."""
     if not env.log_tool_details or not isinstance(skill, str) or not skill:
         return {}
-    return {"tool.skill_name": skill}
+    attrs = {"tool.skill_name": skill}
+    if trigger:
+        attrs["skill.trigger"] = trigger
+    return attrs
+
+
+def skill_read_attributes(path: Any) -> Dict[str, str]:
+    return skill_name_attributes(skill_from_path(path), trigger=SKILL_TRIGGER_IMPLICIT)
+
+
+def skill_command_attributes(command: Any) -> Dict[str, str]:
+    return skill_name_attributes(skill_from_shell_command(command), trigger=SKILL_TRIGGER_IMPLICIT)
+
+
+def invoked_skill_attributes(names: Any) -> Dict[str, str]:
+    """Skills the user named for the turn; several are comma-joined, which skill names never contain."""
+    if not env.log_tool_details or not isinstance(names, (list, tuple)):
+        return {}
+    unique = list(dict.fromkeys(name for name in names if isinstance(name, str) and name))
+    if not unique:
+        return {}
+    return {"skill.name": ",".join(unique), "skill.trigger": SKILL_TRIGGER_USER}
+
+
+def active_skill_attributes(skill: Any) -> Dict[str, str]:
+    if not env.log_tool_details or not isinstance(skill, str) or not skill:
+        return {}
+    return {"skill.active": skill}
+
+
+_SKILL_FILE_RE = re.compile(r"(?:^|/)skills/(?:\.[^./][^/]*/)?([^/.][^/]*)/SKILL\.md$")
+_SKILL_SCRIPT_RE = re.compile(
+    r"(?:^|/)skills/(?:\.[^./][^/]*/)?([^/.][^/]*)/scripts/.+\.(?:py|sh|js|ts|rb|pl|ps1)$", re.IGNORECASE
+)
+_SKILL_URI_RE = re.compile(r"^skill://([^/\\:\s]+)(?:/SKILL\.md)?(?::.*)?$")
+
+
+def skill_from_path(path: Any) -> Optional[str]:
+    """The skill a path names: ``…/skills/<name>/SKILL.md`` or ``skill://<name>[/SKILL.md][:selector]``."""
+    if not isinstance(path, str) or not path:
+        return None
+    match = _SKILL_URI_RE.match(path) or _SKILL_FILE_RE.search(path.replace("\\", "/"))
+    return match.group(1) if match else None
+
+
+_SHELL_LEXEME_RE = re.compile(r"&&|\|\||[;|\n]|(?:\"[^\"]*\"|'[^']*'|[^\s;|&\"']|&(?!&))+")
+_SHELL_QUOTED_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
+_SHELL_REDIRECT_RE = re.compile(r"^(?:\d+|&)?(>>?|>\||<<<?|<)(.*)$")
+_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SHELL_COMMAND_FLAG_RE = re.compile(r"^-[a-z]*c[a-z]*$")
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "\n"})
+_SHELLS = frozenset({"bash", "zsh", "sh"})
+_SKILL_FILE_READERS = frozenset({"cat", "head", "tail", "sed", "less", "more", "bat", "type", "get-content"})
+_SKILL_SCRIPT_RUNNERS = frozenset({"python", "python3", "bash", "zsh", "sh", "node", "deno", "ruby", "perl", "pwsh"})
+
+
+def _unquote(word: str) -> str:
+    return _SHELL_QUOTED_RE.sub(lambda match: match.group(0)[1:-1], word)
+
+
+def _shell_segments(command: str):
+    segment: list = []
+    for lexeme in _SHELL_LEXEME_RE.findall(command):
+        if lexeme in _SHELL_SEPARATORS:
+            if segment:
+                yield segment
+            segment = []
+        else:
+            segment.append(lexeme)
+    if segment:
+        yield segment
+
+
+def _skill_in_segment(raw_words: list, depth: int) -> Optional[str]:
+    start = 0
+    while start < len(raw_words) and _SHELL_ASSIGNMENT_RE.match(raw_words[start]):
+        start += 1
+    if start >= len(raw_words):
+        return None
+    program = re.split(r"[\\/]", _unquote(raw_words[start]))[-1].lower()
+    if program.endswith(".exe"):
+        program = program[: -len(".exe")]
+
+    args: list = []
+    rest = raw_words[start + 1 :]
+    index = 0
+    while index < len(rest):
+        redirect = _SHELL_REDIRECT_RE.match(rest[index])
+        if redirect is None:
+            args.append(_unquote(rest[index]))
+            index += 1
+            continue
+        operator, target = redirect.groups()
+        if not target and index + 1 < len(rest):
+            index += 1
+            target = rest[index]
+        if operator == "<":
+            args.append(_unquote(target))
+        index += 1
+
+    if program in _SHELLS and depth < 2:
+        for position, arg in enumerate(args[:-1]):
+            if _SHELL_COMMAND_FLAG_RE.match(arg):
+                return _skill_from_shell_command(args[position + 1], depth + 1)
+    if program in _SKILL_FILE_READERS:
+        flags = [arg for arg in args if arg.startswith("-")]
+        if program == "sed" and (
+            not any(re.match(r"^-[A-Za-z]*n[A-Za-z]*$", flag) or flag in ("--quiet", "--silent") for flag in flags)
+            or any(re.match(r"^-[A-Za-z]*i", flag) or flag.startswith("--in-place") for flag in flags)
+        ):
+            return None
+        for arg in args:
+            if not arg.startswith("-"):
+                skill = skill_from_path(arg)
+                if skill:
+                    return skill
+        return None
+    if program in _SKILL_SCRIPT_RUNNERS:
+        script = next((arg for arg in args if not arg.startswith("-")), "")
+        match = _SKILL_SCRIPT_RE.search(script.replace("\\", "/"))
+        return match.group(1) if match else None
+    return None
+
+
+def _skill_from_shell_command(command: str, depth: int) -> Optional[str]:
+    for segment in _shell_segments(command):
+        skill = _skill_in_segment(segment, depth)
+        if skill:
+            return skill
+    return None
+
+
+def skill_from_shell_command(command: Any) -> Optional[str]:
+    """The skill a shell command reads (``cat``/``sed -n``/``Get-Content`` … ``SKILL.md``) or runs a script of."""
+    if not isinstance(command, str) or not command:
+        return None
+    return _skill_from_shell_command(command, 0)
 
 
 # ---------------------------------------------------------------------------
