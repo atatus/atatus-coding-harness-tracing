@@ -9,6 +9,7 @@ from typing import Any
 
 from core.common import (
     LLM_EFFORT_ATTR,
+    SKILL_TRIGGER_MODEL,
     build_multi_span,
     build_span,
     env,
@@ -244,7 +245,7 @@ def _put_tool_details(attrs: dict[str, Any], event: ToolEvent) -> None:
 def tool_identity_attributes(tool_name: Any, tool_input: Any) -> dict[str, str]:
     attrs = mcp_attributes_from_tool_name(tool_name)
     if tool_name == "Skill" and isinstance(tool_input, dict):
-        attrs.update(skill_name_attributes(tool_input.get("skill")))
+        attrs.update(skill_name_attributes(tool_input.get("skill"), trigger=SKILL_TRIGGER_MODEL))
     return attrs
 
 

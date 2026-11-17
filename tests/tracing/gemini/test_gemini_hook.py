@@ -991,6 +991,28 @@ class TestAfterTool:
         )
         assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
 
+    def test_activate_skill_leaves_the_trigger_out(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert "skill.trigger" not in attrs
+
+    def test_reading_a_skill_file_is_not_an_activation(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {
+                "tool_name": "read_file",
+                "tool_input": {"file_path": "/home/dev/.gemini/skills/release-notes/SKILL.md"},
+                "tool_response": "",
+            }
+        )
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
     def test_only_activate_skill_has_a_skill_name(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)

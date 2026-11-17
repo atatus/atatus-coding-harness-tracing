@@ -8,6 +8,7 @@ import json
 
 from core.common import (
     LLM_EFFORT_ATTR,
+    SKILL_TRIGGER_MODEL,
     build_span,
     debug_dump,
     env,
@@ -153,7 +154,7 @@ def _tool_attributes(input_json: dict) -> dict:
         if value:
             attrs[key] = redact_content(env.log_tool_details, str(value))
     if tool_name_lc == "skill" and isinstance(tool_input_raw, dict):
-        attrs.update(skill_name_attributes(tool_input_raw.get("skill")))
+        attrs.update(skill_name_attributes(tool_input_raw.get("skill"), trigger=SKILL_TRIGGER_MODEL))
     return {"name": tool_name, "attrs": attrs}
 
 

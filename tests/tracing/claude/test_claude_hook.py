@@ -329,6 +329,46 @@ class TestPostToolUse:
         attrs = _attrs(captured_spans[0])
         assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
 
+    def test_skill_tool_is_a_model_trigger(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert _attrs(captured_spans[0])["skill.trigger"]["stringValue"] == "model"
+
+    def test_failed_skill_tool_is_a_model_trigger(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "error": "unknown"}
+        )
+        assert _attrs(captured_spans[0])["skill.trigger"]["stringValue"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert "skill.trigger" not in _attrs(captured_spans[0])
+
+    def test_reading_a_skill_file_is_not_an_activation(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Read",
+                "tool_use_id": "t9",
+                "tool_input": {"file_path": "/home/dev/.claude/skills/release-notes/SKILL.md"},
+                "tool_response": "",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
     def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         state.set("current_trace_id", "trace-abc")

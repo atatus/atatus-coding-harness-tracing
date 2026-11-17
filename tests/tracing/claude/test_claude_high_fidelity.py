@@ -1703,6 +1703,18 @@ class TestRenderedToolIdentity:
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         assert "tool.skill_name" not in _render_tool("Skill", {"skill": "release-notes"})
 
+    def test_skill_tool_is_a_model_trigger(self):
+        assert _render_tool("Skill", {"skill": "release-notes"})["skill.trigger"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert "skill.trigger" not in _render_tool("Skill", {"skill": "release-notes"})
+
+    def test_reading_a_skill_file_is_not_an_activation(self):
+        attrs = _render_tool("Read", {"file_path": "/home/dev/.claude/skills/release-notes/SKILL.md"})
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
     def test_skill_args_stay_behind_tool_content(self, monkeypatch):
         monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
         attrs = _render_tool("Skill", {"skill": "release-notes", "args": "draft v2 notes"})

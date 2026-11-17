@@ -24,6 +24,7 @@ from typing import Any, Optional
 from core.common import (
     FileLock,
     LLM_EFFORT_ATTR,
+    SKILL_TRIGGER_MODEL,
     StateManager,
     build_span,
     debug_dump,
@@ -527,7 +528,7 @@ def _emit_tool_span(
     for k, v in specialized.items():
         attrs[k] = redact_content(env.log_tool_details, v)
     if tool_name == "skill" and isinstance(tool_input, dict):
-        attrs.update(skill_name_attributes(tool_input.get("name")))
+        attrs.update(skill_name_attributes(tool_input.get("name"), trigger=SKILL_TRIGGER_MODEL))
     if user_id:
         attrs["user.id"] = user_id
     if login_id:

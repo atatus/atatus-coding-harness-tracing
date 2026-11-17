@@ -1031,6 +1031,24 @@ class TestPerToolAttributeMapping:
         tool = _by_kind(captured_spans, "TOOL")[0]
         assert "tool.skill_name" not in _get_attrs(tool)
 
+    def test_skill_tool_is_a_model_trigger(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_close(_make_payload_with_tool("skill", {"name": "release-notes"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert _get_attrs(tool)["skill.trigger"]["stringValue"] == "model"
+
+    def test_skill_trigger_is_left_out_without_tool_details(
+        self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        _handle_close(_make_payload_with_tool("skill", {"name": "release-notes"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert "skill.trigger" not in _get_attrs(tool)
+
+    def test_reading_a_skill_file_is_not_an_activation(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_close(_make_payload_with_tool("read", {"filePath": "/home/dev/.agents/skills/release-notes/SKILL.md"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert "tool.skill_name" not in _get_attrs(tool)
+
 
 # ---------------------------------------------------------------------------
 # Token-detail omission rules
