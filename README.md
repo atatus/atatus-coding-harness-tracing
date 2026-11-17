@@ -153,6 +153,20 @@ left out, not redacted, when it is off. A harness that does not report the serve
 | Antigravity | `call_mcp_tool` arguments' `ServerName` and `ToolName` |
 | GitHub Copilot, opencode, Kiro, omp, Devin | not reported — no server field reaches the hooks, and the tool name alone does not separate server from tool reliably |
 
+#### `tool.skill_name` — auto-detected, no setup
+
+A call to a harness's skill tool names the skill it loaded. The skill's arguments are tool
+content and stay in `input.value`. Like the MCP names, it follows `ATATUS_LOG_TOOL_DETAILS`
+and is left out when that is off.
+
+| Harness | Source |
+|---|---|
+| Claude Code | the `Skill` tool's `skill` argument |
+| GitHub Copilot | the `skill` tool's `skill` argument |
+| opencode | the `skill` tool's `name` argument |
+| Gemini CLI | the `activate_skill` tool's `name` argument |
+| Codex, Cursor, Antigravity, Kiro, omp, Devin | not reported — no skill tool with a skill-name argument is known to reach the hooks |
+
 #### 4. Content logging
 
 Three questions that apply to **all** harnesses. Press Enter to accept each default:
@@ -211,7 +225,7 @@ Most settings live in `.atatus/harness/config.json`, but a small set of env vars
 | `ATATUS_TRACE_DEBUG` | `false` | Dump raw hook payloads as JSON under `~/.atatus/harness/state/<harness>/debug/`. Codex hooks use this for span-tree inspection. |
 | `ATATUS_TRANSCRIPT_WAIT_MS` | `300` | How long a Stop hook waits for the harness to flush its transcript before reading model and token counts. Those two live only in the transcript, and the hook can fire before the write lands — losing that race emits a span with no model and zero tokens. `0` disables the wait. |
 | `ATATUS_LOG_PROMPTS` | `true` | Capture prompt and response text on spans. Set to `false` to emit spans with metadata only. |
-| `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture what each tool was asked to do: tool names, commands, file paths, URLs, queries and MCP server names. |
+| `ATATUS_LOG_TOOL_DETAILS` | `true` | Capture what each tool was asked to do: tool names, commands, file paths, URLs, queries, MCP server names and skill names. |
 | `ATATUS_LOG_TOOL_CONTENT` | **`false`** | Capture full tool arguments and *output* — file bodies being written, patches, shell stdout, search results. Off by default: this is the broadest of the three, and it is where file contents and anything pasted into a session end up. Opt in explicitly. |
 | `ATATUS_DISABLE_FORK` | `false` | Testing only. Hooks normally hand the OTLP POST to a detached background process so the harness is never kept waiting on it; this sends inline instead, which is what makes emitted spans observable to an in-process test. |
 | `ATATUS_OTLP_TIMEOUT` | `5` | Socket timeout in seconds for the OTLP POST. |

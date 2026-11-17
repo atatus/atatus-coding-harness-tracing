@@ -24,6 +24,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
 )
 from tracing.gemini.hooks.adapter import (
     SCOPE_NAME,
@@ -616,6 +617,8 @@ def _handle_after_tool(input_json: dict) -> None:
     mcp_context = _get_robust(input_json, "mcp_context")
     if isinstance(mcp_context, dict):
         attrs.update(mcp_tool_attributes(mcp_context.get("server_name"), mcp_context.get("tool_name")))
+    if tool_name == "activate_skill" and isinstance(tool_args_raw, dict):
+        attrs.update(skill_name_attributes(tool_args_raw.get("name")))
 
     span = build_span(
         tool_name,

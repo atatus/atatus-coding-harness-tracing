@@ -274,6 +274,54 @@ class TestPostToolUse:
         assert attrs["mcp.server.name"]["stringValue"] == "docs"
         assert attrs["mcp.tool.name"]["stringValue"] == "search_pages"
 
+    def test_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Skill",
+                "tool_use_id": "t8",
+                "tool_input": {"skill": "release-notes", "args": "draft v2 notes"},
+                "tool_response": "loaded",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_failed_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use_failure(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "error": "unknown"}
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"tool_name": "Skill", "tool_use_id": "t8", "tool_input": {"skill": "release-notes"}, "tool_response": ""}
+        )
+        assert "tool.skill_name" not in _attrs(captured_spans[0])
+
+    def test_skill_args_stay_behind_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {
+                "tool_name": "Skill",
+                "tool_use_id": "t8",
+                "tool_input": {"skill": "release-notes", "args": "draft v2 notes"},
+                "tool_response": "loaded",
+            }
+        )
+        attrs = _attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["input.value"]["stringValue"].startswith("<redacted (")
+
     def test_builtin_tool_has_no_mcp_names(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")

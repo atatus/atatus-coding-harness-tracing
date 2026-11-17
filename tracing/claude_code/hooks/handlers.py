@@ -25,7 +25,6 @@ from core.common import (
     generate_trace_id,
     get_timestamp_ms,
     log,
-    mcp_attributes_from_tool_name,
     normalize_effort,
     read_stdin_text,
     redact_content,
@@ -61,7 +60,7 @@ from tracing.claude_code.hooks.adapter import (
     resolve_session,
     resolve_transcript_path,
 )
-from tracing.claude_code.hooks.span_renderer import render_event_graph
+from tracing.claude_code.hooks.span_renderer import render_event_graph, tool_identity_attributes
 from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
 from tracing.claude_code.hooks.transcript import (
     is_conversation_record,
@@ -304,7 +303,7 @@ def _handle_post_tool_use(input_json: dict) -> None:
         "input.value": tool_input,
         "output.value": tool_response,
         "tool.description": tool_description,
-        **mcp_attributes_from_tool_name(tool_name),
+        **tool_identity_attributes(tool_name, input_json.get("tool_input")),
     }
     if user_id:
         attrs["user.id"] = user_id
@@ -448,7 +447,7 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         "tool.description": tool_description,
         "error.type": "tool_failure",
         "error.message": redacted_error,
-        **mcp_attributes_from_tool_name(tool_name),
+        **tool_identity_attributes(tool_name, input_json.get("tool_input")),
     }
     if user_id:
         attrs["user.id"] = user_id

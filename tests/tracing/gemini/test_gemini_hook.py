@@ -974,6 +974,30 @@ class TestAfterTool:
         assert "mcp.server.name" not in attrs
         assert "mcp.tool.name" not in attrs
 
+    def test_activate_skill_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool(
+            {"tool_name": "activate_skill", "tool_input": {"name": "release-notes"}, "tool_response": "loaded"}
+        )
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    def test_only_activate_skill_has_a_skill_name(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": "custom_tool", "tool_input": {"name": "release-notes"}, "tool_response": ""})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
     # -- Redaction tests --
 
     def test_redacts_tool_content(self, mock_resolve, state, captured_spans, monkeypatch):

@@ -499,6 +499,26 @@ class TestPostToolUse:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.result_type"]["stringValue"] == "failure"
 
+    def test_skill_tool_names_its_skill(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "skill", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
+    def test_only_the_skill_tool_has_a_skill_name(self, mock_resolve, state, captured_spans):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": "report_intent", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
+        assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
+
     def test_no_result_type_when_empty(self, mock_resolve, state, captured_spans):
         """Does not set tool.result_type when result_type is empty."""
         state.set("current_trace_id", "trace-abc")

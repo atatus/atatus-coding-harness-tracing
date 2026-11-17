@@ -39,6 +39,7 @@ from core.common import (
     restore_stderr_from_log_file,
     send_span,
     send_span_async,
+    skill_name_attributes,
     tool_detail_attributes,
 )
 
@@ -1047,6 +1048,20 @@ class TestMcpToolAttributes:
     @pytest.mark.parametrize("name", [None, "", "Bash", "mcp_docs_search", "mcp__docs", "mcp__docs__", "mcp____search"])
     def test_anything_else_is_not_an_mcp_tool(self, name):
         assert mcp_attributes_from_tool_name(name) == {}
+
+
+class TestSkillNameAttributes:
+    def test_names_the_skill(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "true")
+        assert skill_name_attributes("release-notes") == {"tool.skill_name": "release-notes"}
+
+    @pytest.mark.parametrize("skill", [None, "", 3, ["release-notes"]])
+    def test_anything_else_gives_nothing(self, skill):
+        assert skill_name_attributes(skill) == {}
+
+    def test_left_out_rather_than_redacted_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert skill_name_attributes("release-notes") == {}
 
 
 # ── EnvConfig property tests ──────────────────────────────────────────────

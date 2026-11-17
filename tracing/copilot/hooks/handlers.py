@@ -20,6 +20,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
     tool_detail_attributes,
 )
 from core.event_model import TurnEndReason
@@ -156,6 +157,8 @@ def _tool_attributes(input_json: dict) -> dict:
     ):
         if value:
             attrs[key] = redact_content(env.log_tool_details, str(value))
+    if tool_name_lc == "skill" and isinstance(tool_input_raw, dict):
+        attrs.update(skill_name_attributes(tool_input_raw.get("skill")))
     return {"name": tool_name, "attrs": attrs}
 
 

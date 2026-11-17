@@ -1013,6 +1013,24 @@ class TestPerToolAttributeMapping:
         # description still set from state.title
         assert attrs["tool.description"]["stringValue"] == "tool-title"
 
+    def test_skill_tool_names_its_skill(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_close(_make_payload_with_tool("skill", {"name": "release-notes"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert _get_attrs(tool)["tool.skill_name"]["stringValue"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(
+        self, mock_resolve, mock_ensure, state, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        _handle_close(_make_payload_with_tool("skill", {"name": "release-notes"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert "tool.skill_name" not in _get_attrs(tool)
+
+    def test_only_the_skill_tool_has_a_skill_name(self, mock_resolve, mock_ensure, state, captured_spans):
+        _handle_close(_make_payload_with_tool("custom_thing", {"name": "release-notes"}))
+        tool = _by_kind(captured_spans, "TOOL")[0]
+        assert "tool.skill_name" not in _get_attrs(tool)
+
 
 # ---------------------------------------------------------------------------
 # Token-detail omission rules

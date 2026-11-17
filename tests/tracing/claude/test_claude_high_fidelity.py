@@ -1694,3 +1694,20 @@ class TestRenderedToolIdentity:
         attrs = _render_tool("Bash", {"command": "ls"})
         assert "mcp.server.name" not in attrs
         assert "mcp.tool.name" not in attrs
+
+    def test_skill_tool_names_its_skill(self):
+        attrs = _render_tool("Skill", {"skill": "release-notes", "args": "draft v2 notes"})
+        assert attrs["tool.skill_name"] == "release-notes"
+
+    def test_skill_name_is_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        assert "tool.skill_name" not in _render_tool("Skill", {"skill": "release-notes"})
+
+    def test_skill_args_stay_behind_tool_content(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = _render_tool("Skill", {"skill": "release-notes", "args": "draft v2 notes"})
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert not any("draft v2 notes" in str(value) for value in attrs.values())
+
+    def test_only_the_skill_tool_has_a_skill_name(self):
+        assert "tool.skill_name" not in _render_tool("Read", {"skill": "release-notes", "file_path": "/x"})

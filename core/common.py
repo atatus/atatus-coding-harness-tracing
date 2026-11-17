@@ -357,6 +357,13 @@ def mcp_attributes_from_tool_name(tool_name: Any) -> Dict[str, str]:
     return mcp_tool_attributes(server, tool)
 
 
+def skill_name_attributes(skill: Any) -> Dict[str, str]:
+    """Omitted, not redacted, without tool details: a placeholder would pose as a skill name."""
+    if not env.log_tool_details or not isinstance(skill, str) or not skill:
+        return {}
+    return {"tool.skill_name": skill}
+
+
 # ---------------------------------------------------------------------------
 # Hook stdin
 # ---------------------------------------------------------------------------

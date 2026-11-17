@@ -38,6 +38,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_name_attributes,
 )
 from tracing.opencode.hooks.adapter import (
     SCOPE_NAME,
@@ -525,6 +526,8 @@ def _emit_tool_span(
         attrs["tool.description"] = redact_content(env.log_tool_details, title_raw)
     for k, v in specialized.items():
         attrs[k] = redact_content(env.log_tool_details, v)
+    if tool_name == "skill" and isinstance(tool_input, dict):
+        attrs.update(skill_name_attributes(tool_input.get("name")))
     if user_id:
         attrs["user.id"] = user_id
     if login_id:

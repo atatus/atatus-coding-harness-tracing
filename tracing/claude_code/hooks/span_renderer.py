@@ -15,6 +15,7 @@ from core.common import (
     generate_span_id,
     mcp_attributes_from_tool_name,
     redact_content,
+    skill_name_attributes,
 )
 from core.event_model import (
     AgentEvent,
@@ -237,7 +238,14 @@ def _put_tool_details(attrs: dict[str, Any], event: ToolEvent) -> None:
     for key, value in details.items():
         if value is not None:
             attrs[key] = redact_content(env.log_tool_details, _content_string(value))
-    attrs.update(mcp_attributes_from_tool_name(event.tool_name))
+    attrs.update(tool_identity_attributes(event.tool_name, tool_input))
+
+
+def tool_identity_attributes(tool_name: Any, tool_input: Any) -> dict[str, str]:
+    attrs = mcp_attributes_from_tool_name(tool_name)
+    if tool_name == "Skill" and isinstance(tool_input, dict):
+        attrs.update(skill_name_attributes(tool_input.get("skill")))
+    return attrs
 
 
 def _turn_input(event: TurnEvent) -> Any:
@@ -348,4 +356,4 @@ def _safe_parent_event_ids(events: list[BaseEvent]) -> list[str | None]:
     ]
 
 
-__all__ = ["render_event_graph"]
+__all__ = ["render_event_graph", "tool_identity_attributes"]
