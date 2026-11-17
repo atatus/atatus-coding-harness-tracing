@@ -489,6 +489,47 @@ def _nested_child_transcript(subagents: Path, child="n1", parent="a1", call_id="
     return transcript
 
 
+def _skilled(record, skill="release-notes"):
+    return {**record, "attributionSkill": skill}
+
+
+class TestASubagentsActiveSkillReachesItsModelCalls:
+    def _llm_skills(self, session):
+        return {
+            _attrs(s)["llm.message.id"]: _attrs(s).get("skill.active")
+            for s in session.spans()
+            if _attrs(s).get("openinference.span.kind") == "LLM"
+        }
+
+    def test_a_spliced_foreground_agent(self, session):
+        main = _write(session.dir / "proj" / "s1.jsonl", _agent_call("toolu_wf", "wf1", "completed"))
+        subagent = _web_fetch_transcript(session.dir / "proj" / "s1" / "subagents", "wf1")
+        records = [json.loads(line) for line in subagent.read_text(encoding="utf-8").splitlines()]
+        _write(subagent, [_skilled(r) if r["type"] == "assistant" else r for r in records])
+        _open_turn(session, main)
+        _main_stop(session, main)
+
+        skills = self._llm_skills(session)
+        assert skills["msg-wf1-1"] == "release-notes"
+        assert skills["msg-wf1-2"] == "release-notes"
+        assert skills["msg-toolu_wf"] is None
+
+    def test_a_background_agent(self, session):
+        _hold_launching_turn(session)
+        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
+        _write(
+            transcript,
+            [
+                _skilled(_assistant("u1", "msg_1", [_tool_use("toolu_1")], ts="2026-11-14T03:34:12.000Z")),
+                _tool_result("r1", "toolu_1", ts="2026-11-14T03:34:13.000Z"),
+                _assistant("u2", "msg_2", [{"type": "text", "text": "done"}], ts="2026-11-14T03:34:14.000Z"),
+            ],
+        )
+        _stop(session, transcript)
+
+        assert self._llm_skills(session) == {"msg_1": "release-notes", "msg_2": None}
+
+
 class TestNestedBackgroundAgentsLandUnderTheirAgentTool:
     """A background agent launched by another background agent stops while no turn is open."""
 
@@ -992,44 +1033,3 @@ class TestTheFinalMessageIsWaitedFor:
 
         assert not handlers._wait_for_transcript_flush(transcript, 0, expected_text="bye")
         assert time.monotonic() - began < 1.0
-
-
-def _skilled(record, skill="release-notes"):
-    return {**record, "attributionSkill": skill}
-
-
-class TestASubagentsActiveSkillReachesItsModelCalls:
-    def _llm_skills(self, session):
-        return {
-            _attrs(s)["llm.message.id"]: _attrs(s).get("skill.active")
-            for s in session.spans()
-            if _attrs(s).get("openinference.span.kind") == "LLM"
-        }
-
-    def test_a_spliced_foreground_agent(self, session):
-        main = _write(session.dir / "proj" / "s1.jsonl", _agent_call("toolu_wf", "wf1", "completed"))
-        subagent = _web_fetch_transcript(session.dir / "proj" / "s1" / "subagents", "wf1")
-        records = [json.loads(line) for line in subagent.read_text(encoding="utf-8").splitlines()]
-        _write(subagent, [_skilled(r) if r["type"] == "assistant" else r for r in records])
-        _open_turn(session, main)
-        _main_stop(session, main)
-
-        skills = self._llm_skills(session)
-        assert skills["msg-wf1-1"] == "release-notes"
-        assert skills["msg-wf1-2"] == "release-notes"
-        assert skills["msg-toolu_wf"] is None
-
-    def test_a_background_agent(self, session):
-        _hold_launching_turn(session)
-        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
-        _write(
-            transcript,
-            [
-                _skilled(_assistant("u1", "msg_1", [_tool_use("toolu_1")], ts="2026-11-14T03:34:12.000Z")),
-                _tool_result("r1", "toolu_1", ts="2026-11-14T03:34:13.000Z"),
-                _assistant("u2", "msg_2", [{"type": "text", "text": "done"}], ts="2026-11-14T03:34:14.000Z"),
-            ],
-        )
-        _stop(session, transcript)
-
-        assert self._llm_skills(session) == {"msg_1": "release-notes", "msg_2": None}

@@ -53,31 +53,6 @@ class TestModelCallNamesAreDistinct:
         )
 
 
-class TestTokensAreNotDuplicatedOntoTheRoot:
-    """Summary queries sum `llm.token_count.*` across every span in a range.
-
-    A root that repeats the sum of its children therefore reports exactly twice the real
-    usage — and twice the cost. Tokens belong to the span that spent them.
-    """
-
-    # e.g. root_attrs.update(_token_attrs(sum(...)))
-    ROOT_TOKENS = re.compile(r"root_attrs(?:\[|\.update\()[^\n]*token", re.IGNORECASE)
-
-    @pytest.mark.parametrize("harness", HARNESSES)
-    def test_no_root_attrs_dict_carries_token_counts(self, harness):
-        offenders = []
-        for name, path, source in _handler_sources():
-            if name != harness:
-                continue
-            for lineno, line in enumerate(source.splitlines(), 1):
-                if self.ROOT_TOKENS.search(line):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
-        assert not offenders, (
-            "token counts must not be attached to a trace root — range sums would "
-            "double-count the turn:\n" + "\n".join(offenders)
-        )
-
-
 class TestSkillAttributesFollowToolDetails:
     """The tool-details gate lives in the core skill helpers; a hook writing a skill key itself bypasses it."""
 
@@ -121,6 +96,31 @@ class TestSkillAttributesFollowToolDetails:
         assert self.HELPER_CALLS[helper](common), "the call below must name a skill when tool details are on"
         monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
         assert self.HELPER_CALLS[helper](common) == {}
+
+
+class TestTokensAreNotDuplicatedOntoTheRoot:
+    """Summary queries sum `llm.token_count.*` across every span in a range.
+
+    A root that repeats the sum of its children therefore reports exactly twice the real
+    usage — and twice the cost. Tokens belong to the span that spent them.
+    """
+
+    # e.g. root_attrs.update(_token_attrs(sum(...)))
+    ROOT_TOKENS = re.compile(r"root_attrs(?:\[|\.update\()[^\n]*token", re.IGNORECASE)
+
+    @pytest.mark.parametrize("harness", HARNESSES)
+    def test_no_root_attrs_dict_carries_token_counts(self, harness):
+        offenders = []
+        for name, path, source in _handler_sources():
+            if name != harness:
+                continue
+            for lineno, line in enumerate(source.splitlines(), 1):
+                if self.ROOT_TOKENS.search(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "token counts must not be attached to a trace root — range sums would "
+            "double-count the turn:\n" + "\n".join(offenders)
+        )
 
 
 class TestToolArgumentsFollowToolContent:
