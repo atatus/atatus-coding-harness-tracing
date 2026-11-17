@@ -57,6 +57,8 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_command_attributes,
+    skill_read_attributes,
 )
 from tracing.antigravity.hooks.adapter import (
     SCOPE_NAME,
@@ -279,6 +281,13 @@ def _build_tool_span(
             attrs[attr_name] = redact_content(env.log_tool_details, value)
     if tool_name == "call_mcp_tool" and isinstance(args, dict):
         attrs.update(mcp_tool_attributes(args.get("ServerName"), args.get("ToolName")))
+    if isinstance(args, dict):
+        if tool_name == "view_file":
+            attrs.update(skill_read_attributes(args.get("AbsolutePath")))
+        elif tool_name == "read_file":
+            attrs.update(skill_read_attributes(args.get("Path")))
+        elif tool_name == "run_command":
+            attrs.update(skill_command_attributes(args.get("CommandLine")))
 
     exit_code = tool.get("exit_code")
     if isinstance(exit_code, int):

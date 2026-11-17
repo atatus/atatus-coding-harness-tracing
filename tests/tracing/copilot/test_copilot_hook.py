@@ -550,6 +550,52 @@ class TestPostToolUse:
         _handle_post_tool_use({"toolName": "report_intent", "toolArgs": {"skill": "release-notes"}, "toolResult": {}})
         assert "tool.skill_name" not in _get_span_attrs(captured_spans[0])
 
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("view", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md", "view_range": [1, 80]}),
+            ("read_file", {"filePath": "/home/dev/.github/skills/release-notes/SKILL.md"}),
+            ("read", {"file_path": "/home/dev/.github/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_reading_a_skill_file_is_an_implicit_activation(
+        self, mock_resolve, state, captured_spans, tool_name, tool_args
+    ):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["skill.trigger"]["stringValue"] == "implicit"
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("view", {"path": "/home/dev/.copilot/skills/release-notes/references/style.md"}),
+            ("view", {"path": "/w/SKILL.md"}),
+            ("edit", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}),
+            ("create", {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(self, mock_resolve, state, captured_spans, tool_name, tool_args):
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_file_read_is_left_out_without_tool_details(self, mock_resolve, state, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use(
+            {"toolName": "view", "toolArgs": {"path": "/home/dev/.copilot/skills/release-notes/SKILL.md"}}
+        )
+        attrs = _get_span_attrs(captured_spans[0])
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
     def test_no_result_type_when_empty(self, mock_resolve, state, captured_spans):
         """Does not set tool.result_type when result_type is empty."""
         state.set("current_trace_id", "trace-abc")

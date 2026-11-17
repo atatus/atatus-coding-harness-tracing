@@ -1122,6 +1122,36 @@ class TestHandleBeforeReadFile:
         assert span["name"] == "Read File"
         assert span["parentSpanId"] == "a7e64b1d8f42e11c"
 
+    def _read(self, captured_spans, event, file_path):
+        with mock.patch("tracing.cursor.hooks.handlers.gen_root_span_get", return_value="a7e64b1d8f42e11c"):
+            _dispatch(event, {"conversation_id": "conv-1", "generation_id": "gen-1", "file_path": file_path})
+        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        return {a["key"]: a["value"] for a in span["attributes"]}
+
+    def test_reading_a_skill_file_is_an_implicit_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert attrs["tool.skill_name"]["stringValue"] == "release-notes"
+        assert attrs["skill.trigger"]["stringValue"] == "implicit"
+
+    def test_reading_another_file_is_not_an_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/references/a.md")
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_skill_activation_is_left_out_without_tool_details(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._read(captured_spans, "beforeReadFile", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_a_tab_read_is_not_an_activation(self, captured_spans, monkeypatch):
+        monkeypatch.setenv("ATATUS_TRACE_ENABLED", "true")
+        attrs = self._read(captured_spans, "beforeTabFileRead", "/home/dev/.cursor/skills/release-notes/SKILL.md")
+        assert "tool.skill_name" not in attrs
+
 
 # ---------------------------------------------------------------------------
 # _handle_after_file_edit tests

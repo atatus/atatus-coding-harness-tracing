@@ -511,6 +511,52 @@ class TestMcpToolCall:
         assert "mcp.tool.name" not in attrs
 
 
+_SKILL_FILE = "/home/dev/.gemini/antigravity/skills/release-notes/SKILL.md"
+
+
+class TestSkillFileReads:
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("view_file", {"AbsolutePath": _SKILL_FILE, "toolAction": "Viewing", "toolSummary": "skill"}),
+            ("view_file", {"AbsolutePath": _SKILL_FILE, "StartLine": 1, "EndLine": 80}),
+            ("read_file", {"Path": _SKILL_FILE}),
+            ("run_command", {"CommandLine": f"cat {_SKILL_FILE}", "Cwd": "/w"}),
+        ],
+    )
+    def test_reading_a_skill_file_is_an_implicit_activation(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, name, args
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert attrs["skill.trigger"] == "implicit"
+
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("view_file", {"AbsolutePath": "/home/dev/.gemini/antigravity/skills/release-notes/references/a.md"}),
+            ("read_file", {"Path": "/w/SKILL.md"}),
+            ("run_command", {"CommandLine": f"grep name {_SKILL_FILE}"}),
+            ("write_to_file", {"AbsolutePath": _SKILL_FILE}),
+            ("list_dir", {"DirectoryPath": "/home/dev/.gemini/antigravity/skills/release-notes/SKILL.md"}),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, name, args
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "view_file", {"AbsolutePath": _SKILL_FILE})
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
 # ---------------------------------------------------------------------------
 # High-water-mark dedup: re-running Stop emits nothing the second time
 # ---------------------------------------------------------------------------

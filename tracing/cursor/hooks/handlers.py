@@ -19,6 +19,7 @@ from core.common import (
     redact_content,
     send_span,
     send_span_async,
+    skill_read_attributes,
 )
 from tracing.cursor.hooks.adapter import (
     SCOPE_NAME,
@@ -825,7 +826,8 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         log("cursor: no root span for this generation - span dropped")
         return
 
-    file_path = redact_content(env.log_tool_details, _jq_str(input_json, "file_path", "filePath", "path"))
+    raw_path = _jq_str(input_json, "file_path", "filePath", "path")
+    file_path = redact_content(env.log_tool_details, raw_path)
 
     user_id = _resolve_user_id(input_json)
     login_id = _resolve_user_login_id(input_json)
@@ -835,6 +837,7 @@ def _handle_before_read_file(input_json, conversation_id, gen_id, trace_id, now_
         "tool.name": "read_file",
         "input.value": file_path,
         "session.id": conversation_id,
+        **skill_read_attributes(raw_path),
     }
     if conversation_id:
         attrs["cursor.conversation.id"] = conversation_id

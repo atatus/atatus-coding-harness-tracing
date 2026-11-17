@@ -48,6 +48,7 @@ from core.common import (
 from core.common import send_span as send_span_to_backend
 from core.common import (
     send_span_async,
+    skill_command_attributes,
     tool_detail_attributes,
 )
 from core.constants import MODEL_FAMILY_SYSTEMS
@@ -69,6 +70,11 @@ _CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 _WEB_TOOL_TARGET_KEYS = {"web_search": "query", "open_page": "url"}
 
 _CODE_MODE_TOOL_ITEMS = {"CommandExecution", "FileChange", "McpToolCall", "WebSearch", "ImageView", "Extension"}
+
+_SHELL_TOOLS = frozenset({"exec_command", "shell", "shell_command", "local_shell"})
+
+# `cmd` of each tools.exec_command({...}) in a Code Mode script, quoted key or not.
+_CODE_MODE_CMD_RE = re.compile(r"""(?:"cmd"|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)""")
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +612,34 @@ def _command_text(command: object) -> str:
     return " ".join(parts)
 
 
+def _js_string(literal: str) -> str:
+    if literal.startswith('"'):
+        try:
+            value = json.loads(literal)
+        except ValueError:
+            return literal[1:-1]
+        return value if isinstance(value, str) else ""
+    quote = literal[0]
+    return literal[1:-1].replace("\\" + quote, quote)
+
+
+def _shell_command_text(tool_name: str, args: object) -> str:
+    """The shell command(s) a tool call ran, one per line; "" for any other tool."""
+    if not isinstance(args, str):
+        return ""
+    if tool_name == "exec":
+        return "\n".join(_js_string(literal) for literal in _CODE_MODE_CMD_RE.findall(args))
+    if tool_name not in _SHELL_TOOLS:
+        return ""
+    try:
+        parsed = json.loads(args)
+    except ValueError:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    return _command_text(parsed.get("cmd") or parsed.get("command"))
+
+
 def _code_mode_tool(item: dict) -> "tuple[str, dict]":
     details = env.log_tool_details
     content = env.log_tool_content
@@ -616,6 +650,7 @@ def _code_mode_tool(item: dict) -> "tuple[str, dict]":
             "input.value": redact_content(content, command),
             "output.value": redact_content(content, _json_text(item.get("aggregated_output"))),
             "tool.command": redact_content(details, command),
+            **skill_command_attributes(command),
         }
     if item_type == "FileChange":
         changes = item.get("changes")
@@ -768,6 +803,8 @@ def _build_and_send_spans(
             tool_attrs["openinference.span.kind"] = kind
             del tool_attrs["tool.name"]
             tool_attrs.pop("tool.id", None)
+        else:
+            tool_attrs.update(skill_command_attributes(_shell_command_text(tool_name, args_raw)))
         tool_span_id = generate_span_id()
         child_start = entry.get("start_ts") or turn["turn_start_ms"]
         child_end = entry.get("end_ts") or child_start

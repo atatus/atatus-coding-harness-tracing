@@ -22,6 +22,7 @@ from core.common import (
     send_span,
     send_span_async,
     skill_name_attributes,
+    skill_read_attributes,
     tool_detail_attributes,
 )
 from core.event_model import TurnEndReason
@@ -155,6 +156,12 @@ def _tool_attributes(input_json: dict) -> dict:
             attrs[key] = redact_content(env.log_tool_details, str(value))
     if tool_name_lc == "skill" and isinstance(tool_input_raw, dict):
         attrs.update(skill_name_attributes(tool_input_raw.get("skill"), trigger=SKILL_TRIGGER_MODEL))
+    elif tool_name_lc in ("view", "read_file", "read") and isinstance(tool_input_raw, dict):
+        attrs.update(
+            skill_read_attributes(
+                tool_input_raw.get("path") or tool_input_raw.get("filePath") or tool_input_raw.get("file_path")
+            )
+        )
     return {"name": tool_name, "attrs": attrs}
 
 

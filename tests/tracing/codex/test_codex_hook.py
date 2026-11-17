@@ -1175,6 +1175,93 @@ class TestBuildAndSendSpans:
             assert "user.login_id" not in attrs
 
 
+_SKILL_READ = "sed -n '1,240p' .agents/skills/release-notes/SKILL.md"
+
+
+def _call(tool, args, children=None):
+    entry = {
+        "tool": tool,
+        "args": args,
+        "output": "ok",
+        "call_id": "c1",
+        "start_ts": _ms(1),
+        "end_ts": _ms(5),
+        "decision": None,
+    }
+    if children:
+        entry["children"] = children
+    return entry
+
+
+class TestSkillFileReads:
+    def _tools(self, *calls):
+        sent = []
+        with mock.patch(
+            "tracing.codex.hooks.handlers.send_span_to_backend", side_effect=lambda p: (sent.append(p), True)[1]
+        ):
+            _build_and_send_spans("sess-1", "turn-1", _turn(list(calls)))
+        return [_string_attrs(s) for s in sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][1:]]
+
+    @pytest.mark.parametrize(
+        "tool, args",
+        [
+            ("exec_command", json.dumps({"cmd": _SKILL_READ, "workdir": "/repo", "yield_time_ms": 10000})),
+            ("shell", json.dumps({"command": ["bash", "-lc", "cat .agents/skills/release-notes/SKILL.md"]})),
+            ("shell_command", json.dumps({"command": "head -80 ~/.codex/skills/release-notes/SKILL.md"})),
+            ("exec", 'const r = await tools.exec_command({cmd:"cat .agents/skills/release-notes/SKILL.md"});'),
+            ("exec", f"const r = await tools.exec_command({json.dumps({'cmd': _SKILL_READ, 'workdir': '/repo'})});"),
+            ("exec", "await tools.exec_command({cmd: 'python3 .agents/skills/release-notes/scripts/draft.py'});"),
+            (
+                "exec",
+                "const r = await Promise.allSettled([\n"
+                '  tools.exec_command({"cmd":"git status","workdir":"/repo"}),\n'
+                f"  tools.exec_command({json.dumps({'cmd': _SKILL_READ})}),\n"
+                "]);",
+            ),
+            ("exec", 'await tools.exec_command({"cmd":"cat \\".agents/skills/release-notes/SKILL.md\\""});'),
+        ],
+    )
+    def test_a_shell_read_of_a_skill_file_is_an_implicit_activation(self, tool, args):
+        [attrs] = self._tools(_call(tool, args))
+        assert attrs["tool.skill_name"] == "release-notes"
+        assert attrs["skill.trigger"] == "implicit"
+
+    def test_an_exec_that_ran_tools_marks_the_command_not_the_wrapper(self):
+        script = f"await tools.exec_command({json.dumps({'cmd': _SKILL_READ})});"
+        children = [_child(_command("exec-cmd", cmd=_SKILL_READ), 1.1, 1.2), _child(_command("exec-ls"), 1.3, 1.4)]
+        wrapper, read, other = self._tools(_call("exec", script, children))
+        assert "tool.skill_name" not in wrapper
+        assert read["tool.skill_name"] == "release-notes"
+        assert read["skill.trigger"] == "implicit"
+        assert "tool.skill_name" not in other
+
+    @pytest.mark.parametrize(
+        "tool, args",
+        [
+            ("exec_command", json.dumps({"cmd": "grep -n name .agents/skills/release-notes/SKILL.md"})),
+            ("exec_command", json.dumps({"cmd": "cat .agents/skills/release-notes/references/style.md"})),
+            ("apply_patch", "*** Update File: .agents/skills/release-notes/SKILL.md"),
+            ("view_image", json.dumps({"path": ".agents/skills/release-notes/SKILL.md"})),
+            ("exec", "await tools.exec_command({cmd: 'ls .agents/skills/release-notes'});"),
+            ("exec", "const path = '.agents/skills/release-notes/SKILL.md';"),
+        ],
+    )
+    def test_anything_else_is_not_an_activation(self, tool, args):
+        [attrs] = self._tools(_call(tool, args))
+        assert "tool.skill_name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        script = f"await tools.exec_command({json.dumps({'cmd': _SKILL_READ})});"
+        spans = self._tools(
+            _call("exec_command", json.dumps({"cmd": _SKILL_READ})),
+            _call("exec", script),
+            _call("exec", script, [_child(_command("exec-cmd", cmd=_SKILL_READ), 1.1, 1.2)]),
+        )
+        assert not any("tool.skill_name" in attrs or "skill.trigger" in attrs for attrs in spans)
+
+
 # ---------------------------------------------------------------------------
 # _handle_notify end-to-end
 # ---------------------------------------------------------------------------
