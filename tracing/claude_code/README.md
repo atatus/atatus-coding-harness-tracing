@@ -148,6 +148,44 @@ every span in a range, so a copy on the turn would count the same usage twice.
 `llm.token_count.prompt` is cache-inclusive (`input + cache_read + cache_write`), and
 `prompt_details.input` is sent explicitly rather than left to be derived by subtraction.
 
+## Workflows
+
+A `Workflow` tool run lands in the trace of the prompt that launched it:
+
+```
+Turn N                          CHAIN   the root; held until the main thread's final reply
+└── LLM call k: <model>         LLM
+    └── Workflow                TOOL    workflow.run_id, workflow.task_id, workflow.name
+        ├── Workflow run: <name>    CHAIN   status, agent counts, run totals (no token counts)
+        │   ├── Phase 1: <title>    CHAIN
+        │   │   └── Agent 1: <label>    AGENT   its own LLM and tool spans underneath
+        │   └── Agent 2: <label>        AGENT   an agent outside any phase
+        └── LLM call …          LLM     the reaction turn to the completion
+```
+
+- **When spans arrive.** Each agent's spans are sent when that agent stops, from its own `SubagentStop`
+  hook. The workflow and phase spans are sent once the workflow's end is known: its completion
+  notification, its run file naming that task, a resume of the same run, or `SessionEnd`. The root is
+  sent last, with the main thread's final reply as its `output.value` and `workflow.count`,
+  `workflow.failed_count` and `trace.release_reason`.
+- **Status.** `workflow.status` is `completed` or `stopped` (OK), or `failed` or `incomplete` (ERROR).
+  A failed agent is an ERROR span with its partial work; an agent cut off by a stop has
+  `workflow.agent_state = interrupted`.
+- **Privacy.** Workflow, phase and agent names come from the script, so they follow
+  `ATATUS_LOG_TOOL_DETAILS` (off: `Workflow run`, `Phase 2`, `Agent 3`). An agent's output and every
+  error text follow `ATATUS_LOG_TOOL_CONTENT`, which is off by default.
+- **Background commands.** A `Bash` call with `run_in_background` is followed the same way: its
+  completion continues the launching trace under the `Bash` span.
+- **Killed sessions.** A session killed mid-workflow fires no `SessionEnd`. The next Claude Code session to
+  start (or run its periodic clean-up) finalizes that session's open workflows as `incomplete` and sends its held
+  traces with `trace.release_reason = sweep`, once the killed session has been idle for an hour and its Claude
+  Code process is gone. Sessions idle for more than a week are left alone.
+- **Switch.** `ATATUS_TRACE_WORKFLOWS=false` turns all of this off.
+- **Log lines.** Each workflow event writes one line through the always-on error logger, so it
+  carries the `[atatus:error]` prefix even when nothing is wrong: `workflow registered`, `exported`,
+  `deferred`, `finalized`, `dropped` (with a reason) and `drift` (an unrecognised Claude Code file
+  shape). Every line names the session, trace, run and task.
+
 ## Default Settings
 
 | Setting | Default |

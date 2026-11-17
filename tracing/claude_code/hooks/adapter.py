@@ -129,6 +129,25 @@ def resolve_agent_state(input_json: dict, agent_id: str) -> StateManager:
     return _state_for(agent_state_key(session_key, agent_id))
 
 
+def state_dir() -> Path:
+    return STATE_DIR
+
+
+def existing_state(state_key: str) -> Optional[StateManager]:
+    """The state file for ``state_key`` if it is on disk. Unlike ``_state_for`` it never
+    creates one, so a reader that runs after a file was deleted does not bring it back."""
+    path = STATE_DIR / f"state_{state_key}.json"
+    if not state_key or not path.is_file():
+        return None
+    return StateManager(state_dir=STATE_DIR, state_file=path, lock_path=STATE_DIR / f".lock_{state_key}")
+
+
+def existing_agent_state(session_key: str, agent_id: str) -> Optional[StateManager]:
+    if not session_key or not agent_id:
+        return None
+    return existing_state(agent_state_key(session_key, agent_id))
+
+
 def discard_agent_state(state: StateManager) -> None:
     if state.state_file is not None:
         state.state_file.unlink(missing_ok=True)

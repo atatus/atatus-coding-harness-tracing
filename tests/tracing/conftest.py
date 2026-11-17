@@ -36,3 +36,12 @@ def synchronous_span_send(monkeypatch):
     exercise the fork paths themselves re-set this env var.
     """
     monkeypatch.setenv("ATATUS_DISABLE_FORK", "true")
+
+
+@pytest.fixture(autouse=True)
+def isolated_claude_state_dir(tmp_path_factory, monkeypatch):
+    """The Claude stale-session sweep runs from SessionStart and the periodic gc and scans the
+    state directory; no test may reach the developer's real one."""
+    import tracing.claude_code.hooks.adapter as claude_adapter
+
+    monkeypatch.setattr(claude_adapter, "STATE_DIR", tmp_path_factory.mktemp("claude-state"))
