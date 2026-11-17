@@ -233,7 +233,10 @@ def _output_messages(content: str, tool_calls: list) -> str:
             arguments = json.dumps(call.get("args") or {})
         except (TypeError, ValueError):
             arguments = "{}"
-        calls.append({"tool_call.function": {"name": name, "arguments": arguments}})
+        # The same arguments the tool span keeps behind tool content; prompts alone must not send them.
+        calls.append(
+            {"tool_call.function": {"name": name, "arguments": redact_content(env.log_tool_content, arguments)}}
+        )
     if calls:
         message["message.tool_calls"] = calls
     return json.dumps([message])
