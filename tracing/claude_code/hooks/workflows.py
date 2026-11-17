@@ -25,6 +25,11 @@ AGENT_EXPORTED_KEY = "workflow_exported"
 MARKERS_KEY = "workflow_markers"
 REGISTRY_TTL_MS = 24 * 3600 * 1000
 
+SWEEP_IDLE_S = 3600
+SWEEP_MAX_AGE_S = 7 * 24 * 3600
+SWEEP_MAX_SESSIONS = 50
+SWEEP_MAX_CANDIDATES = 500
+
 COMPUTED_TASK_PREFIX = "[Workflow harness — computed task]"
 
 _RUN_STATUS = {"completed": "completed", "failed": "failed", "killed": "stopped"}
@@ -352,3 +357,46 @@ def chain_span(
 
 def _int(value: object) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def stale_session_keys(state_dir: Path, now_s: float, current_key: str) -> list:
+    """Other sessions' main state files idle for more than an hour and less than a week, newest
+    first, that mention a workflow at all. The substring check is a cheap filter before the
+    caller parses a file; most idle sessions never ran a workflow."""
+    candidates = []
+    try:
+        paths = list(state_dir.glob("state_*.json"))
+    except OSError:
+        return []
+    for path in paths:
+        key = path.name[len("state_") : -len(".json")]
+        if "__agent_" in key or key == current_key:
+            continue
+        try:
+            changed = path.stat().st_mtime
+        except OSError:
+            continue
+        if SWEEP_IDLE_S < now_s - changed <= SWEEP_MAX_AGE_S:
+            candidates.append((changed, key, path))
+    keys = []
+    for _, key, path in sorted(candidates, reverse=True)[:SWEEP_MAX_CANDIDATES]:
+        try:
+            if WORKFLOW_KIND.encode() in path.read_bytes():
+                keys.append(key)
+        except OSError:
+            continue
+    return keys
+
+
+def agents_recently_active(state_dir: Path, key: str, now_s: float) -> bool:
+    try:
+        paths = list(state_dir.glob(f"state_{key}__agent_*.json"))
+    except OSError:
+        return False
+    for path in paths:
+        try:
+            if now_s - path.stat().st_mtime <= SWEEP_IDLE_S:
+                return True
+        except OSError:
+            continue
+    return False

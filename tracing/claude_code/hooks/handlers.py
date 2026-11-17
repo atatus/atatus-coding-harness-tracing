@@ -57,14 +57,18 @@ from tracing.claude_code.hooks import workflows
 from tracing.claude_code.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
+    _get_grandparent_pid,
+    _is_pid_alive,
     check_requirements,
     discard_agent_state,
     ensure_session_initialized,
     existing_agent_state,
+    existing_state,
     gc_stale_state_files,
     resolve_agent_state,
     resolve_session,
     resolve_transcript_path,
+    state_dir,
 )
 from tracing.claude_code.hooks.span_renderer import render_event_graph
 from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
@@ -184,6 +188,7 @@ def _handle_session_start(input_json: dict) -> None:
     state = resolve_session(input_json)
     ensure_session_initialized(state, input_json)
     _gc_workflow_entries(state)
+    _sweep_stale_sessions(state.get("session_id") or "")
     log(f"Session started: {state.get('session_id')}")
 
 
@@ -1332,7 +1337,14 @@ def _workflow_entry(
         "turn_id": str(turn_id or ""),
         "launch_started_ms": int(launch_started_ms),
         "launched_at_ms": int(launched_at_ms),
+        "claude_pid": _claude_pid(),
     }
+
+
+def _claude_pid() -> int:
+    """The Claude Code process, so a later sweep can tell a killed session from a quiet one."""
+    pid = _get_grandparent_pid()
+    return int(pid) if pid.isdigit() else 0
 
 
 def _background_shell_id(result: object) -> str:
@@ -1807,13 +1819,14 @@ def _background_agent_for_notification(state, input_json: dict) -> "tuple[str, d
     return None
 
 
-def _periodic_gc(trace_count: str) -> None:
+def _periodic_gc(trace_count: str, current_key: str = "") -> None:
     try:
         count = int(trace_count or "0")
     except (ValueError, TypeError):
         count = 0
     if count % 5 == 0:
         gc_stale_state_files()
+        _sweep_stale_sessions(current_key)
 
 
 @dataclass
@@ -2152,7 +2165,7 @@ def _export_stopped_turn(state, input_json: dict) -> None:
     if export is None:
         _emit_abandoned_turn(state)
         _acknowledge_exported_turn(state, trace_id, [], {})
-        _periodic_gc(trace_count)
+        _periodic_gc(trace_count, state.get("session_id") or "")
         return
 
     # The ack travels into the detached send rather than the delivery decision
@@ -2163,7 +2176,7 @@ def _export_stopped_turn(state, input_json: dict) -> None:
 
     def _settle() -> None:
         _acknowledge_exported_turn(state, trace_id, export.observations, export.subagents, turn_key)
-        _periodic_gc(trace_count)
+        _periodic_gc(trace_count, state.get("session_id") or "")
 
     if not export.payload:
         _settle()
@@ -2214,7 +2227,7 @@ def settle_exported_turn(
         state_dir=Path(state_dir), state_file=Path(state_file), lock_path=Path(lock_path) if lock_path else None
     )
     _acknowledge_exported_turn(state, trace_id, list(ToolBuffer._decode(observations).values()), subagents, turn_key)
-    _periodic_gc(trace_count)
+    _periodic_gc(trace_count, state.get("session_id") or "")
 
 
 def _handle_subagent_start(input_json: dict) -> None:
@@ -2962,6 +2975,36 @@ def _gc_workflow_entries(state) -> None:
             state._write(data)
     except Exception as exc:
         error(f"Failed to drop old workflow entries: {exc}")
+
+
+def _sweep_stale_sessions(current_key: str) -> None:
+    """A killed session fires no SessionEnd, so its held traces would wait forever. A later
+    session finalizes its open workflows and sends them, once its Claude Code process is gone
+    and nothing in it has moved for an hour. A reused pid only defers the sweep."""
+    if not workflows.enabled():
+        return
+    now_s = time.time()
+    directory = state_dir()
+    swept = 0
+    for key in workflows.stale_session_keys(directory, now_s, current_key):
+        if swept >= workflows.SWEEP_MAX_SESSIONS:
+            break
+        state = existing_state(key)
+        if state is None:
+            continue
+        open_entries = [
+            entry
+            for entry in _background_agents(state).values()
+            if entry.get("kind") == workflows.WORKFLOW_KIND and not entry.get("finalized_at_ms")
+        ]
+        if not open_entries or workflows.agents_recently_active(directory, key, now_s):
+            continue
+        if any(isinstance(e.get("claude_pid"), int) and _is_pid_alive(e["claude_pid"]) for e in open_entries):
+            continue
+        _check_workflows(state, final_reason="sweep")
+        _release_all_held_spans(state, reason="sweep")
+        swept += 1
+        workflows.wf_log("released", reason="sweep", session=key)
 
 
 def _handle_subagent_stop(input_json: dict) -> None:

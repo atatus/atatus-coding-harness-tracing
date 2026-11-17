@@ -176,6 +176,10 @@ Turn N                          CHAIN   the root; held until the main thread's f
   error text follow `ATATUS_LOG_TOOL_CONTENT`, which is off by default.
 - **Background commands.** A `Bash` call with `run_in_background` is followed the same way: its
   completion continues the launching trace under the `Bash` span.
+- **Killed sessions.** A session killed mid-workflow fires no `SessionEnd`. The next Claude Code session to
+  start (or run its periodic clean-up) finalizes that session's open workflows as `incomplete` and sends its held
+  traces with `trace.release_reason = sweep`, once the killed session has been idle for an hour and its Claude
+  Code process is gone. Sessions idle for more than a week are left alone.
 - **Switch.** `ATATUS_TRACE_WORKFLOWS=false` turns all of this off.
 - **Log lines.** Each workflow event writes one line through the always-on error logger, so it
   carries the `[atatus:error]` prefix even when nothing is wrong: `workflow registered`, `exported`,
