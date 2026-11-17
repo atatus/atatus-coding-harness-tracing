@@ -52,6 +52,7 @@ from core.common import (
     error,
     generate_span_id,
     generate_trace_id,
+    invoked_skill_attributes,
     log,
     mcp_tool_attributes,
     redact_content,
@@ -382,6 +383,7 @@ def _build_turn_spans(
         )
     if model_label and model_label != model_id:
         root_attrs["antigravity.model_label"] = model_label
+    root_attrs.update(invoked_skill_attributes(turn.get("invoked_skills") or []))
     effort, thinking = effort_from_label(model_label)
     if effort:
         root_attrs[LLM_EFFORT_ATTR] = effort

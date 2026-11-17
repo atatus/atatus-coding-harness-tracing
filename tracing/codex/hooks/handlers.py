@@ -39,6 +39,7 @@ from core.common import (
     generate_span_id,
     generate_trace_id,
     get_timestamp_ms,
+    invoked_skill_attributes,
     log,
     mcp_tool_attributes,
     normalize_effort,
@@ -75,6 +76,9 @@ _SHELL_TOOLS = frozenset({"exec_command", "shell", "shell_command", "local_shell
 
 # `cmd` of each tools.exec_command({...}) in a Code Mode script, quoted key or not.
 _CODE_MODE_CMD_RE = re.compile(r"""(?:"cmd"|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)""")
+
+_SELECTED_SKILL_KIND = "skills.selected_skill_instructions"
+_SELECTED_SKILL_RE = re.compile(r"^\s*<skill>\s*<name>([^<\n]+)</name>\s*<path>")
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +173,26 @@ def _message_text(content) -> str:
     return "\n".join(parts)
 
 
+def _selected_skills(payload: dict) -> list:
+    """Skills the user named for the turn; Codex injects each one's instructions as a user-role part."""
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return []
+    metadata = payload.get("internal_chat_message_metadata_passthrough")
+    kinds = metadata.get("content_item_kinds") if isinstance(metadata, dict) else None
+    names = []
+    for index, part in enumerate(content):
+        text = part.get("text") if isinstance(part, dict) else None
+        if not isinstance(text, str):
+            continue
+        if isinstance(kinds, list) and (index >= len(kinds) or kinds[index] != _SELECTED_SKILL_KIND):
+            continue
+        match = _SELECTED_SKILL_RE.match(text)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
 def _attach_code_mode_items(wrappers: list, items: list, call_ids: set) -> None:
     # Items never name their exec call, and a yielded cell's items land after later calls, so pair by start time.
     for child in items:
@@ -218,6 +242,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
     # Fallback prompt source, used only when no user_message event arrives. See the
     # response_item/message branch below for why it is collected separately.
     user_messages: list = []
+    invoked_skills: list = []
     assistant_output = ""
     model = ""
     effort = ""
@@ -331,6 +356,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 # Collected rather than assigned so a user_message event, when present, still wins.
                 if outer == "response_item" and ptype == "message":
                     if payload.get("role") == "user":
+                        invoked_skills.extend(_selected_skills(payload))
                         text = _message_text(payload.get("content"))
                         if text and not text.lstrip().startswith("<environment_context>"):
                             user_messages.append(text)
@@ -524,6 +550,7 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
         "sandbox_mode": sandbox_mode,
         "token_usage": token_usage,
         "tool_calls": tool_calls,
+        "invoked_skills": invoked_skills,
     }
 
 
@@ -741,6 +768,7 @@ def _build_and_send_spans(
         attrs["codex.sandbox_mode"] = turn["sandbox_mode"]
     if turn.get("duration_ms") is not None:
         attrs["codex.turn.duration_ms"] = turn["duration_ms"]
+    attrs.update(invoked_skill_attributes(turn.get("invoked_skills") or []))
 
     llm_system, llm_provider = _llm_identity(turn.get("model"), turn.get("model_provider"))
     attrs["llm.system"] = llm_system

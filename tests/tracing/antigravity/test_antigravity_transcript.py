@@ -903,3 +903,52 @@ class TestBackgroundTaskResults:
         assert step["running"] is True
         assert step["failed"] is False
         assert step["exit_code"] is None
+
+
+def _user_input(content):
+    return {
+        "step_index": 0,
+        "type": "USER_INPUT",
+        "source": "USER_EXPLICIT",
+        "created_at": "2026-06-09T16:00:00Z",
+        "content": content,
+    }
+
+
+def _invoked(name):
+    return (
+        f"<SKILL>The user has explicitly invoked the ({name}) skill. You must strictly follow the instructions "
+        "in this skill to proceed.</SKILL>"
+    )
+
+
+class TestUserInvokedSkills:
+    def _turn(self, tmp_path, content):
+        path = tmp_path / "transcript.jsonl"
+        _write_jsonl(path, [_user_input(content)])
+        return parse_transcript(path)[0]
+
+    def test_the_marker_after_the_request_names_the_skill(self, tmp_path):
+        turn = self._turn(
+            tmp_path,
+            "<USER_REQUEST>draft the notes</USER_REQUEST>\n<ADDITIONAL_METADATA>\n"
+            f"{_invoked('release-notes')}\n</ADDITIONAL_METADATA>",
+        )
+        assert turn["invoked_skills"] == ["release-notes"]
+        assert turn["user_input"] == "draft the notes"
+
+    def test_several_markers_keep_their_order(self, tmp_path):
+        turn = self._turn(
+            tmp_path, f"<USER_REQUEST>go</USER_REQUEST>\n{_invoked('release-notes')}\n{_invoked('changelog')}"
+        )
+        assert turn["invoked_skills"] == ["release-notes", "changelog"]
+
+    def test_a_marker_typed_into_the_request_is_not_an_invocation(self, tmp_path):
+        turn = self._turn(tmp_path, f"<USER_REQUEST>{_invoked('release-notes')}</USER_REQUEST>")
+        assert turn["invoked_skills"] == []
+
+    def test_no_request_block_means_no_invocation(self, tmp_path):
+        assert self._turn(tmp_path, _invoked("release-notes"))["invoked_skills"] == []
+
+    def test_a_plain_turn_invokes_nothing(self, tmp_path):
+        assert self._turn(tmp_path, "<USER_REQUEST>go</USER_REQUEST>")["invoked_skills"] == []

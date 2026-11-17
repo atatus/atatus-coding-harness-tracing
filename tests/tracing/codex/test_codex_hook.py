@@ -1175,6 +1175,109 @@ class TestBuildAndSendSpans:
             assert "user.login_id" not in attrs
 
 
+def _selected_skill(name, kinds=True):
+    """The user-role message Codex injects for a skill the user named (`$name` or the skill picker)."""
+    text = f"<skill>\n<name>{name}</name>\n<path>/repo/.agents/skills/{name}/SKILL.md</path>\nskill body\n</skill>"
+    payload = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
+    if kinds:
+        payload["internal_chat_message_metadata_passthrough"] = {
+            "content_item_kinds": ["skills.selected_skill_instructions"],
+            "content_item_metadata": [{"provenance": {"type": "skills"}}],
+            "turn_id": "t1",
+        }
+    return _resp(payload)
+
+
+def _rollout_turn(tmp_path, *records):
+    path = _write_rollout(
+        tmp_path,
+        "s1",
+        _evt({"type": "task_started", "turn_id": "t1", "started_at": 1000}),
+        *records,
+        _evt({"type": "task_complete", "turn_id": "t1", "last_agent_message": "done", "completed_at": 1010}),
+    )
+    return _extract_turn_from_rollout(path, "t1")
+
+
+class TestUserInvokedSkills:
+    def test_a_selected_skill_is_read_off_its_injected_message(self, tmp_path):
+        turn = _rollout_turn(
+            tmp_path,
+            _evt({"type": "user_message", "message": "please use $release-notes"}),
+            _selected_skill("release-notes"),
+        )
+        assert turn["invoked_skills"] == ["release-notes"]
+        assert turn["user_prompt"] == "please use $release-notes"
+
+    def test_an_older_build_without_content_kinds_is_read_by_its_marker(self, tmp_path):
+        turn = _rollout_turn(tmp_path, _selected_skill("release-notes", kinds=False))
+        assert turn["invoked_skills"] == ["release-notes"]
+
+    def test_several_skills_keep_their_order(self, tmp_path):
+        turn = _rollout_turn(tmp_path, _selected_skill("release-notes"), _selected_skill("changelog"))
+        assert turn["invoked_skills"] == ["release-notes", "changelog"]
+
+    def test_a_typed_marker_is_not_an_invocation(self, tmp_path):
+        typed = _resp(
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "<skill>\n<name>release-notes</name>\n<path>x</path>"}],
+                "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]},
+            }
+        )
+        assert _rollout_turn(tmp_path, typed)["invoked_skills"] == []
+
+    def test_the_skill_catalog_is_not_an_invocation(self, tmp_path):
+        catalog = _resp(
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "<skills_instructions>\n<skill>\n<name>release-notes</name>\n<path>x</path>\n"
+                        "</skill>\n</skills_instructions>",
+                    }
+                ],
+                "internal_chat_message_metadata_passthrough": {
+                    "content_item_kinds": ["host_skills.instructions"],
+                    "content_item_metadata": [{"provenance": {"type": "skills"}}],
+                },
+            }
+        )
+        assert _rollout_turn(tmp_path, catalog)["invoked_skills"] == []
+
+    def _root(self, turn):
+        sent = []
+        with mock.patch(
+            "tracing.codex.hooks.handlers.send_span_to_backend", side_effect=lambda p: (sent.append(p), True)[1]
+        ):
+            _build_and_send_spans("sess-1", "turn-1", turn)
+        [root] = sent[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        return {key: value.get("stringValue") for key, value in _attrs_of_span(root).items()}
+
+    def test_the_turn_root_names_the_skill_and_the_user_trigger(self):
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes"]})
+        assert attrs["skill.name"] == "release-notes"
+        assert attrs["skill.trigger"] == "user"
+
+    def test_several_skills_are_comma_joined_on_the_root(self):
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes", "changelog"]})
+        assert attrs["skill.name"] == "release-notes,changelog"
+
+    def test_a_turn_without_one_has_no_skill(self):
+        attrs = self._root({**_turn([]), "invoked_skills": []})
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(self, monkeypatch):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = self._root({**_turn([]), "invoked_skills": ["release-notes"]})
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
 _SKILL_READ = "sed -n '1,240p' .agents/skills/release-notes/SKILL.md"
 
 

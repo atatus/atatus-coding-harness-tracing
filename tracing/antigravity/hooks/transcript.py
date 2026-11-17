@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 _USER_REQUEST_RE = re.compile(r"<USER_REQUEST>(.*?)</USER_REQUEST>", re.DOTALL)
+_INVOKED_SKILL_RE = re.compile(r"<SKILL>The user has explicitly invoked the \(([^)\n]+)\) skill")
 _ADDITIONAL_METADATA_RE = re.compile(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", re.DOTALL)
 _USER_SETTINGS_CHANGE_RE = re.compile(r"<USER_SETTINGS_CHANGE>.*?</USER_SETTINGS_CHANGE>", re.DOTALL)
 _MODEL_SELECTION_RE = re.compile(
@@ -98,6 +99,17 @@ def _extract_user_input(content: str) -> str:
     stripped = _ADDITIONAL_METADATA_RE.sub("", content)
     stripped = _USER_SETTINGS_CHANGE_RE.sub("", stripped)
     return stripped.strip()
+
+
+def _extract_invoked_skills(content: str) -> list[str]:
+    """Skills the user invoked, from the markers Antigravity appends after the request block.
+
+    Only after ``</USER_REQUEST>``: inside it the same words are something the user typed.
+    """
+    _, closed, appended = content.partition("</USER_REQUEST>")
+    if not closed:
+        return []
+    return [name.strip() for name in _INVOKED_SKILL_RE.findall(appended)]
 
 
 def _extract_model_label(content: str) -> str:
@@ -252,6 +264,7 @@ def _build_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
 
     turn: dict[str, Any] = {
         "user_input": _extract_user_input(user_content),
+        "invoked_skills": _extract_invoked_skills(user_content),
         "final_response": "",
         "model_label": _extract_model_label(user_content),
         "max_step_index": 0,

@@ -511,6 +511,53 @@ class TestMcpToolCall:
         assert "mcp.tool.name" not in attrs
 
 
+_INVOKED = (
+    "<USER_REQUEST>draft the notes</USER_REQUEST>\n<ADDITIONAL_METADATA>\n<SKILL>The user has explicitly invoked "
+    "the (release-notes) skill. You must strictly follow the instructions in this skill to proceed.</SKILL>\n"
+    "</ADDITIONAL_METADATA>"
+)
+
+
+def _turn_root_attrs(tmp_path, captured_spans, user_content: str) -> dict:
+    transcript = tmp_path / "transcript.jsonl"
+    _write_jsonl(
+        transcript,
+        [
+            {"step_index": 0, "type": "USER_INPUT", "created_at": "2026-06-09T16:00:00Z", "content": user_content},
+            {"step_index": 1, "type": "PLANNER_RESPONSE", "created_at": "2026-06-09T16:00:01Z", "content": "done"},
+        ],
+    )
+    stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
+    with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+        stop()
+    (root,) = _by_kind(captured_spans, "CHAIN")
+    return {key: value.get("stringValue") for key, value in _get_span_attrs(root).items()}
+
+
+class TestUserInvokedSkill:
+    def test_the_turn_root_names_the_skill_and_the_user_trigger(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _turn_root_attrs(tmp_path, captured_spans, _INVOKED)
+        assert attrs["skill.name"] == "release-notes"
+        assert attrs["skill.trigger"] == "user"
+
+    def test_a_plain_turn_has_no_skill(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _turn_root_attrs(tmp_path, captured_spans, "<USER_REQUEST>go</USER_REQUEST>")
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+    def test_left_out_without_tool_details(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_DETAILS", "false")
+        attrs = _turn_root_attrs(tmp_path, captured_spans, _INVOKED)
+        assert "skill.name" not in attrs
+        assert "skill.trigger" not in attrs
+
+
 _SKILL_FILE = "/home/dev/.gemini/antigravity/skills/release-notes/SKILL.md"
 
 
