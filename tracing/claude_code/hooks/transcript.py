@@ -185,6 +185,7 @@ def parse_claude_transcript(
 
             content = message.get("content")
             message_id = _string(message.get("id"))
+            active_skill = active_skill_of(entry)
             # Claude Code v2 writes one assistant response (one message.id) as
             # several records -- thinking / text / each tool_use on its own line,
             # each with a distinct record uuid. Fold those back into a single
@@ -210,6 +211,7 @@ def parse_claude_transcript(
                     effort=_effort(entry) or None,
                     reasoning=_assistant_reasoning(content) or None,
                     usage=_usage(message.get("usage")),
+                    active_skill=active_skill or None,
                 )
                 graph.events.append(model_event)
                 sequence += 1
@@ -234,6 +236,8 @@ def parse_claude_transcript(
                     model_event.model = _string(message.get("model")) or None
                 if not model_event.effort:
                     model_event.effort = _effort(entry) or None
+                if not model_event.active_skill:
+                    model_event.active_skill = active_skill or None
                 record_usage = _usage(message.get("usage"))
                 existing_total = model_event.usage.total_tokens if model_event.usage else -1
                 if record_usage.total_tokens > existing_total:
@@ -384,6 +388,11 @@ def is_conversation_record(entry: dict[str, Any]) -> bool:
     return record_type is None or record_type in _CONVERSATION_RECORD_TYPES
 
 
+def active_skill_of(entry: dict[str, Any]) -> str:
+    """The skill Claude Code attributes an assistant record's model call to."""
+    return _string(entry.get("attributionSkill")) if entry.get("type") == "assistant" else ""
+
+
 _UNIDENTIFIED_PREFIX = "assistant-line-"
 
 
@@ -523,4 +532,10 @@ def _string(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-__all__ = ["is_conversation_record", "is_unidentified_model_call", "parse_claude_transcript", "transcript_window"]
+__all__ = [
+    "active_skill_of",
+    "is_conversation_record",
+    "is_unidentified_model_call",
+    "parse_claude_transcript",
+    "transcript_window",
+]

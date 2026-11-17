@@ -10,6 +10,7 @@ from typing import Any
 from core.common import (
     LLM_EFFORT_ATTR,
     SKILL_TRIGGER_MODEL,
+    active_skill_attributes,
     build_multi_span,
     build_span,
     env,
@@ -170,6 +171,7 @@ def _span_fields(event: BaseEvent, model_call_number: int, prompt_number: int) -
             _put_content(attrs, "llm.reasoning", event.reasoning, env.log_prompts)
         if event.agent_id:
             attrs["subagent.id"] = event.agent_id
+        attrs.update(active_skill_attributes(event.active_skill))
         if event.usage is not None and not event.usage.is_empty():
             prompt_tokens = event.usage.prompt_tokens
             completion_tokens = event.usage.output_tokens

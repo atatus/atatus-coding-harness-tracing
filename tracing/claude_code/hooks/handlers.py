@@ -16,6 +16,7 @@ from pathlib import Path
 from core.common import (
     LLM_EFFORT_ATTR,
     StateManager,
+    active_skill_attributes,
     build_multi_span,
     build_span,
     debug_dump,
@@ -63,6 +64,7 @@ from tracing.claude_code.hooks.adapter import (
 from tracing.claude_code.hooks.span_renderer import render_event_graph, tool_identity_attributes
 from tracing.claude_code.hooks.tool_buffer import TRUNCATED_BODY, ToolBuffer, ToolObservation
 from tracing.claude_code.hooks.transcript import (
+    active_skill_of,
     is_conversation_record,
     is_unidentified_model_call,
     parse_claude_transcript,
@@ -768,6 +770,28 @@ def _scan_transcript_for_usage(
         usage_totals.completion += _usage_int(usage, "output_tokens")
 
     return output, usage_totals, model
+
+
+def _unanimous_active_skill(transcript: Path, start_line: int, start_offset: "int | None" = None) -> str:
+    """The skill every model call in the window ran under; "" when any call had another or none.
+
+    One flat span carries the whole turn's tokens, so a skill only names it when it owns all of them.
+    """
+    skills_by_call: dict = {}
+    for line_index, line in transcript_window(transcript, start_line, start_offset):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict) or not is_conversation_record(entry):
+            continue
+        msg = entry.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        call = msg.get("id") or f"line-{line_index}"
+        skills_by_call[call] = skills_by_call.get(call) or active_skill_of(entry)
+    skills = set(skills_by_call.values())
+    return skills.pop() if len(skills) == 1 else ""
 
 
 def _payload_effort(input_json: dict) -> str:
@@ -1802,6 +1826,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
         "openinference.span.kind": "LLM",
         **({"llm.model_name": model} if model else {}),
         **usage.token_count_attrs(),
+        **active_skill_attributes(transcript and _unanimous_active_skill(transcript, start_line, start_offset)),
         "input.value": redacted_prompt,
         "output.value": redacted_output,
         "llm.output_messages": json.dumps(output_messages),
