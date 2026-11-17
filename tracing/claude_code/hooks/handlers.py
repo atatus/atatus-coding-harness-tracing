@@ -50,6 +50,7 @@ from core.turn_lifecycle import (
     turn_end_attributes,
     turn_status,
 )
+from tracing.claude_code.hooks import workflows
 from tracing.claude_code.hooks.adapter import (
     SCOPE_NAME,
     SERVICE_NAME,
@@ -101,7 +102,7 @@ def _read_stdin() -> dict:
     return payload
 
 
-_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_-]")
+_UNSAFE_NAME = workflows.UNSAFE_NAME
 
 
 def _debug_dump_payload(payload: object) -> None:
@@ -213,6 +214,8 @@ def _handle_post_tool_use(input_json: dict) -> None:
     is_subagent = bool(input_json.get("agent_id"))
     if not (_has_live_transcript(input_json) or is_subagent) and session_id is None:
         return
+    if not is_subagent and input_json.get("tool_name") == "Workflow":
+        _register_workflow_launch(state, input_json)
 
     if _has_live_transcript(input_json) or is_subagent:
         tool_id = input_json.get("tool_use_id") or generate_trace_id()
@@ -1243,6 +1246,15 @@ def _register_background_agents(
         result = event.output.get("toolUseResult")
         if not isinstance(result, dict) or result.get("status") != "async_launched":
             continue
+        launch = workflows.launch_from_result(result, event.tool_call_id or "") if workflows.enabled() else None
+        if launch is not None:
+            tool_span_id = span_ids.get(event.event_id)
+            if tool_span_id and not nested_parent:
+                started = event.started_at_ms or event.ended_at_ms or get_timestamp_ms()
+                launched[launch.task_id] = _workflow_entry(
+                    launch, trace_id, tool_span_id, event.turn_id, started, event.ended_at_ms or started
+                )
+            continue
         agent_id = result.get("agentId")
         tool_span_id = span_ids.get(event.event_id)
         if not isinstance(agent_id, str) or not agent_id or not tool_span_id:
@@ -1271,6 +1283,74 @@ def _register_background_agents(
         }
     if not launched or state.state_file is None:
         return {}
+    if _store_background_launches(state, trace_id, launched, nested_parent) is None:
+        return {}
+    return launched
+
+
+def _workflow_entry(
+    launch: "workflows.Launch",
+    trace_id: str,
+    tool_span_id: str,
+    turn_id: object,
+    launch_started_ms: int,
+    launched_at_ms: int,
+) -> dict:
+    return {
+        "kind": workflows.WORKFLOW_KIND,
+        "trace_id": trace_id,
+        "tool_span_id": tool_span_id,
+        "tool_use_id": launch.tool_use_id,
+        "run_id": launch.run_id,
+        "run_dir": launch.run_dir,
+        "workflow_name": launch.workflow_name,
+        "turn_id": str(turn_id or ""),
+        "launch_started_ms": int(launch_started_ms),
+        "launched_at_ms": int(launched_at_ms),
+    }
+
+
+def _workflow_tool_attributes(graph) -> dict:
+    if not workflows.enabled():
+        return {}
+    attributes = {}
+    for event in graph.events:
+        if not isinstance(event, ToolEvent) or not isinstance(event.output, dict):
+            continue
+        launch = workflows.launch_from_result(event.output.get("toolUseResult"), event.tool_call_id or "")
+        if launch is not None:
+            attributes[event.event_id] = {
+                "workflow.run_id": launch.run_id,
+                "workflow.task_id": launch.task_id,
+                "workflow.name": redact_content(env.log_tool_details, launch.workflow_name),
+            }
+    return attributes
+
+
+def _register_workflow_launch(state, input_json: dict) -> None:
+    """Register at PostToolUse: an agent can stop inside the launching turn, before its Stop scan."""
+    if not workflows.enabled():
+        return
+    trace_id = state.get("current_trace_id")
+    tool_use_id = input_json.get("tool_use_id") or ""
+    launch = workflows.launch_from_result(input_json.get("tool_response"), tool_use_id)
+    if not trace_id or not tool_use_id or launch is None:
+        return
+    now = get_timestamp_ms()
+    started = state.get(f"tool_{tool_use_id}_start") or ""
+    entry = _workflow_entry(
+        launch,
+        trace_id,
+        _derived_span_id(trace_id, f"tool:{tool_use_id}"),
+        state.get("trace_count"),
+        int(started) if started.isdigit() else now,
+        now,
+    )
+    _store_background_launches(state, trace_id, {launch.task_id: entry})
+
+
+def _store_background_launches(state, trace_id: str, launched: dict, nested_parent: str = "") -> "list[str] | None":
+    """First writer wins; returns the ids this call added, or None when the write failed."""
     try:
         with state._lock():
             data = state._read_safe()
@@ -1294,8 +1374,19 @@ def _register_background_agents(
             state._write(data)
     except Exception as exc:
         error(f"Failed to register background agents: {exc}")
-        return {}
-    return launched
+        return None
+    for task_id in new_ids:
+        entry = launched[task_id]
+        if entry.get("kind") == workflows.WORKFLOW_KIND:
+            workflows.wf_log(
+                "registered",
+                session=state.get("session_id"),
+                trace=trace_id,
+                run=entry.get("run_id"),
+                task=task_id,
+                name=entry.get("workflow_name"),
+            )
+    return new_ids
 
 
 HELD_SPANS_KEY = "held_spans"
@@ -1758,7 +1849,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             service_name=SERVICE_NAME,
             scope_name=SCOPE_NAME,
             span_id_overrides=span_id_overrides,
-            extra_attributes={root_event.event_id: root_attrs},
+            extra_attributes={root_event.event_id: root_attrs, **_workflow_tool_attributes(graph)},
             common_attributes=common_attrs,
             root_parent_span_id=trace_span_id if continuation else "",
             skip_root=continuation,

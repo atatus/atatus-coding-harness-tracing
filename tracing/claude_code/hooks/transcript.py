@@ -459,7 +459,9 @@ def _content_text(content: Any) -> str:
 
 def _tool_output(entry: dict[str, Any], content: Any) -> Any:
     tool_use_result = entry.get("toolUseResult")
-    if isinstance(tool_use_result, dict) and tool_use_result.get("agentId"):
+    if isinstance(tool_use_result, dict) and (
+        tool_use_result.get("agentId") or (tool_use_result.get("taskId") and tool_use_result.get("runId"))
+    ):
         return {"content": content, "toolUseResult": tool_use_result}
     return content
 

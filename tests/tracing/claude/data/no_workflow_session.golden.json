@@ -1,0 +1,194 @@
+{
+ "spans": [
+  {
+   "attributes": {
+    "llm.message.id": "msg-m1",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "",
+    "turn.id": "2"
+   },
+   "label": "LLM call 1: m#1",
+   "parent": "Turn 2#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "input.value": "{\"command\": \"ls\"}",
+    "openinference.span.kind": "TOOL",
+    "output.value": "{\"stdout\": \"a b\"}",
+    "tool.call.id": "toolu_bash",
+    "tool.command": "ls",
+    "tool.description": "ls",
+    "tool.name": "Bash",
+    "turn.id": "2"
+   },
+   "label": "Bash#1",
+   "parent": "LLM call 1: m#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "llm.message.id": "msg-m2",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "started a background agent",
+    "turn.id": "2"
+   },
+   "label": "LLM call 3: m#1",
+   "parent": "Turn 2#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "llm.message.id": "msg-bg-1",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "",
+    "subagent.id": "bg",
+    "turn.id": "2"
+   },
+   "label": "LLM call 1: m#2",
+   "parent": "Subagent: general-purpose#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "input.value": "{\"command\": \"ls\"}",
+    "openinference.span.kind": "TOOL",
+    "output.value": "a b",
+    "subagent.id": "bg",
+    "tool.call.id": "toolu_bg_bash",
+    "tool.command": "ls",
+    "tool.description": "ls",
+    "tool.name": "Bash",
+    "turn.id": "2"
+   },
+   "label": "Bash#2",
+   "parent": "LLM call 1: m#2",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "llm.message.id": "msg-bg-2",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "listed",
+    "subagent.id": "bg",
+    "turn.id": "2"
+   },
+   "label": "LLM call 2: m#1",
+   "parent": "Subagent: general-purpose#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "input.value": "list the files twice",
+    "openinference.span.kind": "CHAIN",
+    "output.value": "started a background agent",
+    "prompt.id": "p-1",
+    "trace.number": "2",
+    "turn.end_reason": "completed",
+    "turn.id": "2"
+   },
+   "label": "Turn 2#1",
+   "parent": "",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "llm.message.id": "msg-toolu_bg",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "",
+    "turn.id": "2"
+   },
+   "label": "LLM call 2: m#2",
+   "parent": "Turn 2#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "input.value": "{\"prompt\": \"go\", \"subagent_type\": \"general-purpose\"}",
+    "openinference.span.kind": "TOOL",
+    "output.value": "{\"content\": [{\"text\": \"launched\", \"type\": \"text\"}], \"toolUseResult\": {\"agentId\": \"bg\", \"status\": \"async_launched\"}}",
+    "tool.call.id": "toolu_bg",
+    "tool.name": "Agent",
+    "turn.id": "2"
+   },
+   "label": "Agent#1",
+   "parent": "LLM call 2: m#2",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "input.value": "go",
+    "openinference.span.kind": "AGENT",
+    "output.value": "listed",
+    "subagent.background": "true",
+    "subagent.id": "bg",
+    "subagent.type": "general-purpose",
+    "turn.id": "2"
+   },
+   "label": "Subagent: general-purpose#1",
+   "parent": "Agent#1",
+   "status": 1,
+   "trace": "trace#1"
+  },
+  {
+   "attributes": {
+    "llm.message.id": "msg-m3",
+    "llm.model_name": "m",
+    "llm.token_count.completion": 5,
+    "llm.token_count.prompt": 10,
+    "llm.token_count.prompt_details.input": 10,
+    "llm.token_count.total": 15,
+    "openinference.span.kind": "LLM",
+    "output.value": "both listings match",
+    "turn.id": "2"
+   },
+   "label": "LLM call 1: m#3",
+   "parent": "Agent#1",
+   "status": 1,
+   "trace": "trace#1"
+  }
+ ],
+ "state_keys": [
+  "background_agents",
+  "claude.tool_observation_buffer",
+  "held_spans",
+  "last_background_task_ids",
+  "session_id",
+  "tool_count",
+  "trace_count"
+ ]
+}
