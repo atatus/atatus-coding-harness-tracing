@@ -42,6 +42,7 @@ def render_event_graph(
     common_attributes: Mapping[str, Any] | None = None,
     root_parent_span_id: str = "",
     skip_root: bool = False,
+    span_names: Mapping[str, str] | None = None,
 ) -> dict:
     """Render every event in graph order under one trace.
 
@@ -56,6 +57,7 @@ def render_event_graph(
     """
 
     overrides = span_id_overrides or {}
+    names = span_names or {}
     extras = extra_attributes or {}
     common = dict(common_attributes or {})
     event_span_ids: list[str] = []
@@ -88,6 +90,7 @@ def render_event_graph(
         if skip_root and index == 0:
             continue
         name, kind, attrs = _span_fields(event, model_call_number, prompt_number)
+        name = names.get(event.event_id, name)
         for key, value in common.items():
             attrs.setdefault(key, value)
         attrs.update(extras.get(event.event_id, {}))

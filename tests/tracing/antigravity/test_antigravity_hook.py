@@ -850,6 +850,56 @@ class TestRedaction:
         assert "redacted" in attrs["tool.query"]["stringValue"]
         assert "redacted" not in attrs["output.value"]["stringValue"]
 
+    @staticmethod
+    def _llm_tool_calls(captured_spans) -> list:
+        calls = []
+        for payload in _by_kind(captured_spans, "LLM"):
+            for message in json.loads(_get_span_attrs(payload)["llm.output_messages"]["stringValue"]):
+                calls += [c["tool_call.function"] for c in message.get("message.tool_calls", [])]
+        return calls
+
+    def _stop_with_secret_call(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        _write_jsonl(
+            transcript,
+            [
+                {"step_index": 0, "type": "USER_INPUT", "created_at": "2026-06-09T16:00:00Z", "content": "hi"},
+                {
+                    "step_index": 1,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-06-09T16:00:01Z",
+                    "content": "writing",
+                    "tool_calls": [{"name": "write_to_file", "args": {"CodeContent": "API_KEY=s3cr3t-value"}}],
+                },
+                {"step_index": 2, "type": "GENERIC", "created_at": "2026-06-09T16:00:02Z", "content": "ok"},
+            ],
+        )
+        with mock.patch.object(
+            sys, "stdin", new=io.StringIO(json.dumps({"conversationId": "c1", "transcriptPath": str(transcript)}))
+        ):
+            stop()
+
+    def test_llm_tool_call_arguments_follow_tool_content(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        """The planner's tool calls carry the same arguments as the tool span, so prompts alone must not send them."""
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        self._stop_with_secret_call(tmp_path)
+
+        (call,) = self._llm_tool_calls(captured_spans)
+        assert call["name"] == "write_to_file"
+        assert call["arguments"].startswith("<redacted (")
+        assert all("s3cr3t-value" not in json.dumps(_get_span_attrs(p)) for p in _by_kind(captured_spans, "LLM"))
+
+    def test_llm_tool_call_arguments_sent_with_tool_content(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "true")
+        self._stop_with_secret_call(tmp_path)
+
+        (call,) = self._llm_tool_calls(captured_spans)
+        assert json.loads(call["arguments"]) == {"CodeContent": "API_KEY=s3cr3t-value"}
+
 
 # ---------------------------------------------------------------------------
 # main() dispatcher
