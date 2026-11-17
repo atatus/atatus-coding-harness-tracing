@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Optional
 
-from core.common import error
+from core.common import build_span, error
 
 ENV_SWITCH = "ATATUS_TRACE_WORKFLOWS"
 WORKFLOW_KIND = "workflow"
@@ -22,7 +22,17 @@ AGENT_STOP_KEY = "workflow_stop"
 AGENT_FAILURE_KEY = "workflow_failure"
 AGENT_EXPORTED_KEY = "workflow_exported"
 
+MARKERS_KEY = "workflow_markers"
+REGISTRY_TTL_MS = 24 * 3600 * 1000
+
 COMPUTED_TASK_PREFIX = "[Workflow harness — computed task]"
+
+_RUN_STATUS = {"completed": "completed", "failed": "failed", "killed": "stopped"}
+_NOTIFICATION = re.compile(r"\s*<task-notification>")
+_TAG = {
+    name: re.compile(rf"<{name}>\s*(.*?)\s*</{name}>", re.DOTALL)
+    for name in ("task-id", "tool-use-id", "status", "summary")
+}
 
 _AGENT_FILE = re.compile(r"agent-(.+)\.jsonl")
 _SEPARATORS = re.compile(r"[\\/]")
@@ -224,3 +234,121 @@ def _records(transcript: Path):
                     yield record
     except OSError:
         return
+
+
+@dataclass(frozen=True)
+class RunJson:
+    task_id: str
+    status: str
+    error: str
+    start_ms: Optional[int]
+    duration_ms: Optional[int]
+    total_tokens: Optional[int]
+    total_tool_calls: Optional[int]
+    phases: tuple
+
+
+def read_run_json(run_dir: Path, run_id: str, task_id: str) -> Optional[RunJson]:
+    """Claude Code writes it when a run ends and overwrites it on a resume, so it describes the
+    task it names and no other."""
+    try:
+        path = run_dir.parents[1].parent / "workflows" / f"{run_id}.json"
+    except IndexError:
+        return None
+    data = _read_json(path, "run_json")
+    if not isinstance(data, dict) or data.get("taskId") != task_id:
+        return None
+    status = data.get("status")
+    if not isinstance(status, str):
+        drift("run_json", "status")
+        return None
+    phases: list = []
+    progress = data.get("workflowProgress")
+    for item in progress if isinstance(progress, list) else []:
+        if isinstance(item, dict) and item.get("type") == "workflow_phase":
+            index, title = item.get("index"), item.get("title")
+            if isinstance(index, int) and isinstance(title, str) and title not in {t for _, t in phases}:
+                phases.append((index, title))
+    error_text = data.get("error")
+    return RunJson(
+        task_id=task_id,
+        status=status,
+        error=error_text if isinstance(error_text, str) else "",
+        start_ms=_int(data.get("startTime")),
+        duration_ms=_int(data.get("durationMs")),
+        total_tokens=_int(data.get("totalTokens")),
+        total_tool_calls=_int(data.get("totalToolCalls")),
+        phases=tuple(phases),
+    )
+
+
+def map_status(run_status: str) -> Optional[str]:
+    return _RUN_STATUS.get(run_status)
+
+
+@dataclass(frozen=True)
+class Notification:
+    task_id: str
+    tool_use_id: str
+    status: str
+    summary: str
+
+
+def parse_notification(prompt: object) -> Optional[Notification]:
+    if not isinstance(prompt, str) or not _NOTIFICATION.match(prompt):
+        return None
+
+    def tag(name: str) -> str:
+        match = _TAG[name].search(prompt)
+        return match.group(1) if match else ""
+
+    task_id = tag("task-id")
+    if not safe_name(task_id):
+        drift("notification", "task-id")
+        return None
+    return Notification(task_id, tag("tool-use-id"), tag("status"), tag("summary"))
+
+
+def transcript_end_ms(transcript: Path) -> Optional[int]:
+    last = None
+    for record in _records(transcript):
+        stamp = record.get("timestamp")
+        if isinstance(stamp, str):
+            try:
+                last = int(datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() * 1000)
+            except ValueError:
+                continue
+    return last
+
+
+def chain_span(
+    name: str,
+    span_id: str,
+    trace_id: str,
+    parent_span_id: str,
+    start_ms: int,
+    end_ms: int,
+    attrs: dict,
+    service_name: str,
+    scope_name: str,
+    error_message: str = "",
+    failed: bool = False,
+) -> dict:
+    return build_span(
+        name,
+        "CHAIN",
+        span_id,
+        trace_id,
+        parent_span_id,
+        start_ms,
+        max(end_ms, start_ms),
+        {"openinference.span.kind": "CHAIN", **attrs},
+        service_name,
+        scope_name,
+        status_code=2 if failed else 1,
+        status_message=error_message if failed else "",
+    )
+
+
+def _int(value: object) -> Optional[int]:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None

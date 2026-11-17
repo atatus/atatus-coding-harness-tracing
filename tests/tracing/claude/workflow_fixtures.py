@@ -349,3 +349,32 @@ def agent_stop(
     if running is not None:
         payload["background_tasks"] = running
     session.hook(handlers.subagent_stop, payload)
+
+
+def write_run_json(
+    run_dir: Path,
+    task_id: str,
+    status: str = "completed",
+    start_ms: int = 1794627100000,
+    duration_ms: int = 30000,
+    phases: "list[tuple[int, str]] | None" = None,
+    error: str = "",
+) -> Path:
+    """`<session>/workflows/<runId>.json`, written by Claude Code when a run ends."""
+    progress = [{"type": "workflow_phase", "index": index, "title": title} for index, title in (phases or [])]
+    data = {
+        "runId": run_dir.name,
+        "taskId": task_id,
+        "status": status,
+        "startTime": start_ms,
+        "durationMs": duration_ms,
+        "totalTokens": 210149,
+        "totalToolCalls": 10,
+        "workflowProgress": progress,
+    }
+    if error:
+        data["error"] = error
+    path = run_dir.parents[2] / "workflows" / f"{run_dir.name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path

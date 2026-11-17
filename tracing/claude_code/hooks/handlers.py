@@ -18,6 +18,7 @@ from core.common import (
     OTLP_MAX_PAYLOAD_BYTES,
     FileLock,
     StateManager,
+    _to_otlp_attr_value,
     build_multi_span,
     build_span,
     debug_dump,
@@ -33,6 +34,7 @@ from core.common import (
     send_span,
     send_span_async,
     tool_detail_attributes,
+    truncate_attr,
 )
 from core.event_model import (
     AgentEvent,
@@ -181,6 +183,7 @@ def _handle_session_start(input_json: dict) -> None:
     """Handle session_start: initialize session."""
     state = resolve_session(input_json)
     ensure_session_initialized(state, input_json)
+    _gc_workflow_entries(state)
     log(f"Session started: {state.get('session_id')}")
 
 
@@ -518,14 +521,20 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     prompt_id = input_json.get("prompt_id") or ""
     prompt_id = prompt_id if isinstance(prompt_id, str) else ""
 
+    notification = workflows.parse_notification(input_json.get("prompt"))
     if state.get("current_trace_id"):
         # Same prompt id means the harness is still inside this turn, whatever the hook says.
         if prompt_id and prompt_id == state.get("current_prompt_id"):
+            if notification is not None:
+                _check_workflows(state, notification=notification)
+                _request_workflow_marker(state, notification)
             log("Prompt resubmitted for the live turn; keeping it open")
             return
         # Stop never fires for a turn the user interrupted, so the next prompt is the
         # first chance to close it - with what it actually did, not a stub.
         _close_live_turn(state, input_json, TurnEndReason.CONTINUED)
+
+    _check_workflows(state, notification=notification)
 
     # A background agent finishing is delivered as a prompt the harness runs as its own
     # turn. It is not a user turn: the work it triggers belongs to the trace that launched
@@ -551,7 +560,7 @@ def _handle_user_prompt_submit(input_json: dict) -> None:
     last_running = state.get(LAST_BACKGROUND_TASKS_KEY)
     if last_running:
         try:
-            _release_finished_traces(state, set(json.loads(last_running)))
+            _release_finished_traces(state, set(json.loads(last_running)), reason="next_prompt")
         except (TypeError, ValueError):
             pass
 
@@ -1435,6 +1444,7 @@ def _store_background_launches(state, trace_id: str, launched: dict, nested_pare
                 task=task_id,
                 name=entry.get("workflow_name"),
             )
+            _finalize_resumed(state, task_id, entry)
     return new_ids
 
 
@@ -1445,7 +1455,9 @@ def _held_spans(state) -> dict[str, dict]:
     return _decode_pending_subagents(state.get(HELD_SPANS_KEY) or "")
 
 
-def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_ids: set[str]) -> dict:
+def _hold_ancestor_spans(
+    state, payload: dict, trace_id: str, agent_tool_span_ids: set[str], final_reply: "str | None" = None
+) -> dict:
     """Split a rendered turn: the spans that enclose a background launch - the Agent tool,
     its model call, the root - are held back so their end can grow to cover the agent's
     real lifetime; everything else ships now. Returns the payload to send."""
@@ -1470,6 +1482,10 @@ def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_id
             current_held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
             entry = current_held.get(trace_id) or {"spans": [], "pending": []}
             entry["spans"] = _merge_held(entry.get("spans", []), held)
+            if final_reply is not None and _has_workflow(
+                _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, "")), trace_id
+            ):
+                entry["final_reply"] = final_reply
             data[HELD_SPANS_KEY] = json.dumps(current_held | {trace_id: entry}, sort_keys=True)
             state._write(data)
     except Exception as exc:
@@ -1481,8 +1497,53 @@ def _hold_ancestor_spans(state, payload: dict, trace_id: str, agent_tool_span_id
     return payload
 
 
+def _grow_held(entry: dict, end_ms: int, anchor_span_id: str = "") -> None:
+    spans = entry.get("spans", [])
+    grow = _ancestor_span_ids(spans, {anchor_span_id}) if anchor_span_id else {s.get("spanId") for s in spans}
+    end_nano = f"{end_ms}000000"
+    for span in spans:
+        if span.get("spanId") in grow and int(span.get("endTimeUnixNano", "0")) < int(end_nano):
+            span["endTimeUnixNano"] = end_nano
+
+
+def _has_workflow(agents: dict, trace_id: str) -> bool:
+    return any(a.get("trace_id") == trace_id and a.get("kind") == workflows.WORKFLOW_KIND for a in agents.values())
+
+
+def _open_workflow(agents: dict, trace_id: str) -> bool:
+    """A workflow's end comes from its own signals, not from the running set, which a turn
+    interrupted before its Stop leaves stale."""
+    return any(
+        a.get("trace_id") == trace_id and a.get("kind") == workflows.WORKFLOW_KIND and not a.get("finalized_at_ms")
+        for a in agents.values()
+    )
+
+
+def _finish_workflow_root(spans: list, entry: dict, reason: str) -> None:
+    root = next((span for span in spans if not span.get("parentSpanId")), None)
+    if root is None:
+        return
+    statuses = entry.get("workflow_statuses") or []
+    updates: dict = {
+        "workflow.count": len(statuses),
+        "workflow.failed_count": sum(1 for status in statuses if status in ("failed", "incomplete")),
+        "trace.release_reason": reason or "final_reply",
+    }
+    if isinstance(entry.get("final_reply"), str):
+        updates["output.value"] = truncate_attr(entry["final_reply"])
+    kept = [attribute for attribute in root.get("attributes", []) if attribute.get("key") not in updates]
+    root["attributes"] = kept + [{"key": key, "value": _to_otlp_attr_value(value)} for key, value in updates.items()]
+
+
 def _extend_held_spans(
-    state, trace_id: str, end_ms: int, agent_id: str = "", release: bool = False, anchor_span_id: str = ""
+    state,
+    trace_id: str,
+    end_ms: int,
+    agent_id: str = "",
+    release: bool = False,
+    anchor_span_id: str = "",
+    reason: str = "",
+    final_reply: "str | None" = None,
 ) -> None:
     """Grow held spans to at least ``end_ms``: only the path from ``anchor_span_id`` up to the
     root when given, so a sibling is not stretched. With ``release`` (or when ``agent_id`` was
@@ -1497,19 +1558,18 @@ def _extend_held_spans(
             entry = current_held.get(trace_id)
             if not entry:
                 return
-            spans = entry.get("spans", [])
-            grow = _ancestor_span_ids(spans, {anchor_span_id}) if anchor_span_id else {s.get("spanId") for s in spans}
-            end_nano = f"{end_ms}000000"
-            for span in spans:
-                if span.get("spanId") in grow and int(span.get("endTimeUnixNano", "0")) < int(end_nano):
-                    span["endTimeUnixNano"] = end_nano
+            agents = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            _grow_held(entry, end_ms, anchor_span_id)
+            if final_reply is not None and _has_workflow(agents, trace_id):
+                entry["final_reply"] = final_reply
             pending = [a for a in entry.get("pending", []) if a != agent_id]
             entry["pending"] = pending
-            if release or (not pending and not entry.get("in_flight")):
+            if release or (not pending and not entry.get("in_flight") and not _open_workflow(agents, trace_id)):
                 to_send = entry.get("spans", [])
+                if entry.get("workflow_statuses"):
+                    _finish_workflow_root(to_send, entry, reason)
                 current_held.pop(trace_id, None)
                 released = {span.get("spanId") for span in to_send}
-                agents = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
                 for agent in agents.values():
                     if agent.get("trace_id") == trace_id:
                         agent["sent_span_ids"] = sorted(set(agent.get("sent_span_ids") or []) | released)
@@ -1547,9 +1607,9 @@ def _mark_continuation(state, trace_id: str, agent_id: str, in_flight: bool) -> 
         error(f"Failed to mark continuation for trace {trace_id}: {exc}")
 
 
-def _release_all_held_spans(state) -> None:
+def _release_all_held_spans(state, reason: str = "session_end") -> None:
     for trace_id in list(_held_spans(state)):
-        _extend_held_spans(state, trace_id, 0, release=True)
+        _extend_held_spans(state, trace_id, 0, release=True, reason=reason)
 
 
 LAST_BACKGROUND_TASKS_KEY = "last_background_task_ids"
@@ -1566,7 +1626,7 @@ def _running_task_ids(input_json: dict) -> "set[str] | None":
     }
 
 
-def _release_finished_traces(state, running: "set[str] | None") -> None:
+def _release_finished_traces(state, running: "set[str] | None", reason: str = "final_reply") -> None:
     """Release every held trace none of whose agents is still running. Claude Code reports
     the running background agents of the whole session, at any depth, on each Stop."""
     if running is None:
@@ -1574,8 +1634,8 @@ def _release_finished_traces(state, running: "set[str] | None") -> None:
     agents = _background_agents(state)
     for trace_id in list(_held_spans(state)):
         mine = {agent_id for agent_id, agent in agents.items() if agent.get("trace_id") == trace_id}
-        if not mine & running:
-            _extend_held_spans(state, trace_id, 0, release=True)
+        if not mine & running and not _open_workflow(agents, trace_id):
+            _extend_held_spans(state, trace_id, 0, release=True, reason=reason)
 
 
 def _update_background_agent(state, agent_id: str, **fields) -> None:
@@ -1903,11 +1963,17 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             root_parent_span_id=trace_span_id if continuation else "",
             skip_root=continuation,
         )
+        markers = _workflow_marker_spans(state, trace_id, trace_span_id)
+        if markers:
+            payload = _with_spans(payload, _payload_spans(payload) + markers)
+        final_reply = redact_content(env.log_prompts, output)
         launched = _register_background_agents(
             state, graph, trace_id, span_id_overrides, already_spliced=set(matched_subagents)
         )
         if launched:
-            payload = _hold_ancestor_spans(state, payload, trace_id, {d["tool_span_id"] for d in launched.values()})
+            payload = _hold_ancestor_spans(
+                state, payload, trace_id, {d["tool_span_id"] for d in launched.values()}, final_reply=final_reply
+            )
         if continuation:
             agent_id = str(state.get("continuation_agent_id"))
             _mark_continuation(state, trace_id, agent_id, in_flight=False)
@@ -1918,6 +1984,8 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
                 int(root_event.ended_at_ms or get_timestamp_ms()),
                 agent_id=settled,
                 anchor_span_id=trace_span_id,
+                reason="final_reply",
+                final_reply=final_reply,
             )
         return _TurnExport(payload, reason, matched_observations, matched_subagents)
 
@@ -1932,6 +2000,7 @@ def _export_turn(state, input_json: dict, reason: TurnEndReason) -> "_TurnExport
             get_timestamp_ms(),
             agent_id=settled,
             anchor_span_id=str(state.get("current_trace_span_id") or ""),
+            reason="final_reply",
         )
         return _TurnExport({}, reason, [], {})
 
@@ -2061,6 +2130,8 @@ def _handle_stop(input_json: dict) -> None:
     have all finished."""
     state = resolve_session(input_json)
     _purge_workflow_debris(state)
+    _check_workflows(state)
+    _gc_workflow_entries(state)
     _export_stopped_turn(state, input_json)
     running = _running_task_ids(input_json)
     if running is not None:
@@ -2290,7 +2361,9 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     for nested_id, nested_launch in nested.items():
         nested_end = _int_or_none(registry.get(nested_id, {}).get("ended_at_ms"))
         if held_now and nested_end:
-            _extend_held_spans(state, trace_id, nested_end, anchor_span_id=nested_launch["tool_span_id"])
+            _extend_held_spans(
+                state, trace_id, nested_end, anchor_span_id=nested_launch["tool_span_id"], reason="agent_stop"
+            )
     sent = set(descriptor.get("sent_span_ids") or [])
     new_spans = [span for span in spans if span["spanId"] not in sent and not (held_now and span["spanId"] in hold_ids)]
     if new_spans:
@@ -2299,7 +2372,9 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
             on_chunk=lambda span_ids: _mark_spans_sent(state, agent_id, span_ids),
             on_chunk_ref=_sent_spans_ref(state, agent_id),
         )
-    _extend_held_spans(state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), anchor_span_id=tool_span_id)
+    _extend_held_spans(
+        state, trace_id, int(agent_event.ended_at_ms or ended_at_ms), anchor_span_id=tool_span_id, reason="agent_stop"
+    )
     state.delete(f"subagent_{agent_id}_start_time")
     state.delete(f"subagent_{agent_id}_prompt")
     log(f"Background subagent {agent_id} attached to trace {trace_id}")
@@ -2556,6 +2631,335 @@ def _purge_workflow_debris(state) -> None:
             state._write(data)
     except Exception as exc:
         error(f"Failed to purge workflow debris: {exc}")
+
+
+def _strict_lock(state, timeout: float = 2.0):
+    """A finalize must not run twice, so its lock never breaks itself; a busy lock defers it to
+    the next signal instead."""
+    if state._lock_path is None:
+        return state._lock()
+    return FileLock(state._lock_path, timeout=timeout, break_on_timeout=False)
+
+
+def _matches(notification: "workflows.Notification", task_id: str, entry: dict) -> bool:
+    if notification.task_id == task_id:
+        return True
+    return bool(notification.tool_use_id) and notification.tool_use_id == entry.get("tool_use_id")
+
+
+def _check_workflows(state, notification: "workflows.Notification | None" = None, final_reason: str = "") -> None:
+    """Finalize each open workflow whose end is known. The task leaving ``background_tasks`` is
+    not such a signal: the run JSON may not exist yet, and a status guessed then could not be
+    corrected later."""
+    if not workflows.enabled():
+        return
+    for task_id, entry in _background_agents(state).items():
+        if entry.get("kind") != workflows.WORKFLOW_KIND or entry.get("finalized_at_ms"):
+            continue
+        run = workflows.read_run_json(Path(str(entry.get("run_dir") or "")), str(entry.get("run_id") or ""), task_id)
+        run_status = workflows.map_status(run.status) if run else None
+        run_error = run.error if run else ""
+        if notification is not None and _matches(notification, task_id, entry):
+            status = run_status or workflows.map_status(notification.status)
+            if status:
+                summary = notification.summary if status == "failed" else ""
+                _finalize_workflow(state, task_id, status, run_error or summary, "notification")
+        elif run_status:
+            _finalize_workflow(state, task_id, run_status, run_error, "run_json")
+        elif final_reason:
+            _finalize_workflow(state, task_id, "incomplete", run_error, final_reason)
+
+
+def _finalize_resumed(state, task_id: str, entry: dict) -> None:
+    """A resume reuses the run id under a new task id, and exists only once the earlier task
+    has ended, so the earlier task is finalized before the new one runs."""
+    run_id = str(entry.get("run_id") or "")
+    for other_id, other in _workflow_tasks(state, run_id).items():
+        if other_id == task_id or other.get("finalized_at_ms"):
+            continue
+        run = workflows.read_run_json(Path(str(other.get("run_dir") or "")), run_id, other_id)
+        status = (workflows.map_status(run.status) if run else None) or "stopped"
+        _finalize_workflow(state, other_id, status, run.error if run else "", "resumed")
+
+
+def _merge_payloads(payloads: list) -> dict:
+    spans = [span for payload in payloads for span in _payload_spans(payload)]
+    if not spans:
+        return {}
+    return build_multi_span(
+        [{"resourceSpans": [{"scopeSpans": [{"spans": [span]}]}]} for span in spans], SERVICE_NAME, SCOPE_NAME
+    )
+
+
+def _finalize_workflow(state, task_id: str, status: str, error_text: str, reason: str) -> None:
+    entry = _background_agents(state).get(task_id)
+    if not entry or entry.get("finalized_at_ms") or state.state_file is None:
+        return
+    trace_id = str(entry.get("trace_id") or "")
+    run_id = str(entry.get("run_id") or "")
+    run_dir = Path(str(entry.get("run_dir") or ""))
+    session_key = state.get("session_id") or ""
+    tasks = _workflow_tasks(state, run_id)
+    run = workflows.read_run_json(run_dir, run_id, task_id)
+    agents = [
+        (
+            start,
+            agent_id,
+            agent_state,
+            _agent_record(agent_state, workflows.AGENT_STOP_KEY),
+            _agent_record(agent_state, workflows.AGENT_FAILURE_KEY),
+        )
+        for start, agent_id, agent_state in _task_agents(session_key, run_dir, tasks, task_id)
+    ]
+    now = get_timestamp_ms()
+    agent_ends = [
+        int(end)
+        for _, _, _, stop, failure in agents
+        if isinstance(end := stop.get("ended_at_ms") or failure.get("at_ms"), int)
+    ]
+    if run is not None and run.start_ms is not None and run.duration_ms is not None:
+        end_ms = run.start_ms + run.duration_ms
+    else:
+        end_ms = max(agent_ends) if agent_ends else now
+    start_ms = int(entry.get("launch_started_ms") or entry.get("launched_at_ms") or end_ms)
+    fields = {"session": state.get("session_id"), "trace": trace_id, "run": run_id, "task": task_id}
+    try:
+        with _strict_lock(state):
+            data = state._read_safe()
+            current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            stored = current.get(task_id)
+            if not stored or stored.get("finalized_at_ms"):
+                return
+            stored.update(
+                finalized_at_ms=now, ended_at_ms=end_ms, status=status, error=error_text, finalize_reason=reason
+            )
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
+            held = _decode_pending_subagents(data.get(HELD_SPANS_KEY, ""))
+            held_entry = held.get(trace_id)
+            if held_entry:
+                held_entry["pending"] = [a for a in held_entry.get("pending", []) if a != task_id]
+                _grow_held(held_entry, end_ms, str(entry.get("tool_span_id") or ""))
+                held_entry["workflow_statuses"] = [*held_entry.get("workflow_statuses", []), status]
+                data[HELD_SPANS_KEY] = json.dumps(held, sort_keys=True)
+            for _, agent_id, _, _, _ in agents:
+                data.pop(f"subagent_{agent_id}_start_time", None)
+                data.pop(f"subagent_{agent_id}_prompt", None)
+            state._write(data)
+    except TimeoutError:
+        workflows.wf_log("dropped", reason="lock_busy", **fields)
+        return
+
+    payloads: list = []
+    counts = {"exported": 0, "failed": 0, "interrupted": 0}
+    phase_windows: dict = {}
+    for agent_start, agent_id, agent_state, stop, failure in agents:
+        agent_end = stop.get("ended_at_ms") or failure.get("at_ms") or end_ms
+        if _claim_agent(agent_state, "finalize", {}):
+            if failure:
+                label, agent_status, agent_end = "failed", EventStatus.FAILED, failure.get("at_ms") or end_ms
+                message = ": ".join(t for t in (failure.get("error"), failure.get("message")) if t)
+                counts["failed"] += 1
+            elif stop:
+                label, agent_status, message = "completed", EventStatus.COMPLETED, ""
+            else:
+                transcript = run_dir / f"agent-{agent_id}.jsonl"
+                label, agent_status, message = "interrupted", EventStatus.CANCELLED, ""
+                agent_end = workflows.transcript_end_ms(transcript) or end_ms
+                counts["interrupted"] += 1
+            payloads.append(
+                _render_workflow_agent(
+                    state,
+                    session_key,
+                    run_dir,
+                    task_id,
+                    entry,
+                    tasks,
+                    agent_id,
+                    agent_state,
+                    agent_start or None,
+                    int(agent_end),
+                    agent_status,
+                    label,
+                    message,
+                )
+            )
+        else:
+            counts["exported"] += 1
+        phase = workflows.read_meta(run_dir, agent_id).phase
+        if phase:
+            window = phase_windows.setdefault(phase, [agent_start or start_ms, int(agent_end), 0])
+            window[0] = min(window[0], agent_start or start_ms)
+            window[1] = max(window[1], int(agent_end))
+            window[2] += 1
+
+    details = env.log_tool_details
+    name = str(entry.get("workflow_name") or "")
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    common = {
+        "workflow.run_id": run_id,
+        "workflow.task_id": task_id,
+        **({"user.id": user_id} if user_id else {}),
+        **({"user.login_id": login_id} if login_id else {}),
+    }
+    workflow_span_id = _derived_span_id(trace_id, f"workflow:{task_id}")
+    failed = status in ("failed", "incomplete")
+    workflow_attrs = {
+        **common,
+        "workflow.name": redact_content(details, name),
+        "workflow.status": status,
+        "workflow.agent_count": len(agents),
+        "workflow.failed_agent_count": counts["failed"],
+        "workflow.interrupted_agent_count": counts["interrupted"],
+    }
+    if run is not None and run.total_tokens is not None:
+        workflow_attrs["workflow.total_tokens"] = run.total_tokens
+    if run is not None and run.total_tool_calls is not None:
+        workflow_attrs["workflow.tool_call_count"] = run.total_tool_calls
+    payloads.append(
+        workflows.chain_span(
+            workflows.display_names(name, "", 0, "", 0, details).workflow,
+            workflow_span_id,
+            trace_id,
+            str(entry.get("tool_span_id") or ""),
+            start_ms,
+            end_ms,
+            workflow_attrs,
+            SERVICE_NAME,
+            SCOPE_NAME,
+            error_message=redact_content(env.log_tool_content, error_text) if error_text else f"Workflow {status}",
+            failed=failed,
+        )
+    )
+    declared = dict((title, index) for index, title in (run.phases if run is not None else ()))
+    for order, (title, (phase_start, phase_end, phase_agents)) in enumerate(
+        sorted(phase_windows.items(), key=lambda item: item[1][0]), 1
+    ):
+        index = declared.get(title, max(declared.values(), default=0) + order if declared else order)
+        payloads.append(
+            workflows.chain_span(
+                workflows.display_names(name, title, index, "", 0, details).phase,
+                _derived_span_id(trace_id, f"phase:{task_id}:{title}"),
+                trace_id,
+                workflow_span_id,
+                max(phase_start, start_ms),
+                min(max(phase_end, phase_start), max(end_ms, phase_start)),
+                {
+                    **common,
+                    "workflow.phase": redact_content(details, title),
+                    "workflow.phase_index": index,
+                    "workflow.agent_count": phase_agents,
+                },
+                SERVICE_NAME,
+                SCOPE_NAME,
+            )
+        )
+    payload = _merge_payloads(payloads)
+    if payload:
+        _send_span_async(payload)
+    for _, _, agent_state, _, _ in agents:
+        discard_agent_state(agent_state)
+    workflows.wf_log(
+        "finalized",
+        status=status,
+        reason=reason,
+        agents=len(agents),
+        exported=counts["exported"],
+        failed=counts["failed"],
+        interrupted=counts["interrupted"],
+        spans=len(_payload_spans(payload)) if payload else 0,
+        **fields,
+    )
+
+
+def _request_workflow_marker(state, notification: "workflows.Notification") -> None:
+    """A workflow from an earlier prompt that finishes during this one closes in its own trace;
+    the live trace gets one span saying so."""
+    live_trace = state.get("current_trace_id")
+    for task_id, entry in _background_agents(state).items():
+        if entry.get("kind") != workflows.WORKFLOW_KIND or not _matches(notification, task_id, entry):
+            continue
+        if entry.get("trace_id") == live_trace or state.state_file is None:
+            return
+        request = {
+            "task_id": task_id,
+            "run_id": entry.get("run_id"),
+            "name": entry.get("workflow_name"),
+            "status": entry.get("status") or workflows.map_status(notification.status) or notification.status,
+            "origin_trace_id": entry.get("trace_id"),
+            "at_ms": get_timestamp_ms(),
+        }
+        try:
+            with state._lock():
+                data = state._read_safe()
+                requests = json.loads(data.get(workflows.MARKERS_KEY) or "[]")
+                data[workflows.MARKERS_KEY] = json.dumps([*requests, request], sort_keys=True)
+                state._write(data)
+        except Exception as exc:
+            error(f"Failed to record workflow marker: {exc}")
+        return
+
+
+def _workflow_marker_spans(state, trace_id: str, parent_span_id: str) -> list:
+    if not state.get(workflows.MARKERS_KEY) or state.state_file is None:
+        return []
+    try:
+        with state._lock():
+            data = state._read_safe()
+            requests = json.loads(data.pop(workflows.MARKERS_KEY, None) or "[]")
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to read workflow markers: {exc}")
+        return []
+    details = env.log_tool_details
+    spans = []
+    for request in requests if isinstance(requests, list) else []:
+        task_id = str(request.get("task_id") or "")
+        name = str(request.get("name") or "")
+        marker = workflows.chain_span(
+            f"Workflow completed: {name}" if details and name else "Workflow completed",
+            _derived_span_id(trace_id, f"marker:{task_id}"),
+            trace_id,
+            parent_span_id,
+            int(request.get("at_ms") or get_timestamp_ms()),
+            int(request.get("at_ms") or get_timestamp_ms()),
+            {
+                "workflow.run_id": str(request.get("run_id") or ""),
+                "workflow.task_id": task_id,
+                "workflow.status": str(request.get("status") or ""),
+                "workflow.origin_trace_id": str(request.get("origin_trace_id") or ""),
+            },
+            SERVICE_NAME,
+            SCOPE_NAME,
+        )
+        spans.extend(_payload_spans(marker))
+    return spans
+
+
+def _gc_workflow_entries(state) -> None:
+    """A late notification within a day still finds its trace; after that the entry goes."""
+    cutoff = get_timestamp_ms() - workflows.REGISTRY_TTL_MS
+    held = _held_spans(state)
+    stale = [
+        task_id
+        for task_id, entry in _background_agents(state).items()
+        if entry.get("kind") == workflows.WORKFLOW_KIND
+        and isinstance(entry.get("finalized_at_ms"), int)
+        and entry["finalized_at_ms"] < cutoff
+        and entry.get("trace_id") not in held
+    ]
+    if not stale or state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current = _decode_pending_subagents(data.get(BACKGROUND_AGENTS_KEY, ""))
+            for task_id in stale:
+                current.pop(task_id, None)
+            data[BACKGROUND_AGENTS_KEY] = json.dumps(current, sort_keys=True)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to drop old workflow entries: {exc}")
 
 
 def _handle_subagent_stop(input_json: dict) -> None:
@@ -2977,6 +3381,7 @@ def _handle_session_end(input_json: dict) -> None:
     if session_id is None:
         return
 
+    _check_workflows(state, final_reason="session_end")
     # A turn still open here was cut off by the session ending, not by a failure.
     if state.get("current_trace_id"):
         _close_live_turn(state, input_json, TurnEndReason.INTERRUPTED)
