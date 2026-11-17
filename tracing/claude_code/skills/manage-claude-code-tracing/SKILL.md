@@ -280,3 +280,6 @@ Common issues and fixes:
 | Want verbose logging | Set `ATATUS_VERBOSE` to `"true"` in env config |
 | Wrong project name | Set `harnesses.claude-code.project_name` in `~/.atatus/harness/config.json` (default: `"claude-code"`) |
 | Spans missing user attribution | Set `ATATUS_USER_ID` in env config to add `user.id` to all spans |
+| A workflow's agents or workflow span are missing | grep the log for `workflow ` lines with the run id: `registered` then one `exported` per agent and one `finalized`. `dropped reason=...` says why something was skipped; `deferred` means the agent stopped before its launch was registered (it is sent at finalize) |
+| Workflow spans show only "Workflow run" / "Agent 3" names | `ATATUS_LOG_TOOL_DETAILS` is off; script-authored names are hidden with it |
+| Want to turn workflow tracing off | Set `ATATUS_TRACE_WORKFLOWS` to `"false"` in env config |

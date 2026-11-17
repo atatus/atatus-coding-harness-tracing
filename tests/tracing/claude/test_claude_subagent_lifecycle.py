@@ -705,6 +705,94 @@ class TestHeldSpansAreReleasedWhenTheWorkIsDone:
         assert _end_ms(root) == 1794627110000
 
 
+def _flaky(session, fail_calls):
+    """A collector that refuses the given (1-based) POSTs and accepts the rest."""
+    calls = {"n": 0}
+
+    def send(payload):
+        calls["n"] += 1
+        if calls["n"] in fail_calls:
+            return False
+        session.payloads.append(payload)
+        return True
+
+    return send
+
+
+def _wire_size(payload):
+    return len(json.dumps(payload).encode("utf-8"))
+
+
+class TestLargePayloadsAreSplit:
+    BUDGET = 6_000
+
+    @pytest.fixture(autouse=True)
+    def _small_budget(self, monkeypatch):
+        monkeypatch.setattr(handlers, "OTLP_MAX_PAYLOAD_BYTES", self.BUDGET)
+
+    def _llm_ids(self, session):
+        return sorted(
+            _attrs(s)["llm.message.id"] for s in session.spans() if _attrs(s).get("openinference.span.kind") == "LLM"
+        )
+
+    def _padded_held_trace(self, session):
+        _hold_launching_turn(session)
+        held = json.loads(session.state.get("held_spans"))
+        pad = [{"key": "pad", "value": {"stringValue": "p" * 2_500}}]
+        held[TRACE]["spans"] += [
+            {**_held_span(f"{i:016x}", f"Tool {i}", "e" * 16), "attributes": pad} for i in range(1, 7)
+        ]
+        session.state.set("held_spans", json.dumps(held))
+        return sorted(s["spanId"] for s in held[TRACE]["spans"])
+
+    def test_a_large_agent_export_goes_in_posts_under_budget(self, session):
+        _hold_launching_turn(session)
+        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
+        _grow(transcript, 12)
+        _stop(session, transcript)
+
+        assert len(session.payloads) > 1
+        assert all(_wire_size(p) <= self.BUDGET for p in session.payloads)
+        assert self._llm_ids(session) == sorted(f"msg_{i}" for i in range(1, 13))
+
+    def test_a_chunk_lost_twice_is_resent_alone_at_the_next_stop(self, session):
+        _hold_launching_turn(session)
+        transcript = session.dir / "proj" / "s1" / "subagents" / "agent-a1.jsonl"
+        _grow(transcript, 12)
+        session.sender = _flaky(session, {2, 3})
+        _stop(session, transcript)
+        session.sender = None
+        delivered_first = len(session.spans())
+        _stop(session, transcript)
+
+        assert 0 < delivered_first < len(session.spans())
+        assert self._llm_ids(session) == sorted(f"msg_{i}" for i in range(1, 13))
+
+    def test_a_held_release_goes_in_posts_under_budget(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        assert len(session.payloads) > 1
+        assert all(_wire_size(p) <= self.BUDGET for p in session.payloads)
+        assert sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE) == held_ids
+
+    def test_a_release_chunk_that_fails_once_is_retried(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.sender = _flaky(session, {1})
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        assert sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE) == held_ids
+
+    def test_a_release_chunk_that_fails_twice_is_dropped_and_the_rest_still_go(self, session):
+        held_ids = self._padded_held_trace(session)
+        session.sender = _flaky(session, {2, 3})
+        session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
+
+        sent = sorted(s["spanId"] for s in session.spans() if s["traceId"] == TRACE)
+        assert 0 < len(sent) < len(held_ids)
+        assert set(sent) < set(held_ids)
+
+
 def _registered(session, agent_id="a1", tool_use_id="toolu_A1"):
     session.state.set(
         "background_agents",
@@ -1033,3 +1121,59 @@ class TestTheFinalMessageIsWaitedFor:
 
         assert not handlers._wait_for_transcript_flush(transcript, 0, expected_text="bye")
         assert time.monotonic() - began < 1.0
+
+
+def _subagent_failure(session, agent_id="wfa1"):
+    session.hook(
+        handlers.stop_failure,
+        {
+            "hook_event_name": "StopFailure",
+            "agent_id": agent_id,
+            "agent_type": "workflow-subagent",
+            "error": "model_not_found",
+            "last_assistant_message": "There's an issue with the selected model.",
+        },
+    )
+
+
+class TestASubagentFailureLeavesTheMainTurnAlone:
+    """A failed subagent fires StopFailure with its agent_id while the main turn is still live."""
+
+    def _turn(self, session) -> Path:
+        main = _write(
+            session.dir / "proj" / "s1.jsonl",
+            [
+                _human("h1", "go", 0),
+                _assistant("m1", "msg_launch", [_tool_use("toolu_bash")], ts=_ts(1)),
+                _tool_result("m2", "toolu_bash", ts=_ts(2)),
+                _assistant("m3", "msg_final", [{"type": "text", "text": "done"}], ts=_ts(3)),
+            ],
+        )
+        _open_turn(session, main)
+        return main
+
+    def test_no_failed_turn_is_sent_and_the_turn_stays_open(self, session):
+        self._turn(session)
+        _subagent_failure(session)
+
+        assert session.spans() == []
+        assert session.state.get("current_trace_id") == TRACE
+        assert session.state.get("current_trace_span_id") == ROOT
+
+    def test_the_main_stop_still_exports_the_turns_own_work(self, session):
+        main = self._turn(session)
+        _subagent_failure(session)
+        _main_stop(session, main)
+
+        roots = [s for s in session.spans() if not s.get("parentSpanId")]
+        assert [r["name"] for r in roots] == ["Turn 1"]
+        assert roots[0]["spanId"] == ROOT
+        assert {"msg_launch", "msg_final"} <= _llm_ids(session)
+        assert "toolu_bash" in {_attrs(s).get("tool.call.id") for s in session.spans()}
+
+    def test_a_main_thread_failure_still_ends_the_turn(self, session):
+        self._turn(session)
+        session.hook(handlers.stop_failure, {"hook_event_name": "StopFailure", "error": "rate_limit"})
+
+        assert [s["name"] for s in session.spans()] == ["Turn 1 (failed)"]
+        assert session.state.get("current_trace_id") is None
