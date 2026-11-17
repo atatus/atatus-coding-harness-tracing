@@ -153,19 +153,36 @@ left out, not redacted, when it is off. A harness that does not report the serve
 | Antigravity | `call_mcp_tool` arguments' `ServerName` and `ToolName` |
 | GitHub Copilot, opencode, Kiro, omp, Devin | not reported — no server field reaches the hooks, and the tool name alone does not separate server from tool reliably |
 
-#### `tool.skill_name` — auto-detected, no setup
+#### Skill activations — auto-detected, no setup
 
-A call to a harness's skill tool names the skill it loaded. The skill's arguments are tool
-content and stay in `input.value`. Like the MCP names, it follows `ATATUS_LOG_TOOL_DETAILS`
-and is left out when that is off.
+Spans say which skills were used, and who chose them. All of these are tool details: like the
+MCP names they follow `ATATUS_LOG_TOOL_DETAILS` and are left out, not redacted, when it is off.
+The skill's arguments and the file's body are tool content and stay in `input.value` /
+`output.value`. Names are what the harness reports (Claude Code plugin skills keep
+`plugin:skill`); for a file read it is the folder in `…/skills/<name>/SKILL.md`.
 
-| Harness | Source |
-|---|---|
-| Claude Code | the `Skill` tool's `skill` argument |
-| GitHub Copilot | the `skill` tool's `skill` argument |
-| opencode | the `skill` tool's `name` argument |
-| Gemini CLI | the `activate_skill` tool's `name` argument |
-| Codex, Cursor, Antigravity, Kiro, omp, Devin | not reported — no skill tool with a skill-name argument is known to reach the hooks |
+| Attribute | Span | Meaning |
+|---|---|---|
+| `tool.skill_name` | TOOL | the skill this call activated |
+| `skill.trigger` | TOOL | `model` — a dedicated skill tool; `implicit` — the model read the skill's `SKILL.md` (or ran one of its scripts) |
+| `skill.name` + `skill.trigger=user` | turn root | skills the user invoked for the turn; several are comma-joined in order (skill names never contain a comma) |
+| `skill.active` | LLM | the skill active while that model call ran |
+
+| Harness | `skill.trigger=model` | `skill.trigger=implicit` | turn root `skill.name` | LLM `skill.active` |
+|---|---|---|---|---|
+| Claude Code | `Skill` tool, `skill` argument | — | not set; `command.name` / `command.source` say it | the transcript's `attributionSkill`, per model call and in subagents |
+| GitHub Copilot | `skill` tool, `skill` argument | `view` / `read_file` of a `SKILL.md` | — | — |
+| opencode | `skill` tool, `name` argument | — | — | — |
+| Gemini CLI | `activate_skill` names the skill, with no `skill.trigger`: it serves both the model and a user typing `/name` | — | — | — |
+| Kiro | `disclose_context` whose `name` is a folder under `<cwd>/.kiro/skills/` or `~/.kiro/skills/` (otherwise it loaded steering) | — | — | — |
+| Devin | `skill` tool, `name` or `skill` argument | — | — | — |
+| Codex | — | a shell command that reads a `SKILL.md` (`cat`, `sed -n`, `head`, …) or runs a skill's `scripts/` file, on the span carrying the command | the selected-skill instructions Codex injects for `$name` | — |
+| Cursor | — | the agent's file read of a `SKILL.md` | — | — |
+| Antigravity | — | `view_file`, `read_file` or `run_command` reading a `SKILL.md` | the `<SKILL>` notice after the request | — |
+| omp | — | `read` of a `skill://<name>` URI or a `SKILL.md` path | — | — |
+
+A `SKILL.md` read is only an activation where reading the file is how the harness loads a skill;
+where a skill tool exists, it is someone editing the skill.
 
 #### 4. Content logging
 

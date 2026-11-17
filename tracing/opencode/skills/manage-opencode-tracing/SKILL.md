@@ -164,7 +164,7 @@ Each trace covers one **turn** (one user prompt → the assistant's response →
 |------|------|-------------|
 | `Turn` | CHAIN | Root span. `input.value` is the user prompt; `output.value` is the assistant's final text. Timestamps come from `message.time.created` / `time.completed`. |
 | `LLM: <model>` | LLM | Child of `Turn`, or of a child session's `AGENT`. The assistant message. Carries the message ID, `llm.model_name`, `llm.provider`, prompt/completion/reasoning token counts, cache read/write tokens, and `llm.cost`. |
-| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. Records `tool.name`, redacted input/output, and `tool.command`/`tool.file_path`/`tool.query`/`tool.url`/`tool.skill_name` where applicable. Timestamps come from `toolPart.state.time.start` / `.end`. |
+| `<tool>` | TOOL | Child of the requesting `LLM`, correlated by `ToolPart.messageID`; falls back to `Turn` only when that relation is unavailable. Records `tool.name`, redacted input/output, and `tool.command`/`tool.file_path`/`tool.query`/`tool.url`/`tool.skill_name` (with `skill.trigger=model` on the `skill` tool) where applicable. Timestamps come from `toolPart.state.time.start` / `.end`. |
 | `Agent: <name>` | AGENT | Child of a `task` TOOL when the SDK child session has the matching `Session.parentID`; child LLM/TOOL spans nest below it. |
 
 ## Troubleshoot
