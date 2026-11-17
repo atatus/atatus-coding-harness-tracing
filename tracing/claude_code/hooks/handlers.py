@@ -2650,7 +2650,9 @@ def _matches(notification: "workflows.Notification", task_id: str, entry: dict) 
 def _check_workflows(state, notification: "workflows.Notification | None" = None, final_reason: str = "") -> None:
     """Finalize each open workflow whose end is known. The task leaving ``background_tasks`` is
     not such a signal: the run JSON may not exist yet, and a status guessed then could not be
-    corrected later."""
+    corrected later. A completed or failed run still has a notification on its way whose
+    reaction belongs to this trace, so its run JSON alone does not finalize it; only a stopped
+    run, whose notification reaches no hook, is finalized from the run JSON."""
     if not workflows.enabled():
         return
     for task_id, entry in _background_agents(state).items():
@@ -2664,10 +2666,10 @@ def _check_workflows(state, notification: "workflows.Notification | None" = None
             if status:
                 summary = notification.summary if status == "failed" else ""
                 _finalize_workflow(state, task_id, status, run_error or summary, "notification")
-        elif run_status:
+        elif run_status == "stopped":
             _finalize_workflow(state, task_id, run_status, run_error, "run_json")
         elif final_reason:
-            _finalize_workflow(state, task_id, "incomplete", run_error, final_reason)
+            _finalize_workflow(state, task_id, run_status or "incomplete", run_error, final_reason)
 
 
 def _finalize_resumed(state, task_id: str, entry: dict) -> None:

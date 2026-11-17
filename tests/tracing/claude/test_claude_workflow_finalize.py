@@ -238,6 +238,78 @@ class TestEndSignals:
         assert len(session.spans()) == sent
 
 
+class TestReleaseWaitsForTheReaction:
+    def test_a_completed_run_file_at_stop_keeps_the_trace_for_its_notification(self, session):
+        flow = Flow(session).launch()
+        write_run_json(_run_dir(session), TASK)
+        session.stop([], "launched")
+
+        assert not _entry(session).get("finalized_at_ms")
+        assert session.held(_trace(session))
+
+        flow.notify(reply="the workflow finished")
+        [root] = [s for s in session.spans() if not s.get("parentSpanId")]
+        assert attrs(root)["output.value"] == "the workflow finished"
+
+    def test_a_second_workflow_finishing_during_the_first_reaction_waits_for_its_own(self, session):
+        flow = Flow(session)
+        session.prompt("run two", "p-1")
+        result_a = workflow_result("w1", RUN, _run_dir(session, RUN))
+        result_b = workflow_result("w2", "wf_bbbb-222", _run_dir(session, "wf_bbbb-222"))
+        flow.records = [human("h1", "run two", 0)]
+        flow.records += workflow_call("toolu_wf1", result_a, 2, 3) + workflow_call("toolu_wf2", result_b, 2, 3)
+        flow.records.append(assistant("m2", "msg-m2", [text("launched two")], 5))
+        write_jsonl(session.main, flow.records)
+        session.post_tool("toolu_wf1", "Workflow", {}, result_a)
+        session.post_tool("toolu_wf2", "Workflow", {}, result_b)
+        session.stop(_running("w1", "w2"), "launched two")
+
+        write_run_json(_run_dir(session, RUN), "w1")
+        prompt = notification("w1", "toolu_wf1")
+        flow.records.append(human("h2", prompt, 40))
+        write_jsonl(session.main, flow.records)
+        session.prompt(prompt, "p-2")
+        write_run_json(_run_dir(session, "wf_bbbb-222"), "w2")
+        flow.records.append(assistant("m3", "msg-m3", [text("first one done")], 42))
+        write_jsonl(session.main, flow.records)
+        session.stop([], "first one done")
+
+        assert session.held(_trace(session, "w1"))
+
+        prompt = notification("w2", "toolu_wf2")
+        flow.records.append(human("h3", prompt, 50))
+        write_jsonl(session.main, flow.records)
+        session.prompt(prompt, "p-3")
+        flow.records.append(assistant("m4", "msg-m4", [text("both done")], 52))
+        write_jsonl(session.main, flow.records)
+        session.stop([], "both done")
+
+        [root] = [s for s in session.spans() if not s.get("parentSpanId")]
+        assert attrs(root)["output.value"] == "both done"
+        assert int(attrs(root)["workflow.count"]) == 2
+
+
+class TestMidTurnCompletion:
+    def test_a_completion_inside_the_launching_turn_is_released_at_its_stop(self, session):
+        session.prompt("run and wait", "p-1")
+        result = workflow_result(TASK, RUN, _run_dir(session))
+        records = [human("h1", "run and wait", 0), *workflow_call(CALL, result, 2, 3)]
+        write_jsonl(session.main, records)
+        session.post_tool(CALL, "Workflow", {}, result)
+        write_run_json(_run_dir(session), TASK)
+        session.prompt(notification(TASK, CALL), "p-1")
+
+        assert _entry(session)["finalize_reason"] == "notification"
+        records.append(assistant("m2", "msg-m2", [text("waited and done")], 30))
+        write_jsonl(session.main, records)
+        session.stop([], "waited and done")
+
+        [root] = [s for s in session.spans() if not s.get("parentSpanId")]
+        assert attrs(root)["output.value"] == "waited and done"
+        assert attrs(root)["trace.release_reason"] == "final_reply"
+        assert session.held(_trace(session)) == {}
+
+
 class TestResume:
     def test_a_resume_finalizes_the_stopped_task_and_keeps_agents_apart(self, session):
         flow = Flow(session).launch()
@@ -255,7 +327,8 @@ class TestResume:
         flow.agent("a3", "slow", "Second", stop=False)
         agent_stop(session, _run_dir(session) / "agent-a3.jsonl", "a3", running=_running("w2"))
         write_run_json(_run_dir(session), "w2")
-        session.stop([], "resumed run done")
+        session.stop(_running("w2"), "resumed")
+        session.prompt(notification("w2", "toolu_wf2"), "p-4")
 
         by_task = {}
         for span in _by_name(session, "Agent"):
