@@ -104,6 +104,19 @@ bump() {
         echo "${TARGET_FILES[$i]}: ${VERSIONS[$i]} -> $new"
     done
     check
+    next_steps "$new"
+}
+
+next_steps() {
+    local new="$1" branch
+    branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    echo
+    echo "Next, to release v$new:"
+    echo "  git add ${TARGET_FILES[*]}"
+    echo "  git commit -m \"bump version to $new\""
+    echo "  git tag v$new"
+    echo "  git push origin $branch"
+    echo "  git push origin v$new"
 }
 
 VERSION=""
