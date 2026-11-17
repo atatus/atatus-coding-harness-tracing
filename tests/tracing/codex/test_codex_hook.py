@@ -1208,6 +1208,18 @@ class TestUserInvokedSkills:
         assert turn["invoked_skills"] == ["release-notes"]
         assert turn["user_prompt"] == "please use $release-notes"
 
+    def test_an_injected_skill_is_never_taken_for_the_prompt(self, tmp_path):
+        typed = _resp(
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "please use $release-notes"}],
+            }
+        )
+        turn = _rollout_turn(tmp_path, typed, _selected_skill("release-notes"))
+        assert turn["invoked_skills"] == ["release-notes"]
+        assert turn["user_prompt"] == "please use $release-notes"
+
     def test_an_older_build_without_content_kinds_is_read_by_its_marker(self, tmp_path):
         turn = _rollout_turn(tmp_path, _selected_skill("release-notes", kinds=False))
         assert turn["invoked_skills"] == ["release-notes"]

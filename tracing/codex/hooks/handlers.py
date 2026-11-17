@@ -354,8 +354,9 @@ def _extract_turn_from_rollout(rollout_path: Path, turn_id: str) -> "dict | None
                 # Collected rather than assigned so a user_message event, when present, still wins.
                 if outer == "response_item" and ptype == "message":
                     if payload.get("role") == "user":
-                        invoked_skills.extend(_selected_skills(payload))
-                        text = _message_text(payload.get("content"))
+                        selected = _selected_skills(payload)
+                        invoked_skills.extend(selected)
+                        text = "" if selected else _message_text(payload.get("content"))
                         if text and not text.lstrip().startswith("<environment_context>"):
                             user_messages.append(text)
                     continue
