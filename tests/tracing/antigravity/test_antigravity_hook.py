@@ -381,89 +381,6 @@ class TestStopSingleTurnFixture:
                 assert not attr["key"].startswith("llm.token_count"), f"unexpected token attr emitted: {attr['key']}"
 
 
-# ---------------------------------------------------------------------------
-# Tool descriptions come from Antigravity's PascalCase arg keys
-# ---------------------------------------------------------------------------
-
-
-class TestToolDescription:
-    def _tool_descriptions(self, spans) -> dict:
-        out = {}
-        for p in spans:
-            span = _get_span(p)
-            attrs = {a["key"]: a["value"] for a in span["attributes"]}
-            kind = attrs.get("openinference.span.kind", {}).get("stringValue", "")
-            if kind == "TOOL":
-                out[span["name"]] = attrs["tool.description"]["stringValue"]
-        return out
-
-    @pytest.fixture
-    def fixture_descriptions(self, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans):
-        stdin_payload = {
-            "conversationId": "c1",
-            "transcriptPath": str(FIXTURE_DIR / "transcript_full.jsonl"),
-            "workspacePaths": ["/home/user/proj"],
-        }
-        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
-            stop()
-        return self._tool_descriptions(captured_spans)
-
-    def test_run_command_uses_commandline_key(self, fixture_descriptions):
-        assert fixture_descriptions["run_command"] == (
-            "curl -X POST --data-binary @codecov.yml https://api.codecov.io/validate"
-        )
-
-    def test_view_file_uses_absolutepath_key(self, fixture_descriptions):
-        assert fixture_descriptions["view_file"] == ("/home/user/Documents/code/coding-harness-tracing/codecov.yml")
-
-    def test_list_dir_uses_directorypath_key(self, fixture_descriptions):
-        assert fixture_descriptions["list_dir"] == "/home/user/Documents/code/coding-harness-tracing"
-
-    def test_grep_search_uses_pascalcase_query_key(self, fixture_descriptions):
-        assert fixture_descriptions["grep_search"] == "codecov.yml"
-
-    def test_search_web_keeps_lowercase_query_key(self, fixture_descriptions):
-        assert fixture_descriptions["search_web"] == (
-            "codecov yml validation schema spec comment layout behavior require_changes"
-        )
-
-    def test_unknown_args_fall_back_to_truncated_json_blob(
-        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
-    ):
-        transcript = tmp_path / "transcript.jsonl"
-        args = {"SomethingElse": "z" * 300}
-        _write_jsonl(
-            transcript,
-            [
-                {
-                    "step_index": 0,
-                    "type": "USER_INPUT",
-                    "created_at": "2026-06-09T16:00:00Z",
-                    "content": "<USER_REQUEST>hi</USER_REQUEST>",
-                },
-                {
-                    "step_index": 1,
-                    "type": "PLANNER_RESPONSE",
-                    "created_at": "2026-06-09T16:00:01Z",
-                    "content": "calling",
-                    "tool_calls": [{"name": "mystery_tool", "args": args}],
-                },
-                {
-                    "step_index": 2,
-                    "type": "MYSTERY_TOOL",
-                    "created_at": "2026-06-09T16:00:02Z",
-                    "content": "ok",
-                },
-            ],
-        )
-        stdin_payload = {"conversationId": "c1", "transcriptPath": str(transcript)}
-        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
-            stop()
-        desc = self._tool_descriptions(captured_spans)["mystery_tool"]
-        assert desc == json.dumps(args)[:200]
-        assert len(desc) == 200
-
-
 def _single_tool_attrs(tmp_path, captured_spans, name: str, args: dict) -> dict:
     transcript = tmp_path / "transcript.jsonl"
     _write_jsonl(
@@ -499,6 +416,74 @@ _MCP_CALL_ARGS = {
     "toolAction": "Searching",
     "toolSummary": "Search docs",
 }
+
+
+# ---------------------------------------------------------------------------
+# Tool descriptions come from Antigravity's PascalCase arg keys
+# ---------------------------------------------------------------------------
+
+
+class TestToolDescription:
+    def _tool_descriptions(self, spans) -> dict:
+        out = {}
+        for p in spans:
+            span = _get_span(p)
+            attrs = {a["key"]: a["value"] for a in span["attributes"]}
+            kind = attrs.get("openinference.span.kind", {}).get("stringValue", "")
+            if kind == "TOOL" and "tool.description" in attrs:
+                out[span["name"]] = attrs["tool.description"]["stringValue"]
+        return out
+
+    @pytest.fixture
+    def fixture_descriptions(self, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans):
+        stdin_payload = {
+            "conversationId": "c1",
+            "transcriptPath": str(FIXTURE_DIR / "transcript_full.jsonl"),
+            "workspacePaths": ["/home/user/proj"],
+        }
+        with mock.patch.object(sys, "stdin", new=io.StringIO(json.dumps(stdin_payload))):
+            stop()
+        return self._tool_descriptions(captured_spans)
+
+    def test_run_command_uses_commandline_key(self, fixture_descriptions):
+        assert fixture_descriptions["run_command"] == (
+            "curl -X POST --data-binary @codecov.yml https://api.codecov.io/validate"
+        )
+
+    def test_view_file_uses_absolutepath_key(self, fixture_descriptions):
+        assert fixture_descriptions["view_file"] == ("/home/user/Documents/code/coding-harness-tracing/codecov.yml")
+
+    def test_list_dir_uses_directorypath_key(self, fixture_descriptions):
+        assert fixture_descriptions["list_dir"] == "/home/user/Documents/code/coding-harness-tracing"
+
+    def test_grep_search_uses_pascalcase_query_key(self, fixture_descriptions):
+        assert fixture_descriptions["grep_search"] == "codecov.yml"
+
+    def test_search_web_keeps_lowercase_query_key(self, fixture_descriptions):
+        assert fixture_descriptions["search_web"] == (
+            "codecov yml validation schema spec comment layout behavior require_changes"
+        )
+
+    def test_unknown_args_give_no_description(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans
+    ):
+        attrs = _single_tool_attrs(tmp_path, captured_spans, "mystery_tool", {"SomethingElse": "z" * 300})
+        assert "tool.description" not in attrs
+        assert attrs["input.value"] == json.dumps({"SomethingElse": "z" * 300})
+
+    @pytest.mark.parametrize(
+        "name, args",
+        [
+            ("call_mcp_tool", {**_MCP_CALL_ARGS, "Arguments": {"q": "SECRET-ARG"}}),
+            ("mystery_tool", {"SomethingElse": "SECRET-ARG"}),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, tmp_path, trace_enabled, mock_resolve, mock_ensure, mock_gc, captured_spans, monkeypatch, name, args
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        attrs = _single_tool_attrs(tmp_path, captured_spans, name, args)
+        assert "SECRET-ARG" not in json.dumps(attrs)
 
 
 class TestMcpToolCall:

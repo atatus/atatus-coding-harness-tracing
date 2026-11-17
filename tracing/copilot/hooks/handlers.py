@@ -136,20 +136,15 @@ def _tool_attributes(input_json: dict) -> dict:
             query = tool_input_raw.get("pattern") or tool_input_raw.get("query", "")
             file_path = tool_input_raw.get("path", "")
             description = f"grep: {str(query)[:100]}"
-        else:
-            description = tool_input[:200]
-    else:
-        description = tool_input[:200]
 
     tool_input = redact_content(env.log_tool_content, tool_input)
-    description = redact_content(env.log_tool_details, description)
     attrs = {
         "openinference.span.kind": "TOOL",
         "tool.name": tool_name,
         "input.value": tool_input,
-        "tool.description": description,
     }
     for key, value in (
+        ("tool.description", description),
         ("tool.command", command),
         ("tool.file_path", file_path),
         ("tool.url", url),

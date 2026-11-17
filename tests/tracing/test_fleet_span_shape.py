@@ -101,3 +101,23 @@ class TestToolArgumentsFollowToolContent:
             "tool arguments must be redacted with env.log_tool_content; promote the command, "
             "path or URL with tool_detail_attributes instead:\n" + "\n".join(offenders)
         )
+
+    # A slice of the serialized arguments is still argument content: MCP payloads, skill args, file bodies.
+    ARGUMENT_PREFIX = re.compile(
+        r"(?:\b(?:args_\w*|tool_input\w*|tool_args\w*|input_\w*|arguments)\)?|json\.dumps\([^)\n]*\))\s*\[\s*:"
+        r"|redact_content\(env\.log_tool_details,[^\n]*\b(?:args_\w+|tool_input|tool_args)\b"
+    )
+
+    @pytest.mark.parametrize("harness", HARNESSES)
+    def test_no_prefix_of_the_arguments_is_sent_as_a_tool_detail(self, harness):
+        offenders = []
+        for name, path, source in _handler_sources():
+            if name != harness:
+                continue
+            for lineno, line in enumerate(source.splitlines(), 1):
+                if self.ARGUMENT_PREFIX.search(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "a slice of the raw tool arguments is argument content, not a tool detail; build "
+            "tool.description from a known short field or leave it out:\n" + "\n".join(offenders)
+        )

@@ -204,15 +204,15 @@ def _resolve_model(state, turn: dict, conversation_id: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _tool_description(name: str, args: dict, args_json: str) -> str:
+def _tool_description(args: dict) -> str:
     """Build a short, scannable description from the most informative argument."""
     if not isinstance(args, dict):
-        return args_json[:200]
+        return ""
     for key in _DESCRIPTION_ARG_KEYS:
         val = args.get(key)
         if isinstance(val, str) and val:
             return val[:200]
-    return args_json[:200]
+    return ""
 
 
 def _output_messages(content: str, tool_calls: list) -> str:
@@ -264,10 +264,12 @@ def _build_tool_span(
             "tool.name": tool_name,
             "input.value": redact_content(env.log_tool_content, args_json),
             "output.value": redact_content(env.log_tool_content, output_text),
-            "tool.description": redact_content(env.log_tool_details, _tool_description(tool_name, args, args_json)),
             "tracing.parentage": parentage,
         }
     )
+    description = _tool_description(args)
+    if description:
+        attrs["tool.description"] = redact_content(env.log_tool_details, description)
 
     promoted = _TOOL_ATTR_KEYS.get(tool_name)
     if promoted and isinstance(args, dict):

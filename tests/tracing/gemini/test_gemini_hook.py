@@ -929,13 +929,12 @@ class TestAfterTool:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.query"]["stringValue"] == "rust tutorial"
 
-    def test_unknown_tool_description(self, mock_resolve, state, captured_spans):
-        """Unknown tool gets description from input_value[:200]."""
+    def test_unknown_tool_has_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool({"tool_name": "custom_tool", "tool_args": {"key": "value"}, "tool_result": "result"})
         attrs = _get_span_attrs(captured_spans[0])
-        assert "tool.description" in attrs
+        assert "tool.description" not in attrs
         # Should not have tool-specific attributes
         assert "tool.command" not in attrs
         assert "tool.file_path" not in attrs
@@ -1520,13 +1519,30 @@ class TestAfterModelEdgeCases:
 
 
 class TestAfterToolEdgeCases:
-    def test_non_dict_tool_args_uses_str_description(self, mock_resolve, state, captured_spans):
-        """Non-dict tool_args are stringified into the tool description."""
+    def test_non_dict_tool_args_give_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "a" * 32)
         state.set("current_trace_span_id", "b" * 16)
         _handle_after_tool({"tool_name": "raw_string_tool", "tool_input": "not-a-dict-arg", "tool_response": "result"})
         attrs = _get_span_attrs(captured_spans[0])
-        assert attrs["tool.description"]["stringValue"] == "not-a-dict-arg"
+        assert "tool.description" not in attrs
+        assert attrs["input.value"]["stringValue"] == "not-a-dict-arg"
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_input",
+        [
+            ("mcp_docs_search_pages", {"q": "SECRET-ARG"}),
+            ("custom_tool", {"body": "SECRET-ARG"}),
+            ("raw_string_tool", "SECRET-ARG"),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, tool_name, tool_input
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "a" * 32)
+        state.set("current_trace_span_id", "b" * 16)
+        _handle_after_tool({"tool_name": tool_name, "tool_input": tool_input, "tool_response": "ok"})
+        assert "SECRET-ARG" not in json.dumps(_get_span_attrs(captured_spans[0]))
 
 
 # ---------------------------------------------------------------------------

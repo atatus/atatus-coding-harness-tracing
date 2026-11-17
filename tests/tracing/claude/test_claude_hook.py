@@ -224,19 +224,31 @@ class TestPostToolUse:
         attrs = {a["key"]: a["value"] for a in span["attributes"]}
         assert attrs["tool.url"]["stringValue"] == "https://example.com"
 
-    def test_unknown_tool_description_is_input(self, mock_resolve, state, captured_spans):
-        """Unknown tool_name → description is first 200 chars of input."""
+    def test_unknown_tool_has_no_description(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")
         state.set("current_trace_span_id", "parentparentpare")
         _handle_post_tool_use(
             {"tool_name": "CustomTool", "tool_use_id": "t5", "tool_input": {"data": "hello"}, "tool_response": "result"}
         )
-        span = captured_spans[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
-        attrs = {a["key"]: a["value"] for a in span["attributes"]}
-        desc = attrs["tool.description"]["stringValue"]
-        assert len(desc) <= 200
-        # Description is the JSON serialization of tool_input, truncated
-        assert "hello" in desc
+        assert "tool.description" not in _attrs(captured_spans[0])
+
+    @pytest.mark.parametrize("handler", [_handle_post_tool_use, _handle_post_tool_use_failure])
+    @pytest.mark.parametrize(
+        "tool_name, tool_input",
+        [
+            ("Skill", {"skill": "release-notes", "args": "SECRET-ARG"}),
+            ("mcp__docs__search_pages", {"q": "SECRET-ARG"}),
+            ("CustomTool", {"body": "SECRET-ARG"}),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, handler, tool_name, tool_input
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        handler({"tool_name": tool_name, "tool_use_id": "t5", "tool_input": tool_input, "tool_response": "ok"})
+        assert "SECRET-ARG" not in json.dumps(_attrs(captured_spans[0]))
 
     def test_mcp_tool_names_its_server_and_tool(self, mock_resolve, state, captured_spans):
         state.set("current_trace_id", "trace-abc")

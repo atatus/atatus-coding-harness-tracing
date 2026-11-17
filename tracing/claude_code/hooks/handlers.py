@@ -269,8 +269,6 @@ def _handle_post_tool_use(input_json: dict) -> None:
         tool_query = input_json.get("tool_input", {}).get("pattern", "")
         tool_file_path = input_json.get("tool_input", {}).get("path", "")
         tool_description = f"grep: {tool_query[:100]}"
-    else:
-        tool_description = tool_input[:200]
 
     # Timing
     start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
@@ -281,7 +279,8 @@ def _handle_post_tool_use(input_json: dict) -> None:
     # tool_command/file_path/url/query/description describe what was requested.
     tool_input = redact_content(env.log_tool_content, tool_input)
     tool_response = redact_content(env.log_tool_content, tool_response)
-    tool_description = redact_content(env.log_tool_details, tool_description)
+    if tool_description:
+        tool_description = redact_content(env.log_tool_details, tool_description)
     if tool_command:
         tool_command = redact_content(env.log_tool_details, tool_command)
     if tool_file_path:
@@ -302,13 +301,14 @@ def _handle_post_tool_use(input_json: dict) -> None:
         **({"tool.call.id": tool_id} if tool_id else {}),
         "input.value": tool_input,
         "output.value": tool_response,
-        "tool.description": tool_description,
         **tool_identity_attributes(tool_name, input_json.get("tool_input")),
     }
     if user_id:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    if tool_description:
+        attrs["tool.description"] = tool_description
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:
@@ -408,8 +408,6 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         tool_query = input_json.get("tool_input", {}).get("pattern", "")
         tool_file_path = input_json.get("tool_input", {}).get("path", "")
         tool_description = f"grep: {tool_query[:100]}"
-    else:
-        tool_description = tool_input[:200]
 
     # Timing
     start_time = state.get(f"tool_{tool_id}_start") or str(get_timestamp_ms())
@@ -423,7 +421,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
     tool_input = redact_content(env.log_tool_content, tool_input)
     output_value = redact_content(env.log_tool_content, output_value)
     redacted_error = redact_content(env.log_tool_content, error_text)
-    tool_description = redact_content(env.log_tool_details, tool_description)
+    if tool_description:
+        tool_description = redact_content(env.log_tool_details, tool_description)
     if tool_command:
         tool_command = redact_content(env.log_tool_details, tool_command)
     if tool_file_path:
@@ -444,7 +443,6 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         **({"tool.call.id": tool_id} if tool_id else {}),
         "input.value": tool_input,
         "output.value": output_value,
-        "tool.description": tool_description,
         "error.type": "tool_failure",
         "error.message": redacted_error,
         **tool_identity_attributes(tool_name, input_json.get("tool_input")),
@@ -453,6 +451,8 @@ def _handle_post_tool_use_failure(input_json: dict) -> None:
         attrs["user.id"] = user_id
     if login_id:
         attrs["user.login_id"] = login_id
+    if tool_description:
+        attrs["tool.description"] = tool_description
     if tool_command:
         attrs["tool.command"] = tool_command
     if tool_file_path:

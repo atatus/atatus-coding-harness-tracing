@@ -465,7 +465,25 @@ class TestPostToolUse:
         attrs = _get_span_attrs(captured_spans[0])
         assert attrs["tool.name"]["stringValue"] == "report_intent"
         assert attrs["output.value"]["stringValue"] == "ack"
-        assert attrs["tool.description"]["stringValue"]  # non-empty
+        assert "tool.description" not in attrs
+
+    @pytest.mark.parametrize(
+        "tool_name, tool_args",
+        [
+            ("skill", {"skill": "release-notes", "args": "SECRET-ARG"}),
+            ("github-mcp-server-get_file_contents", {"path": "SECRET-ARG"}),
+            ("report_intent", {"intent": "SECRET-ARG"}),
+            ("report_intent", '{"intent": "SECRET-ARG"}'),
+        ],
+    )
+    def test_arguments_stay_behind_tool_content(
+        self, mock_resolve, state, captured_spans, monkeypatch, tool_name, tool_args
+    ):
+        monkeypatch.setenv("ATATUS_LOG_TOOL_CONTENT", "false")
+        state.set("current_trace_id", "trace-abc")
+        state.set("current_trace_span_id", "parentparentpare")
+        _handle_post_tool_use({"toolName": tool_name, "toolArgs": tool_args, "toolResult": {}})
+        assert "SECRET-ARG" not in json.dumps(_get_span_attrs(captured_spans[0]))
 
     def test_extracts_text_result_for_llm(self, mock_resolve, state, captured_spans):
         """Extracts text_result_for_llm from tool_result."""
