@@ -216,6 +216,8 @@ def _handle_post_tool_use(input_json: dict) -> None:
         return
     if not is_subagent and input_json.get("tool_name") == "Workflow":
         _register_workflow_launch(state, input_json)
+    if not is_subagent and input_json.get("tool_name") == "Bash":
+        _register_shell_launch(state, input_json)
 
     if _has_live_transcript(input_json) or is_subagent:
         tool_id = input_json.get("tool_use_id") or generate_trace_id()
@@ -1244,6 +1246,18 @@ def _register_background_agents(
         if not isinstance(event, ToolEvent) or not isinstance(event.output, dict):
             continue
         result = event.output.get("toolUseResult")
+        shell_id = _background_shell_id(result)
+        if shell_id:
+            tool_span_id = span_ids.get(event.event_id)
+            if tool_span_id and not nested_parent:
+                launched[shell_id] = _shell_entry(
+                    trace_id,
+                    tool_span_id,
+                    event.tool_call_id or "",
+                    event.turn_id,
+                    event.ended_at_ms or event.started_at_ms or get_timestamp_ms(),
+                )
+            continue
         if not isinstance(result, dict) or result.get("status") != "async_launched":
             continue
         launch = workflows.launch_from_result(result, event.tool_call_id or "") if workflows.enabled() else None
@@ -1308,6 +1322,39 @@ def _workflow_entry(
         "launch_started_ms": int(launch_started_ms),
         "launched_at_ms": int(launched_at_ms),
     }
+
+
+def _background_shell_id(result: object) -> str:
+    task_id = result.get("backgroundTaskId") if isinstance(result, dict) else None
+    return task_id if isinstance(task_id, str) and workflows.safe_name(task_id) else ""
+
+
+def _shell_entry(trace_id: str, tool_span_id: str, tool_use_id: str, turn_id: object, launched_at_ms: int) -> dict:
+    return {
+        "kind": "shell",
+        "trace_id": trace_id,
+        "tool_span_id": tool_span_id,
+        "tool_use_id": tool_use_id,
+        "turn_id": str(turn_id or ""),
+        "launched_at_ms": int(launched_at_ms),
+    }
+
+
+def _register_shell_launch(state, input_json: dict) -> None:
+    """A background command's completion comes back as a notification, like a background agent's."""
+    trace_id = state.get("current_trace_id")
+    tool_use_id = input_json.get("tool_use_id") or ""
+    shell_id = _background_shell_id(input_json.get("tool_response"))
+    if not trace_id or not tool_use_id or not shell_id:
+        return
+    entry = _shell_entry(
+        trace_id,
+        _derived_span_id(trace_id, f"tool:{tool_use_id}"),
+        tool_use_id,
+        state.get("trace_count"),
+        get_timestamp_ms(),
+    )
+    _store_background_launches(state, trace_id, {shell_id: entry})
 
 
 def _workflow_tool_attributes(graph) -> dict:
