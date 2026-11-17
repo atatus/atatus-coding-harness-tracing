@@ -279,3 +279,73 @@ def no_workflow_session(session: Session) -> dict:
     state_keys = sorted(session.data())
     session.hook(handlers.session_end, {"hook_event_name": "SessionEnd", "reason": "exit"})
     return {"spans": canonical(session.payloads), "state_keys": state_keys}
+
+
+USER_REQUEST = "[Workflow harness — user request] The harness relays, verbatim and indented below, the user request."
+COMPUTED_TASK = "[Workflow harness — computed task] The task text below was computed at runtime by a workflow script."
+
+
+def workflow_agent(
+    run_dir: Path,
+    agent_id: str,
+    label: str,
+    phase: str = "",
+    answer: str = "b",
+    start: int = 10,
+    handback: bool = True,
+) -> Path:
+    """One workflow agent's transcript and meta file, shaped like debug run 5."""
+    records = [
+        human(f"{agent_id}-u0", USER_REQUEST, start),
+        human(f"{agent_id}-u1", f"{COMPUTED_TASK}\n\nRun `echo {answer}` with Bash.", start),
+        assistant(
+            f"{agent_id}-a1",
+            f"msg-{agent_id}-1",
+            [tool_use(f"toolu_{agent_id}_bash", "Bash", {"command": f"echo {answer}"})],
+            start + 1,
+        ),
+        tool_result(f"{agent_id}-r1", f"toolu_{agent_id}_bash", answer, start + 2),
+    ]
+    if handback:
+        records += [
+            assistant(
+                f"{agent_id}-a2",
+                f"msg-{agent_id}-2",
+                [tool_use(f"toolu_{agent_id}_hb", "SubagentHandback", {"message": answer})],
+                start + 3,
+            ),
+            tool_result(f"{agent_id}-r2", f"toolu_{agent_id}_hb", "", start + 4),
+        ]
+    else:
+        records.append(assistant(f"{agent_id}-a2", f"msg-{agent_id}-2", [text(f"last words {answer}")], start + 3))
+    transcript = write_jsonl(run_dir / f"agent-{agent_id}.jsonl", records)
+    meta = {"agentType": "workflow-subagent", "description": label, "spawnDepth": 1, "requestShape": "foreground"}
+    if phase:
+        meta["workflowPhase"] = phase
+    transcript.with_suffix(".meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    return transcript
+
+
+def agent_start(session: Session, agent_id: str, agent_type: str = "workflow-subagent") -> None:
+    session.hook(
+        handlers.subagent_start, {"hook_event_name": "SubagentStart", "agent_id": agent_id, "agent_type": agent_type}
+    )
+
+
+def agent_stop(
+    session: Session,
+    transcript: Path,
+    agent_id: str,
+    agent_type: str = "workflow-subagent",
+    running: "list[dict] | None" = None,
+) -> None:
+    payload = {
+        "hook_event_name": "SubagentStop",
+        "agent_id": agent_id,
+        "agent_type": agent_type,
+        "agent_transcript_path": str(transcript),
+        "transcript_path": str(session.main),
+    }
+    if running is not None:
+        payload["background_tasks"] = running
+    session.hook(handlers.subagent_stop, payload)

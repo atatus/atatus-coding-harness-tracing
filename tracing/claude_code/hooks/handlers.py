@@ -16,6 +16,7 @@ from pathlib import Path
 from core.common import (
     LLM_EFFORT_ATTR,
     OTLP_MAX_PAYLOAD_BYTES,
+    FileLock,
     StateManager,
     build_multi_span,
     build_span,
@@ -57,6 +58,7 @@ from tracing.claude_code.hooks.adapter import (
     check_requirements,
     discard_agent_state,
     ensure_session_initialized,
+    existing_agent_state,
     gc_stale_state_files,
     resolve_agent_state,
     resolve_session,
@@ -2058,6 +2060,7 @@ def _handle_stop(input_json: dict) -> None:
     """Handle Stop: export the completed turn, then release any held trace whose agents
     have all finished."""
     state = resolve_session(input_json)
+    _purge_workflow_debris(state)
     _export_stopped_turn(state, input_json)
     running = _running_task_ids(input_json)
     if running is not None:
@@ -2303,9 +2306,266 @@ def _export_background_subagent(state, input_json: dict, agent_id: str, descript
     return True
 
 
+def _workflow_tasks(state, run_id: str) -> dict:
+    return {
+        task_id: entry
+        for task_id, entry in _background_agents(state).items()
+        if entry.get("kind") == workflows.WORKFLOW_KIND and entry.get("run_id") == run_id
+    }
+
+
+def _agent_start_ms(agent_state, transcript: Path) -> "int | None":
+    stored = agent_state.get("start_time") if agent_state is not None else None
+    if isinstance(stored, str) and stored.isdigit():
+        return int(stored)
+    return workflows.transcript_start_ms(transcript)
+
+
+def _agent_record(agent_state, key: str) -> dict:
+    raw = agent_state.get(key) if agent_state is not None else None
+    try:
+        value = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _update_agent_file(agent_state, records: dict) -> None:
+    """Write only while the file exists: finalize deletes it once the agent is accounted for."""
+    try:
+        with agent_state._lock():
+            if not agent_state.state_file.is_file():
+                return
+            data = agent_state._read_safe()
+            data.update({key: json.dumps(value, sort_keys=True) for key, value in records.items()})
+            agent_state._write(data)
+    except Exception as exc:
+        error(f"Failed to update agent state {agent_state.state_file}: {exc}")
+
+
+def _claim_agent(agent_state, by: str, records: dict) -> bool:
+    """One render per agent id, whichever of its stop and the workflow's finalize gets here first."""
+    try:
+        with FileLock(agent_state._lock_path, timeout=1.0, break_on_timeout=False):
+            data = agent_state._read_safe()
+            if workflows.AGENT_EXPORTED_KEY in data:
+                return False
+            data.update({key: json.dumps(value, sort_keys=True) for key, value in records.items()})
+            data[workflows.AGENT_EXPORTED_KEY] = json.dumps({"by": by, "at_ms": get_timestamp_ms()}, sort_keys=True)
+            agent_state._write(data)
+    except TimeoutError:
+        return False
+    return True
+
+
+def _task_agents(session_key: str, run_dir: Path, tasks: dict, task_id: str) -> list:
+    """The task's agents in start order. Replayed agents fire no hooks and have no file, so a
+    resumed task never claims them."""
+    agents = []
+    for agent_id in workflows.run_agent_ids(run_dir):
+        agent_state = existing_agent_state(session_key, agent_id)
+        if agent_state is None:
+            continue
+        start = _agent_start_ms(agent_state, run_dir / f"agent-{agent_id}.jsonl")
+        if workflows.task_for_agent(tasks, start) == task_id:
+            agents.append((start or 0, agent_id, agent_state))
+    return sorted(agents, key=lambda item: (item[0], item[1]))
+
+
+def _handback_message(graph, observations: list) -> str:
+    for event in graph.events:
+        if isinstance(event, ToolEvent) and event.tool_name == "SubagentHandback" and isinstance(event.input, dict):
+            message = event.input.get("message")
+            if isinstance(message, str) and message:
+                return message
+    for observation in observations:
+        if observation.tool_name == "SubagentHandback" and isinstance(observation.tool_input, dict):
+            message = observation.tool_input.get("message")
+            if isinstance(message, str) and message and message != TRUNCATED_BODY:
+                return message
+    replies = [
+        e.output for e in graph.events if isinstance(e, ModelCallEvent) and isinstance(e.output, str) and e.output
+    ]
+    return replies[-1] if replies else ""
+
+
+def _workflow_parent_span_id(trace_id: str, task_id: str, phase: str) -> str:
+    if phase:
+        return _derived_span_id(trace_id, f"phase:{task_id}:{phase}")
+    return _derived_span_id(trace_id, f"workflow:{task_id}")
+
+
+def _render_workflow_agent(
+    state,
+    session_key: str,
+    run_dir: Path,
+    task_id: str,
+    entry: dict,
+    tasks: dict,
+    agent_id: str,
+    agent_state,
+    start_ms: "int | None",
+    end_ms: int,
+    status: EventStatus,
+    agent_state_label: str,
+    error_text: str = "",
+) -> dict:
+    transcript = run_dir / f"agent-{agent_id}.jsonl"
+    meta = workflows.read_meta(run_dir, agent_id)
+    trace_id = str(entry.get("trace_id") or "")
+    agent_event = AgentEvent(
+        event_id=f"agent:{agent_id}",
+        session_id=state.get("session_id") or "",
+        turn_id=str(entry.get("turn_id") or ""),
+        sequence=0,
+        started_at_ms=start_ms,
+        ended_at_ms=end_ms,
+        status=status,
+        input=agent_state.get("prompt") or workflows.agent_input(transcript),
+        output="",
+        error=error_text or None,
+        agent_id=agent_id,
+        source_id=meta.agent_type or "workflow-subagent",
+    )
+    graph = parse_claude_transcript(transcript, agent_event)
+    observations = ToolBuffer(agent_state).all()
+    _merge_tool_observations(graph, observations)
+    agent_event.output = _handback_message(graph, observations)
+    ends = [e.ended_at_ms for e in graph.events if isinstance(e.ended_at_ms, int)]
+    if ends:
+        agent_event.ended_at_ms = max([end_ms, *ends])
+    task_agents = _task_agents(session_key, run_dir, tasks, task_id)
+    ordinal = next((i for i, (_, other, _) in enumerate(task_agents, 1) if other == agent_id), len(task_agents) + 1)
+    details = env.log_tool_details
+    label = meta.label or agent_id[:8]
+    names = workflows.display_names(str(entry.get("workflow_name") or ""), meta.phase, 0, label, ordinal, details)
+    attributes = {
+        "workflow.run_id": str(entry.get("run_id") or ""),
+        "workflow.task_id": task_id,
+        "workflow.name": redact_content(details, str(entry.get("workflow_name") or "")),
+        "workflow.agent_label": redact_content(details, label),
+        "workflow.agent_state": agent_state_label,
+    }
+    if meta.phase:
+        attributes["workflow.phase"] = redact_content(details, meta.phase)
+    user_id = state.get("user_id") or ""
+    login_id = state.get("user_login_id") or ""
+    return render_event_graph(
+        graph,
+        trace_id=trace_id,
+        service_name=SERVICE_NAME,
+        scope_name=SCOPE_NAME,
+        span_id_overrides={event.event_id: _derived_span_id(trace_id, event.event_id) for event in graph.events},
+        extra_attributes={agent_event.event_id: attributes},
+        common_attributes={
+            **({"user.id": user_id} if user_id else {}),
+            **({"user.login_id": login_id} if login_id else {}),
+        },
+        root_parent_span_id=_workflow_parent_span_id(trace_id, task_id, meta.phase),
+        span_names={agent_event.event_id: names.agent},
+    )
+
+
+def _handle_workflow_agent_stop(state, input_json: dict, path: "workflows.AgentPath") -> None:
+    """Export the agent now, from its own hook. ``agent()`` in the script waits for this hook, so
+    it touches only the agent's own file and hands the POST to the detached sender."""
+    session_key = str(input_json.get("session_id") or state.get("session_id") or "")
+    agent_id = path.agent_id
+    transcript = path.run_dir / f"agent-{agent_id}.jsonl"
+    fields = {"session": state.get("session_id"), "run": path.run_id, "agent": agent_id}
+    tasks = _workflow_tasks(state, path.run_id)
+    agent_state = existing_agent_state(session_key, agent_id)
+    start_ms = _agent_start_ms(agent_state, transcript)
+    now = get_timestamp_ms()
+    task_id = workflows.task_for_agent(tasks, start_ms)
+    if task_id is None:
+        if agent_state is not None:
+            _update_agent_file(agent_state, {workflows.AGENT_STOP_KEY: {"ended_at_ms": now, "run_id": path.run_id}})
+        workflows.wf_log("deferred", **fields)
+        return
+    entry = tasks[task_id]
+    fields.update(trace=entry.get("trace_id"), task=task_id)
+    if entry.get("finalized_at_ms"):
+        workflows.wf_log("dropped", reason="finalized", **fields)
+        return
+    if agent_state is None:
+        agent_state = resolve_agent_state(input_json, agent_id)
+    stop_record = {"ended_at_ms": now, "run_id": path.run_id}
+    if not _claim_agent(agent_state, "stop", {workflows.AGENT_STOP_KEY: stop_record}):
+        workflows.wf_log("dropped", reason="claimed", **fields)
+        return
+    payload = _render_workflow_agent(
+        state,
+        session_key,
+        path.run_dir,
+        task_id,
+        entry,
+        tasks,
+        agent_id,
+        agent_state,
+        start_ms,
+        now,
+        EventStatus.COMPLETED,
+        "completed",
+    )
+    _send_span_async(payload)
+    spans = len(_payload_spans(payload))
+    size = len(json.dumps(payload))
+    _update_agent_file(
+        agent_state, {workflows.AGENT_EXPORTED_KEY: {"by": "stop", "spans": spans, "bytes": size, "at_ms": now}}
+    )
+    workflows.wf_log("exported", spans=spans, bytes=size, **fields)
+
+
+def _record_agent_failure(input_json: dict) -> None:
+    agent_id = input_json.get("agent_id")
+    session_key = input_json.get("session_id") or ""
+    if not workflows.safe_name(agent_id) or not isinstance(session_key, str):
+        return
+    agent_state = existing_agent_state(session_key, str(agent_id))
+    if agent_state is None:
+        return
+    failure = {
+        "error": str(input_json.get("error") or ""),
+        "message": str(input_json.get("last_assistant_message") or ""),
+        "at_ms": get_timestamp_ms(),
+    }
+    _update_agent_file(agent_state, {workflows.AGENT_FAILURE_KEY: failure})
+
+
+def _purge_workflow_debris(state) -> None:
+    """Workflow agents stopped by the pre-upgrade tracer were buffered here and never spliced."""
+    raw = state.get("pending_subagents") or ""
+    if "workflows" not in raw or state.state_file is None:
+        return
+    try:
+        with state._lock():
+            data = state._read_safe()
+            current = _decode_pending_subagents(data.get("pending_subagents", ""))
+            keep = {
+                agent_id: descriptor
+                for agent_id, descriptor in current.items()
+                if not workflows.in_workflow_run_dir(descriptor.get("transcript_path"))
+            }
+            if len(keep) == len(current):
+                return
+            if keep:
+                data["pending_subagents"] = json.dumps(keep, sort_keys=True)
+            else:
+                data.pop("pending_subagents", None)
+            state._write(data)
+    except Exception as exc:
+        error(f"Failed to purge workflow debris: {exc}")
+
+
 def _handle_subagent_stop(input_json: dict) -> None:
     """Handle subagent_stop: parse subagent transcript and send CHAIN span."""
     state = resolve_session(input_json)
+    if workflows.enabled():
+        workflow_agent = workflows.classify_agent_path(input_json.get("agent_transcript_path"))
+        if workflow_agent is not None:
+            _handle_workflow_agent_stop(state, input_json, workflow_agent)
+            return
     agent_id = input_json.get("agent_id", "")
     background = _background_agents(state).get(agent_id) if isinstance(agent_id, str) and agent_id else None
     if background is None:
@@ -2416,6 +2676,7 @@ def _handle_stop_failure(input_json: dict) -> None:
     """Handle StopFailure: emit a span describing the failed turn so it doesn't disappear silently.
     A subagent's failure carries its agent_id and leaves the main turn running."""
     if input_json.get("agent_id"):
+        _record_agent_failure(input_json)
         return
     state = resolve_session(input_json)
     session_id = state.get("session_id")
